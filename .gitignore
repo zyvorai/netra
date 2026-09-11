@@ -7,3 +7,5 @@ bpf/*.o
 .env
 .idea/
 .vscode/
+
+.cursor/
