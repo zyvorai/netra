@@ -1,5 +1,9 @@
 # Netra
 
+[![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.14.0-informational.svg)](CHANGELOG.md)
+
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
 Netra v0.14 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
@@ -7,6 +11,25 @@ Netra v0.14 does not require Cilium. The node agent owns its own programs and ma
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
 ![Netra dashboard — Overview](docs/ux/00-overview.png)
+
+## Contents
+
+- [Standalone eBPF capabilities](#standalone-ebpf-capabilities)
+- [TCP Path Diagnostics](#tcp-path-diagnostics)
+- [Drop Diagnostics](#drop-diagnostics)
+- [Behavior and Rate Insights](#behavior-and-rate-insights)
+- [Hook model](#hook-model)
+- [Important visibility boundaries](#important-visibility-boundaries)
+- [Optional Cilium / Hubble integration](#optional-cilium--hubble-integration)
+- [HTTPS default](#https-default)
+- [Architecture](#architecture)
+- [Repository](#repository)
+- [Prerequisites](#prerequisites)
+- [Build](#build)
+- [Standalone Helm install](#standalone-helm-install)
+- [eBPF CLI examples](#ebpf-cli-examples)
+- [Safety and persistence](#safety-and-persistence)
+- [License](#license)
 
 ## Standalone eBPF capabilities
 
