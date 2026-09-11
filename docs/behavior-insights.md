@@ -71,12 +71,6 @@ netractl insights baseline clear
 
 Clearing a baseline requires an explicit confirmation header in the API; `netractl` adds it only for the `baseline clear` command.
 
-## Dashboard
-
-The **Insights** page wires every insights API: summary metrics, dependency edges, baseline capture/clear, drift findings, and recommendation drafts (with Cilium-aware apply guidance when `cilium.enabled=true`).
-
-**Overview** also shows a compact Insights pulse (`dependencyEdges`, `baselineEntries`, `driftFindings`, `recommendations`) beside Network Health and L7 metadata.
-
 ## API
 
 ```text

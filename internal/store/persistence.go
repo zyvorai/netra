@@ -38,6 +38,7 @@ type diskState struct {
 	NextRevisionID  uint64                    `json:"nextRevisionId"`
 	Preflights      map[string]diskPreflight  `json:"preflights,omitempty"`
 	Baseline        models.BehaviorBaseline   `json:"baseline,omitempty"`
+	RateBaseline    models.RateBaseline       `json:"rateBaseline,omitempty"`
 }
 
 // Open returns a store backed by an atomically replaced JSON state file. The
@@ -113,6 +114,7 @@ func (s *Store) load() error {
 	s.nextRevisionID = d.NextRevisionID
 	s.preflights = map[string]preflight{}
 	s.baseline = cloneBaseline(d.Baseline)
+	s.rateBaseline = cloneRateBaseline(d.RateBaseline)
 	now := time.Now().UTC()
 	for token, item := range d.Preflights {
 		if token == "" || len(item.Hash) != 32 || !now.Before(item.ExpiresAt) {
@@ -178,6 +180,7 @@ func (s *Store) persistLocked() error {
 		NextRevisionID:  s.nextRevisionID,
 		Preflights:      make(map[string]diskPreflight, len(s.preflights)),
 		Baseline:        cloneBaseline(s.baseline),
+		RateBaseline:    cloneRateBaseline(s.rateBaseline),
 	}
 	now := time.Now().UTC()
 	for token, item := range s.preflights {

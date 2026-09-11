@@ -108,6 +108,16 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	drift := insights.Drift(baseline, agents)
 	metricGauge(w, "netra_behavior_baseline_entries", "Known-good behavior entries in the persisted Netra baseline.", float64(len(baseline.Entries)))
 	metricGauge(w, "netra_behavior_drift_findings", "Current behaviors not present in the persisted baseline and above noise thresholds.", float64(len(drift.Findings)))
+	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
+	rateBaseline := s.store.RateBaseline()
+	rateDrift := insights.RateDrift(rateBaseline, rateWindow)
+	warming := 0
+	if rateWindow.Warming {
+		warming = 1
+	}
+	metricGauge(w, "netra_rate_window_warming", "Whether the controller lacks two fresh agent reports for delta-based rate analytics.", float64(warming))
+	metricGauge(w, "netra_rate_baseline_entries", "Persisted traffic-rate baseline metric entries.", float64(len(rateBaseline.Entries)))
+	metricGauge(w, "netra_rate_drift_findings", "Current delta-based traffic-rate anomalies above baseline thresholds.", float64(len(rateDrift.Findings)))
 	metricGauge(w, "netra_dependency_edges", "Workload egress dependency edges derived from exact standalone eBPF counters before Kubernetes service resolution.", float64(len(observability.Topology(agents, 5000))))
 }
 

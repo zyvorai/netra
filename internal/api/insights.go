@@ -114,5 +114,102 @@ func (s *Server) insightsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	b := s.store.Baseline()
-	writeJSON(w, 200, models.InsightSummary{DependencyEdges: len(graph.Edges), ExternalEdges: external, BaselineEntries: len(b.Entries), DriftFindings: len(drift.Findings), Recommendations: len(recs)})
+	rateBaseline := s.store.RateBaseline()
+	rateDrift := s.rateDrift(r)
+	exposure := insights.Exposure(graph, drift, rateDrift)
+	remediations := insights.Remediations(graph, drift, rateDrift, 200)
+	highExposure := 0
+	for _, item := range exposure {
+		if item.Severity == "high" || item.Severity == "critical" {
+			highExposure++
+		}
+	}
+	writeJSON(w, 200, models.InsightSummary{DependencyEdges: len(graph.Edges), ExternalEdges: external, BaselineEntries: len(b.Entries), DriftFindings: len(drift.Findings), Recommendations: len(recs), RateBaselineEntries: len(rateBaseline.Entries), RateDriftFindings: len(rateDrift.Findings), HighExposure: highExposure, RemediationProposals: len(remediations), RateWarming: rateDrift.Window.Warming})
+}
+
+func insightRateWindow(r *http.Request) time.Duration {
+	window := 5 * time.Minute
+	if raw := strings.TrimSpace(r.URL.Query().Get("window")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d >= 30*time.Second && d <= 2*time.Hour {
+			window = d
+		}
+	}
+	return window
+}
+
+func (s *Server) insightsRates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.store.RateWindow(insightRateWindow(r), time.Now()))
+}
+
+func (s *Server) insightsRateBaselineGet(w http.ResponseWriter, _ *http.Request) {
+	b := s.store.RateBaseline()
+	if b.CapturedAt.IsZero() {
+		writeJSON(w, 200, map[string]any{"captured": false, "baseline": nil})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"captured": true, "baseline": b})
+}
+
+func (s *Server) insightsRateBaselineCapture(w http.ResponseWriter, r *http.Request) {
+	b, err := s.store.CaptureRateBaseline(insightRateWindow(r), actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+		} else {
+			errorJSON(w, http.StatusConflict, err.Error())
+		}
+		return
+	}
+	writeJSON(w, 201, map[string]any{"captured": true, "baseline": b})
+}
+
+func (s *Server) insightsRateBaselineClear(w http.ResponseWriter, r *http.Request) {
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Netra-Confirm-Rate-Baseline-Clear")), "clear") {
+		errorJSON(w, 409, "clearing the traffic-rate baseline requires X-Netra-Confirm-Rate-Baseline-Clear: clear")
+		return
+	}
+	if err := s.store.ClearRateBaseline(actor(r)); err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+		} else {
+			errorJSON(w, 500, err.Error())
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"cleared": true})
+}
+
+func (s *Server) rateDrift(r *http.Request) models.RateDriftResponse {
+	return insights.RateDrift(s.store.RateBaseline(), s.store.RateWindow(insightRateWindow(r), time.Now()))
+}
+
+func (s *Server) insightsRateDrift(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, s.rateDrift(r))
+}
+
+func (s *Server) insightsExposure(w http.ResponseWriter, r *http.Request) {
+	graph, err := s.dependencyGraph(r, 5000)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	behavior := insights.Drift(s.store.Baseline(), s.store.AgentStatuses(time.Now(), s.agentStaleAfter))
+	rates := s.rateDrift(r)
+	writeJSON(w, 200, map[string]any{"items": insights.Exposure(graph, behavior, rates), "rateWarming": rates.Window.Warming})
+}
+
+func (s *Server) insightsRemediations(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	graph, err := s.dependencyGraph(r, 5000)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	behavior := insights.Drift(s.store.Baseline(), s.store.AgentStatuses(time.Now(), s.agentStaleAfter))
+	rates := s.rateDrift(r)
+	items := insights.Remediations(graph, behavior, rates, limit)
+	writeJSON(w, 200, map[string]any{"items": items, "count": len(items), "reviewRequired": true, "autoApply": false})
 }

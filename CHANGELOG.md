@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 — 2026-09-11
+
+- Added bounded controller-side rolling samples built from consecutive node-agent cumulative reports.
+- Added delta-based per-workload packets/s, bytes/s, blocked/s, connections/s, DNS query/failure rates, TLS handshakes/s and cleartext HTTP requests/s.
+- Counter-reset intervals are discarded rather than interpreted as spikes.
+- Added persisted traffic-rate baseline capture/clear and HA-safe recovery; rolling samples intentionally warm up after restart/failover.
+- Added deterministic traffic-rate drift findings with metric-specific noise floors and 2×/5×/10× severity thresholds.
+- Added workload exposure scoring combining external dependencies, behavior drift and rate drift.
+- Added review-only remediation proposals for investigation, exact SNI review, and new external-IP containment review.
+- Added Insights UI/CLI/API support for rate windows, rate baseline, exposure and remediation proposals.
+- Added low-cardinality Prometheus gauges for rate-baseline state, warm-up and rate-drift findings.
+- No automatic remediation or learned-policy enforcement was added.
+
 ## v0.11.0 — 2026-09-11
 
 - Added Kubernetes-aware workload dependency graph resolution from exact standalone eBPF counters, including Pod and Service destination mapping.

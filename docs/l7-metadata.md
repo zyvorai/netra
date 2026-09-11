@@ -1,6 +1,6 @@
-# Netra L7 metadata — v0.10 (current in v0.11)
+# Netra L7 metadata — v0.10
 
-Netra v0.10 adds metadata-only application context to the standalone eBPF datapath without turning Netra into a payload-capture or stream-DPI system. v0.11 keeps this surface and dashboard (**L7 Metadata** + Overview pulse).
+Netra v0.10 adds metadata-only application context to the standalone eBPF datapath without turning Netra into a payload-capture or stream-DPI system.
 
 ## TLS SNI
 

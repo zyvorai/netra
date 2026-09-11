@@ -85,7 +85,9 @@ func usage() {
   ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
   ebpf scope set FILE
   insights summary | dependencies [limit] | drift | recommendations [namespace] [workload]
-  insights baseline show | capture | clear`)
+  insights baseline show | capture | clear
+  insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
+  insights rate-baseline show | capture [window] | clear`)
 }
 func policy() error {
 	if len(os.Args) < 3 {
@@ -556,6 +558,48 @@ func insightCmd() error {
 		return request("GET", p, nil)
 	case "drift":
 		return request("GET", "/api/v1/insights/drift", nil)
+	case "rates":
+		p := "/api/v1/insights/rates"
+		if len(os.Args) > 3 {
+			p += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "rate-drift":
+		p := "/api/v1/insights/rate-drift"
+		if len(os.Args) > 3 {
+			p += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "exposure":
+		p := "/api/v1/insights/exposure"
+		if len(os.Args) > 3 {
+			p += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "remediations":
+		p := "/api/v1/insights/remediations"
+		if len(os.Args) > 3 {
+			p += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "rate-baseline":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("rate-baseline show|capture [window]|clear")
+		}
+		switch os.Args[3] {
+		case "show":
+			return request("GET", "/api/v1/insights/rate-baseline", nil)
+		case "capture":
+			p := "/api/v1/insights/rate-baseline"
+			if len(os.Args) > 4 {
+				p += "?window=" + url.QueryEscape(os.Args[4])
+			}
+			return request("POST", p, nil)
+		case "clear":
+			return requestHeaders("DELETE", "/api/v1/insights/rate-baseline", nil, map[string]string{"X-Netra-Confirm-Rate-Baseline-Clear": "clear"})
+		default:
+			return fmt.Errorf("rate-baseline show|capture [window]|clear")
+		}
 	case "recommendations":
 		q := url.Values{}
 		if len(os.Args) > 3 {

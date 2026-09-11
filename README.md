@@ -2,7 +2,7 @@
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
-Netra v0.11 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
+Netra v0.12 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
@@ -46,17 +46,21 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 These controls are intentionally an emergency/containment layer, not a replacement for a full CNI policy engine, QoS system, L7 proxy or IDS/IPS.
 
-## Behavior Insights
+## Behavior and Rate Insights
 
-Netra v0.11 adds a controller-side behavior layer on top of exact eBPF metadata:
+Netra v0.12 extends the controller-side behavior layer with real time-window deltas on top of exact eBPF metadata:
 
 - Kubernetes-aware workload dependency graph with Pod and Service resolution;
 - persistent known-good behavior baseline;
 - drift detection for newly observed destinations, DNS names, TLS SNI, HTTP hosts and remote ports;
 - review-only CiliumNetworkPolicy drafts derived from observed workload egress;
-- low-cardinality Prometheus gauges for baseline entries, drift findings and dependency edges.
+- low-cardinality Prometheus gauges for baseline entries, drift findings and dependency edges;
+- delta-based packets/bytes/connections/DNS/TLS/HTTP rates over 30s–2h windows;
+- a persisted traffic-rate baseline with deterministic 2×/5×/10× drift thresholds;
+- workload exposure scoring that combines external dependencies, behavior drift and rate drift;
+- review-only remediation proposals for investigation or staged containment.
 
-The baseline is an **inventory anchor**, not a statistical traffic-rate model. Netra intentionally does not auto-apply learned policy or auto-block newly observed behavior. See `docs/behavior-insights.md`.
+The behavior baseline remains an **inventory anchor** while the rate baseline is a separate time-window anchor. Rolling samples intentionally warm up again after controller restart/HA failover. Netra never auto-applies learned policy or remediation. See `docs/behavior-insights.md` and `docs/rate-insights.md`.
 
 ## Hook model
 
@@ -72,11 +76,11 @@ The baseline is an **inventory anchor**, not a statistical traffic-rate model. N
 
 The default agent can therefore run **cgroup-only**: no `cilium_host`, no Cilium maps, and no assumption about the Kubernetes CNI.
 
-> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.11 includes `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
+> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.12 includes `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
 
 ## Important visibility boundaries
 
-Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. TLS metadata parsing is best-effort and limited to ordinary ClientHello SNI found in a single egress skb; there is no TCP stream reassembly, ECH decryption, QUIC parsing, or certificate inspection. Cleartext HTTP metadata is limited to an HTTP/1 method and `Host` header visible in one skb; request paths/bodies are not exported. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.11. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
+Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. TLS metadata parsing is best-effort and limited to ordinary ClientHello SNI found in a single egress skb; there is no TCP stream reassembly, ECH decryption, QUIC parsing, or certificate inspection. Cleartext HTTP metadata is limited to an HTTP/1 method and `Host` header visible in one skb; request paths/bodies are not exported. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.12. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
 
 ## Optional Cilium / Hubble integration
 
@@ -135,7 +139,7 @@ internal/agent/          BPF loading, hook attachment and reporting
 internal/observability/  standalone eBPF summaries and workload topology
 internal/health/          TCP/DNS/connect health scoring and anomaly signals
 internal/l7/              TLS SNI / HTTP Host / socket-attempt aggregation
-internal/insights/         dependency graph, behavior baseline, drift and policy drafts
+internal/insights/         dependency graph, behavior/rate baselines, drift, exposure and drafts
 internal/cgroupmeta/     cgroup-v2 Kubernetes path/inode discovery
 internal/workload/       workload selector matching and cgroup joins
 internal/api/            REST/SSE API
@@ -151,7 +155,8 @@ deploy/                  plain manifests
 docs/standalone-ebpf.md  eBPF hook/map/limitation reference
 docs/workload-scoping.md workload attribution/scoping runbook
 docs/l7-metadata.md      metadata-only L7 behavior and limitations
-docs/behavior-insights.md dependency/baseline/drift/recommendation runbook
+docs/behavior-insights.md dependency/inventory-baseline/drift/recommendation runbook
+docs/rate-insights.md     time-window rate baseline, exposure and remediation runbook
 docs/high-availability.md HA runbook
 ```
 
@@ -175,8 +180,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.11.0 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.11.0 .
+docker build -t ghcr.io/zyvorai/netra:0.12.0 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.12.0 .
 ```
 
 ## Standalone Helm install
@@ -252,23 +257,7 @@ netractl ebpf mode enforce 15m
 netractl ebpf mode observe
 ```
 
-The same controls are available in the **eBPF** dashboard, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
-
-Dashboard map (HTTPS UI):
-
-| Page | Primary APIs |
-|---|---|
-| Overview | `/api/v1/status`, `/api/v1/ebpf/summary`, `/api/v1/ebpf/health`, `/api/v1/ebpf/l7`, `/api/v1/insights/summary` |
-| Network Health | `/api/v1/ebpf/health` |
-| L7 Metadata | `/api/v1/ebpf/l7`, `/api/v1/ebpf/sni` |
-| Insights | `/api/v1/insights/*` |
-| Hubble / Live flows | `/api/v1/flows/stream`, `/api/v1/flows/summary`, `/api/v1/drops/explain` |
-| eBPF | `/api/v1/ebpf/*` config, scope, deny rules, workloads, topology |
-| Pods / VMs | `/api/v1/pods`, `/api/v1/vms`, `/api/v1/workloads/...`, lockdown |
-
-```bash
-netractl flows summary --direction EGRESS
-```
+The same controls are available in the **eBPF Network** dashboard, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
 
 Behavior Insights CLI:
 
@@ -278,6 +267,13 @@ netractl insights dependencies
 netractl insights baseline capture
 netractl insights drift
 netractl insights recommendations prod checkout
+
+# time-window rate intelligence
+netractl insights rates 5m
+netractl insights rate-baseline capture 5m
+netractl insights rate-drift 5m
+netractl insights exposure 5m
+netractl insights remediations 5m
 ```
 
 ## Safety and persistence
@@ -286,7 +282,7 @@ Netra is secure-by-default: the controller requires independent API and agent cr
 
 Controller state is restart-durable when `NETRA_STATE_FILE` is configured. Active/passive HA uses Kubernetes Lease election plus a shared state-file lock. A leader transition or controller restart never resurrects an old eBPF enforcement lease: the datapath returns to observe first.
 
-See `SECURITY.md`, `VALIDATION.md`, `docs/standalone-ebpf.md`, `docs/workload-scoping.md`, `docs/behavior-insights.md`, and `docs/high-availability.md` before production deployment.
+See `SECURITY.md`, `VALIDATION.md`, `docs/standalone-ebpf.md`, `docs/workload-scoping.md`, `docs/behavior-insights.md`, `docs/rate-insights.md`, and `docs/high-availability.md` before production deployment.
 
 ## License
 

@@ -1,34 +1,38 @@
-# Validation record — Netra v0.11.0
+# Validation record — Netra v0.12.0
 
 ## Locally executed checks
 
-The packaging environment has Go 1.23.2, Node 22, global TypeScript 5.8.3 and Clang 17. It has no outbound package/DNS access, no Helm binary, and the local Clang build does not provide the BPF target used by release CI. Netra itself intentionally targets Go 1.27.0 with toolchain 1.27.1.
+The packaging environment has Go 1.23.x, Node 22, a global TypeScript compiler and Clang 17. It has no outbound package/DNS access, no Helm binary, and the local Clang build does not provide the BPF target used by release CI. Netra itself intentionally targets Go 1.27.0 with toolchain 1.27.1.
 
-The following checks were executed successfully on this v0.11 source tree:
+The following checks were executed successfully on this v0.12 source tree:
 
-- `gofmt` over all `cmd/` and `internal/` Go source.
-- Dependency-free Go tests for `internal/insights`, `internal/store`, `internal/kube`, `internal/policy`, `internal/health`, `internal/l7`, `internal/observability`, `internal/workload`, `internal/flowstats`, `internal/cgroupmeta`, `internal/ha`, and `cmd/netractl`. Only the local `go` directive was temporarily lowered to the installed toolchain for these checks, then the intended Go 1.27.0 / toolchain 1.27.1 module file was restored.
+- `gofmt` over changed `cmd/` and `internal/` Go source.
+- Dependency-free Go tests for `internal/insights`, `internal/store`, `internal/kube`, `internal/policy`, `internal/health`, `internal/l7`, `internal/observability`, `internal/workload`, `internal/flowstats`, `internal/cgroupmeta`, `internal/ha`, and `cmd/netractl`. The local `go` directive was temporarily lowered only for these checks, then the intended Go 1.27.0 / toolchain 1.27.1 module file was restored.
 - `go vet` for the same locally compilable packages.
-- Insight tests cover known-good capture, new-SNI drift, noise thresholds, Kubernetes Service resolution, external-edge classification, and generated Cilium `toServices` policy drafts.
-- Store tests include behavior-baseline persistence across reopen in addition to the existing durable-state, preflight, audit, scope, policy-history and fail-open regression suite.
-- Kubernetes helper tests include Service-list parsing and headless-Service exclusion.
+- New rate-store tests cover positive counter deltas, counter-reset rejection, persisted rate-baseline recovery, and mandatory post-restart warm-up.
+- New insight tests cover 10×/critical rate drift, exposure scoring, and review-only external-IP containment drafting.
+- CLI regression tests cover rate windows, rate drift, exposure, remediations, rate-baseline capture, and the dedicated clear-confirmation header.
 - `clang -Wall -Wextra -Werror -fsyntax-only -I/usr/include/x86_64-linux-gnu bpf/netra_tc.c`.
 - Parsing of all plain `deploy/*.yaml`, `.github/workflows/ci.yml`, and JSON examples.
 - `bash -n hack/smoke.sh`.
 - Global TypeScript parser pass. Dependency/type diagnostics are expected because `web/node_modules` cannot be installed offline; no `TS1xxx` parser/syntax-class diagnostics were emitted.
-- Release version consistency sweep across controller, API, Helm, manifests, web package and README.
+- Release version assertions across controller, API, Helm, manifests and web package.
 
-## v0.11 behavior-insights coverage
+A direct local compile of `internal/api` was attempted but could not proceed because the environment cannot download the Cilium/gRPC/protobuf modules. The GitHub Go 1.27 CI remains the dependency-complete compile gate for that package.
 
-- The persisted baseline is stored in the existing atomic state file and survives controller restart / HA leader change.
-- Baseline capture, drift, dependency graph, and recommendation calculations exclude stale agent reports.
-- The baseline is an inventory anchor, not a rate model. Drift only claims that a sufficiently repeated behavior is new relative to the explicit known-good capture.
-- Dependency resolution uses read-only Kubernetes Pod and Service metadata. The privileged agent remains `automountServiceAccountToken: false`.
-- Service ClusterIPs resolve to Kubernetes Service nodes; Pod IPs resolve to the immediate owner when available; unresolved targets remain explicitly external.
-- Generated Cilium recommendations are review-only. Service targets use `toServices`; direct IP targets use exact `/32` or `/128` CIDRs; repeated observed SNI can contribute `toFQDNs` TCP/443 rules.
-- Only concrete TCP/UDP destination ports are translated into L4 policy drafts. Netra does not silently convert ICMP or unknown-L4 observations into broad policy.
-- Baseline clearing requires `X-Netra-Confirm-Baseline-Clear: clear`.
-- Prometheus insight metrics are aggregate and low-cardinality; workload names, IPs, domains and process names are not emitted as metric labels.
+## v0.12 rate-intelligence coverage
+
+- Rolling samples are created only from consecutive node-agent reports and retained for at most two hours / 240 samples per node.
+- Rate calculations use positive cumulative-counter deltas and skip an interval if any tracked counter resets, avoiding restart-induced spikes.
+- Unattributed host traffic is kept node-specific (`node:<name>`) rather than merged into one global source.
+- Supported derived rates are packets/s, bytes/s, blocked/s, connection attempts/s, DNS queries/s, DNS failures/s, TLS handshakes/s and cleartext HTTP/1 requests/s.
+- Rate-baseline capture refuses while the window is warming and persists only the compact baseline, not rolling raw samples.
+- After controller restart or HA leader change, the persisted baseline survives but the rolling window intentionally returns to warming state until at least two new reports are present.
+- Rate drift uses deterministic metric-specific absolute floors plus 2× warning, 5× high and 10× critical relative thresholds.
+- Exposure scoring combines external dependency count, inventory drift and rate drift. It is explicitly a triage heuristic, not a vulnerability or intrusion verdict.
+- Remediation proposals are review-only. No new endpoint auto-adds an eBPF deny, enables an enforcement lease, or applies a Cilium policy.
+- New external-destination proposals are created only when the destination also resolves as external in the current dependency graph.
+- Prometheus additions are low-cardinality gauges: warm-up state, rate-baseline entry count and rate-drift finding count. Workload names, IPs and domains are not used as metric labels.
 
 ## CI / integration gates that remain required
 
@@ -39,31 +43,23 @@ The GitHub workflow remains the authoritative dependency-complete gate and runs:
 3. Helm lint/render for secure defaults, standalone mode, Pod+Service metadata RBAC, optional Cilium/Hubble, agent mode and HA/RWX constraints.
 4. Real `clang -target bpfel -O2 -g -Wall -Wextra -Werror` object generation.
 
-A target-cluster integration run is still required before production rollout. It should load/verifier-check the BPF object, exercise the standalone hooks and workload attribution, verify Pod/Service graph resolution against real Kubernetes objects, capture a baseline, introduce a controlled new destination/SNI, confirm drift, and server-side dry-run any generated Cilium recommendation before considering an apply.
+A target-cluster integration run is still required before production rollout. It should load/verifier-check the BPF object, exercise standalone hooks and workload attribution, generate at least two fresh reports, capture a rate baseline, introduce a controlled traffic-rate increase, confirm the expected rate finding/exposure change, and verify that remediation output remains review-only.
 
-## Workspace merge verification — 2026-09-11 (v0.11)
+## Workspace merge verification — 2026-09-11 (v0.12)
 
-Merged `netra-v0.11.0` into `zyvorai/netra` with Netra lab overlays retained (Apple CSS, `scripts/deploy-remote.sh`, `.dockerignore` allowing host `web/dist`, TLS/30870 CI gates, pods+services+kubevirt RBAC, Overview/Flows UX wiring, route/lockdown tests).
+Merged `netra-v0` (v0.12.0 rate intelligence) into `zyvorai/netra` with Netra lab overlays retained (Apple CSS, scripts, `.dockerignore` host `web/dist`, TLS/30870 CI, pods+services+kubevirt RBAC, Overview/Flows UX wiring, Insights null-safe baseline rendering, route/lockdown tests).
 
 Executed here:
 
-- Regenerated `go.sum` (archive sums truncated)
-- `go test ./...` including `internal/insights`, binary builds
-- `npm --prefix web run build` (kept wired Overview/Flows; Insights page from archive)
-- Helm asserts: HTTPS :30870, TLS init, `pods,services` + kubevirt RBAC, cgroup scan interval
+- Regenerated `go.sum` when archive hashes were truncated
+- `go test ./...` including rate insights packages; binary builds
+- `npm --prefix web run build`
+- Helm asserts: HTTPS :30870, TLS init, pods+services + kubevirt
 
-Lab deploy/smoke against `212.8.248.187:30870` not run in this merge step.
+Lab deploy/smoke not run in this merge step.
 
 ## Lab smoke — 2026-09-11 (`https://212.8.248.187:30870`)
 
-Deployed Netra **0.11.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus rollout restart.
+Deployed Netra **0.12.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus rollout restart.
 
-Feature checks **23/23**: health/version `0.11.0`, HTTPS UI, pods/VMs, `flows/summary`, `ebpf/{summary,health,l7,workloads,config}`, all `insights/{summary,dependencies,baseline,drift,recommendations}`, baseline capture, scope preview, Overview/Flows JS wiring for insights + flows summary, Apple CSS.
-
-## UX walkthrough — 2026-09-11
-
-Headless Playwright against `https://212.8.248.187:30870` clicked every nav page and exercised interactive controls.
-
-**62/62 passed**, including: Overview pulses (health/L7/insights), Pods inventory+detail+lockdown plan+live flows, VMs, Network Health metrics, L7 SNI add/delete, Insights sections+baseline capture, eBPF deny add/delete, Hubble flow summary refresh, Policies, Audit, and all primary `/api/v1/*` fetches returning 2xx with **no page errors**.
-
-Fixed Insights crash when `baseline.entries` is JSON `null` (`entries?.length ?? 0`).
+Feature checks: health/version `0.12.0`, core/eBPF/flows APIs, all insights endpoints including `rates`/`rate-baseline`/`rate-drift`/`exposure`/`remediations`. Behavior baseline capture OK. Rate baseline correctly returns **409 while warming** (needs ≥2 fresh agent reports). Insights UI shows RATE WINDOW (wired to `/api/v1/insights/rates`), exposure/remediation sections without page errors; Overview shows rate-anomaly and high-exposure pulse.

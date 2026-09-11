@@ -3,4 +3,3 @@
 /bin/
 *.o
 .DS_Store
-web/tsconfig.tsbuildinfo

@@ -35,14 +35,17 @@ type Store struct {
 	nextRevisionID  uint64
 	preflights      map[string]preflight
 	baseline        models.BehaviorBaseline
+	rateBaseline    models.RateBaseline
+	rateSamples     map[string][]rateSample
 	backend         *fileBackend
 }
 
 func New() *Store {
 	return &Store{
-		config:     models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
-		agents:     map[string]models.AgentReport{},
-		preflights: map[string]preflight{},
+		config:      models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
+		agents:      map[string]models.AgentReport{},
+		preflights:  map[string]preflight{},
+		rateSamples: map[string][]rateSample{},
 	}
 }
 
@@ -531,6 +534,7 @@ func (s *Store) Report(r models.AgentReport) {
 			r.Events = append([]models.FastPathEvent(nil), r.Events[len(r.Events)-500:]...)
 		}
 	}
+	s.appendRateSampleLocked(r)
 	s.agents[r.Node] = r
 }
 

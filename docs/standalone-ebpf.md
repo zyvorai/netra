@@ -1,6 +1,4 @@
-# Standalone eBPF datapath — v0.11
-
-Netra’s node agent loads its own programs and maps under `/sys/fs/bpf/netra`. Cilium is optional. v0.11 keeps the standalone observability/enforcement stack from v0.8–v0.10 and adds controller-side Behavior Insights on top of those exact counters (see `docs/behavior-insights.md`).
+# Standalone eBPF datapath — v0.10
 
 Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge of the installed CNI. The default attachment point is the root cgroup v2 hierarchy, so descendant workload traffic is covered independently of virtual-interface naming.
 
@@ -13,7 +11,7 @@ Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge
 
 ## Workload attribution and selected enforcement
 
-Netra includes cgroup-to-Pod attribution without giving the privileged agent Kubernetes credentials. The controller reads Pod and Service metadata; the agent scans host cgroup v2, derives cgroup IDs from inode identity, joins pod/container path components to that inventory, and enriches cgroup events/counters locally.
+Netra v0.10 includes cgroup-to-Pod attribution without giving the privileged agent Kubernetes credentials. The controller reads Pod metadata; the agent scans host cgroup v2, derives cgroup IDs from inode identity, joins pod/container path components to that inventory, and enriches cgroup events/counters locally.
 
 `scopeMode=all` preserves node-wide enforcement. `scopeMode=selected` populates an `enforced_cgroups` BPF map from namespace/pod/immediate-owner/label/cgroup-ID selectors. In selected mode, un-attributed cgroups fail open, and optional TCX/XDP remain observe-only because those hooks cannot provide the workload cgroup identity used by this policy gate. See `docs/workload-scoping.md`.
 

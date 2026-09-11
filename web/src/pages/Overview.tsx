@@ -140,26 +140,26 @@ export default function Overview() {
 
       <section className="card span2">
         <p className="eyebrow">BEHAVIOR INSIGHTS</p>
-        <h3>Dependencies · baseline · drift</h3>
+        <h3>Dependencies · drift · exposure</h3>
         <div className="metrics">
           <div>
             <b>{ins.dependencyEdges ?? 0}</b>
             <span>dependency edges</span>
           </div>
           <div>
-            <b>{ins.baselineEntries ?? 0}</b>
-            <span>baseline entries</span>
-          </div>
-          <div>
             <b>{ins.driftFindings ?? 0}</b>
-            <span>drift findings</span>
+            <span>behavior drift</span>
           </div>
           <div>
-            <b>{ins.recommendations ?? 0}</b>
-            <span>policy drafts</span>
+            <b>{ins.rateDriftFindings ?? 0}</b>
+            <span>rate anomalies</span>
+          </div>
+          <div>
+            <b>{ins.highExposure ?? 0}</b>
+            <span>high exposure</span>
           </div>
         </div>
-        <p>Review-only drafts live on the Insights page — v0.11 does not auto-enforce learned policy.</p>
+        <p>Review-only drafts and rate baselines live on the Insights page — v0.12 does not auto-enforce learned policy.</p>
       </section>
 
       <section className="card span2">

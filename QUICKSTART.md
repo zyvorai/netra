@@ -21,14 +21,14 @@ Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Ov
 - **Pods / VMs** — pick a workload for scoped live flows, create/delete CNP rules, lock down / unlock.
 - **Network Health** — TCP/DNS sockops health, anomalies, health score.
 - **L7 Metadata** — TLS SNI / HTTP Host observation and leased SNI deny.
-- **Insights** — dependency graph, known-good baseline, drift, review-only CNP drafts.
+- **Insights** — dependency graph, behavior/rate baselines, drift, exposure scoring, review-only CNP drafts and remediations.
 - **Policies** — guided builder + JSON workbench with preflight receipts.
 - **Live flows** — Hubble stream plus `flows/summary` aggregates (verdicts, top destinations).
 - **eBPF** — observe/enforce lease, scope, deny rules, workloads, topology.
 
 ## Path B — Remote full stack (K3s + Cilium + Netra)
 
-SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.11.0`); after deploy, restart the Deployment so the new layers are picked up:
+SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.12.0`); after deploy, restart the Deployment so the new layers are picked up:
 
 ```bash
 NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh HOST USER --k8s
@@ -62,6 +62,8 @@ curl -skf https://HOST:30870/api/v1/ebpf/l7 | head
 curl -skf https://HOST:30870/api/v1/flows/summary?number=50 | head
 curl -skf https://HOST:30870/api/v1/insights/summary | head
 curl -skf https://HOST:30870/api/v1/insights/dependencies?limit=20 | head
+curl -skf "https://HOST:30870/api/v1/insights/rates?window=5m" | head
+curl -skf "https://HOST:30870/api/v1/insights/exposure?window=5m" | head
 ```
 
 ```bash

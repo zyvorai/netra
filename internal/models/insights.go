@@ -86,9 +86,85 @@ type PolicyRecommendation struct {
 }
 
 type InsightSummary struct {
-	DependencyEdges int `json:"dependencyEdges"`
-	ExternalEdges   int `json:"externalEdges"`
-	BaselineEntries int `json:"baselineEntries"`
-	DriftFindings   int `json:"driftFindings"`
-	Recommendations int `json:"recommendations"`
+	DependencyEdges      int  `json:"dependencyEdges"`
+	ExternalEdges        int  `json:"externalEdges"`
+	BaselineEntries      int  `json:"baselineEntries"`
+	DriftFindings        int  `json:"driftFindings"`
+	Recommendations      int  `json:"recommendations"`
+	RateBaselineEntries  int  `json:"rateBaselineEntries"`
+	RateDriftFindings    int  `json:"rateDriftFindings"`
+	HighExposure         int  `json:"highExposure"`
+	RemediationProposals int  `json:"remediationProposals"`
+	RateWarming          bool `json:"rateWarming"`
+}
+
+type RateMetric struct {
+	Source                 string  `json:"source"`
+	WindowSeconds          float64 `json:"windowSeconds"`
+	Samples                int     `json:"samples"`
+	PacketsPerSecond       float64 `json:"packetsPerSecond"`
+	BytesPerSecond         float64 `json:"bytesPerSecond"`
+	BlockedPerSecond       float64 `json:"blockedPerSecond"`
+	ConnectionsPerSecond   float64 `json:"connectionsPerSecond"`
+	DNSQueriesPerSecond    float64 `json:"dnsQueriesPerSecond"`
+	DNSFailuresPerSecond   float64 `json:"dnsFailuresPerSecond"`
+	TLSHandshakesPerSecond float64 `json:"tlsHandshakesPerSecond"`
+	HTTPRequestsPerSecond  float64 `json:"httpRequestsPerSecond"`
+}
+
+type RateWindow struct {
+	GeneratedAt            time.Time    `json:"generatedAt"`
+	RequestedWindowSeconds int64        `json:"requestedWindowSeconds"`
+	Warming                bool         `json:"warming"`
+	Metrics                []RateMetric `json:"metrics"`
+}
+
+type RateBaselineEntry struct {
+	Source string  `json:"source"`
+	Metric string  `json:"metric"`
+	Rate   float64 `json:"rate"`
+}
+
+type RateBaseline struct {
+	SchemaVersion int                 `json:"schemaVersion"`
+	CapturedAt    time.Time           `json:"capturedAt"`
+	WindowSeconds int64               `json:"windowSeconds"`
+	Entries       []RateBaselineEntry `json:"entries"`
+}
+
+type RateFinding struct {
+	Severity     string  `json:"severity"`
+	Source       string  `json:"source"`
+	Metric       string  `json:"metric"`
+	BaselineRate float64 `json:"baselineRate"`
+	CurrentRate  float64 `json:"currentRate"`
+	Ratio        float64 `json:"ratio,omitempty"`
+	Message      string  `json:"message"`
+}
+
+type RateDriftResponse struct {
+	BaselineCapturedAt *time.Time    `json:"baselineCapturedAt,omitempty"`
+	Window             RateWindow    `json:"window"`
+	Findings           []RateFinding `json:"findings"`
+}
+
+type ExposureScore struct {
+	Source               string   `json:"source"`
+	Score                int      `json:"score"`
+	Severity             string   `json:"severity"`
+	ExternalDependencies int      `json:"externalDependencies"`
+	BehaviorDrift        int      `json:"behaviorDrift"`
+	RateDrift            int      `json:"rateDrift"`
+	Reasons              []string `json:"reasons"`
+}
+
+type RemediationProposal struct {
+	ID             string         `json:"id"`
+	Source         string         `json:"source"`
+	Severity       string         `json:"severity"`
+	Kind           string         `json:"kind"`
+	Title          string         `json:"title"`
+	Rationale      []string       `json:"rationale"`
+	Action         map[string]any `json:"action"`
+	ReviewRequired bool           `json:"reviewRequired"`
 }

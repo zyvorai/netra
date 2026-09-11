@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -160,6 +161,42 @@ func TestEBPFDNSAndProcessCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !seen["dns"] || !seen["process"] {
+		t.Fatalf("seen=%#v", seen)
+	}
+}
+
+func TestInsightsRateCommands(t *testing.T) {
+	seen := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.Method+" "+r.URL.Path] = true
+		if r.URL.Path == "/api/v1/insights/rate-baseline" && r.Method == http.MethodDelete && r.Header.Get("X-Netra-Confirm-Rate-Baseline-Clear") != "clear" {
+			t.Fatalf("missing rate-baseline clear confirmation")
+		}
+		if strings.Contains(r.URL.Path, "rate") && r.URL.Query().Get("window") != "" && r.URL.Query().Get("window") != "5m" {
+			t.Fatalf("window=%q", r.URL.Query().Get("window"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	oldBase, oldArgs := base, os.Args
+	base = srv.URL
+	defer func() { base, os.Args = oldBase, oldArgs }()
+
+	for _, args := range [][]string{
+		{"netractl", "insights", "rates", "5m"},
+		{"netractl", "insights", "rate-drift", "5m"},
+		{"netractl", "insights", "exposure", "5m"},
+		{"netractl", "insights", "remediations", "5m"},
+		{"netractl", "insights", "rate-baseline", "capture", "5m"},
+		{"netractl", "insights", "rate-baseline", "clear"},
+	} {
+		os.Args = args
+		if err := insightCmd(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if !seen["GET /api/v1/insights/rates"] || !seen["POST /api/v1/insights/rate-baseline"] || !seen["DELETE /api/v1/insights/rate-baseline"] {
 		t.Fatalf("seen=%#v", seen)
 	}
 }
