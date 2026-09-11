@@ -15,7 +15,7 @@ jobs:
     - run: go mod tidy
     - run: go test ./...
     - run: go vet ./...
-    - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent
+    - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor
   web:
     runs-on: ubuntu-latest
     steps:

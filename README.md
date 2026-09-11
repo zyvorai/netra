@@ -193,7 +193,9 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
+cmd/netra-doctor/       read-only host readiness preflight
 internal/agent/          BPF loading, hook attachment and reporting
+internal/doctor/         host readiness checks used by netra-doctor
 internal/observability/  standalone eBPF summaries and workload topology
 internal/health/          TCP/DNS/connect health scoring and anomaly signals
 internal/l7/              TLS SNI / HTTP Host / socket-attempt aggregation
@@ -216,11 +218,14 @@ docs/l7-metadata.md      metadata-only L7 behavior and limitations
 docs/behavior-insights.md dependency/inventory-baseline/drift/recommendation runbook
 docs/rate-insights.md     time-window rate baseline, exposure and remediation runbook
 docs/high-availability.md HA runbook
+docs/host-readiness.md    netra-doctor host readiness runbook
 ```
 
 ## Prerequisites
 
 Standalone mode requires Linux with cgroup v2, bpffs at `/sys/fs/bpf`, and kernel BPF support. The ring-buffer-based implementation has a practical **Linux 5.8+** baseline; use a modern LTS kernel in production. TCX is optional and has a newer kernel requirement (Linux 6.6+ is the practical baseline used by this project). XDP support depends on the selected interface/driver and is off unless explicitly configured.
+
+Before deploying the privileged node agent, run `netra-doctor` (see `docs/host-readiness.md`) to verify cgroup v2, bpffs, BTF, tracefs and related host gates. Use `--require-tcx` / `--require-drop-reasons` when those optional features are mandatory.
 
 Build requirements are Go 1.27, Node 22 and Clang/LLVM with a BPF target.
 
