@@ -14,6 +14,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 ## Contents
 
+- [Dashboard gallery](#dashboard-gallery)
 - [Standalone eBPF capabilities](#standalone-ebpf-capabilities)
 - [TCP Path Diagnostics](#tcp-path-diagnostics)
 - [Drop Diagnostics](#drop-diagnostics)
@@ -30,6 +31,22 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [eBPF CLI examples](#ebpf-cli-examples)
 - [Safety and persistence](#safety-and-persistence)
 - [License](#license)
+
+## Dashboard gallery
+
+Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockdown appear above and under Cilium integration; the rest of the console:
+
+![Hubble live flows](docs/ux/01-flows.png)
+
+![Flow stream detail](docs/ux/flows.png)
+
+![Policy authoring](docs/ux/02-policy.png)
+
+![Policy dry-run / preflight](docs/ux/05-policy-dryrun.png)
+
+![Drop explain](docs/ux/03-drops.png)
+
+![eBPF controls](docs/ux/04-ebpf.png)
 
 ## Standalone eBPF capabilities
 
