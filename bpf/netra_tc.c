@@ -12,6 +12,13 @@
 #include <linux/udp.h>
 #include <linux/pkt_cls.h>
 
+#ifndef IPPROTO_ICMP
+#define IPPROTO_ICMP 1
+#endif
+#ifndef IPPROTO_ICMPV6
+#define IPPROTO_ICMPV6 58
+#endif
+
 #define NETRA_BPF 1
 #include "netra_ipv6.h"
 
@@ -455,6 +462,218 @@ struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 22);
 } events SEC(".maps");
+
+
+// Conntrack + policy-drop ABI (v0.17). New maps only — existing pinned ABIs unchanged.
+#define NETRA_CT_TCP_TIMEOUT_NS  (3600ULL * 1000000000ULL)
+#define NETRA_CT_UDP_TIMEOUT_NS  (180ULL * 1000000000ULL)
+#define NETRA_CT_OTHER_TIMEOUT_NS (60ULL * 1000000000ULL)
+
+struct ct_key {
+    __u8 family;
+    __u8 protocol;
+    __u16 pad;
+    __u16 src_port;
+    __u16 dst_port;
+    __u8 src_addr[16];
+    __u8 dst_addr[16];
+};
+struct ct_state {
+    __u64 last_seen_ns;
+    __u64 packets;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct ct_key);
+    __type(value, struct ct_state);
+} conntrack SEC(".maps");
+
+struct policy_drop_key {
+    __u8 family;
+    __u8 protocol;
+    __u8 direction;
+    __u8 reason;
+    __u16 src_port;
+    __u16 dst_port;
+    __u8 src_addr[16];
+    __u8 dst_addr[16];
+};
+struct policy_drop_value {
+    __u64 packets;
+    __u64 bytes;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct policy_drop_key);
+    __type(value, struct policy_drop_value);
+} policy_drops SEC(".maps");
+
+// Optional XDP Shield (v0.18) — generation-published, opt-in interfaces only.
+struct shield_config {
+    __u32 generation;
+    __u32 mode; /* 0=off 1=audit 2=enforce */
+    __u32 protect_all;
+    __u32 syn_pps;
+    __u32 udp_pps;
+    __u32 icmp_pps;
+    __u32 other_pps;
+    __u32 burst_seconds;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct shield_config);
+} shield_cfg SEC(".maps");
+struct shield_ip4_key { __u32 generation; __u32 addr; };
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct shield_ip4_key);
+    __type(value, __u8);
+} shield_protected4 SEC(".maps");
+struct shield_src_key { __u8 family; __u8 class_id; __u16 pad; __u8 addr[16]; };
+struct shield_src_state {
+    __u64 last_refill_ns;
+    __u64 tokens;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct shield_src_key);
+    __type(value, struct shield_src_state);
+} shield_sources SEC(".maps");
+struct shield_stat_value { __u64 allowed; __u64 dropped; __u64 audited; };
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct shield_stat_value);
+} shield_stats SEC(".maps");
+
+// Optional NetworkPolicy-shaped deny maps (v0.19) — identity = cgroup_id hash bucket.
+struct netpol_peer4_key {
+    __u64 cgroup_id;
+    __u32 peer;
+    __u16 port;
+    __u8 protocol;
+    __u8 direction; /* DIR_* */
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct netpol_peer4_key);
+    __type(value, __u8); /* 1=deny */
+} netpol_deny4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32); /* 0=off 1=on */
+} netpol_enabled SEC(".maps");
+
+
+static __always_inline __u64 ct_timeout_ns(__u8 protocol)
+{
+    if (protocol == IPPROTO_TCP) return NETRA_CT_TCP_TIMEOUT_NS;
+    if (protocol == IPPROTO_UDP) return NETRA_CT_UDP_TIMEOUT_NS;
+    return NETRA_CT_OTHER_TIMEOUT_NS;
+}
+
+static __always_inline void ct_fill(__u8 family, __u8 proto, __u16 sport, __u16 dport,
+                                   const __u8 src[16], const __u8 dst[16], struct ct_key *k)
+{
+    __builtin_memset(k, 0, sizeof(*k));
+    k->family = family; k->protocol = proto; k->src_port = sport; k->dst_port = dport;
+    __builtin_memcpy(k->src_addr, src, 16); __builtin_memcpy(k->dst_addr, dst, 16);
+}
+
+static __always_inline int ct_hit(struct ct_key *k)
+{
+    struct ct_state *st = bpf_map_lookup_elem(&conntrack, k);
+    if (!st) return 0;
+    __u64 now = bpf_ktime_get_ns();
+    if (st->last_seen_ns == 0 || now - st->last_seen_ns > ct_timeout_ns(k->protocol)) {
+        bpf_map_delete_elem(&conntrack, k);
+        return 0;
+    }
+    st->last_seen_ns = now;
+    __sync_fetch_and_add(&st->packets, 1);
+    return 1;
+}
+
+static __always_inline void ct_learn_pair(__u8 family, __u8 proto, __u16 sport, __u16 dport,
+                                         const __u8 src[16], const __u8 dst[16])
+{
+    struct ct_key k; struct ct_state st = {.last_seen_ns = bpf_ktime_get_ns(), .packets = 1};
+    ct_fill(family, proto, sport, dport, src, dst, &k);
+    bpf_map_update_elem(&conntrack, &k, &st, BPF_ANY);
+    ct_fill(family, proto, dport, sport, dst, src, &k);
+    bpf_map_update_elem(&conntrack, &k, &st, BPF_ANY);
+}
+
+static __always_inline void record_policy_drop(__u8 family, __u8 proto, __u8 direction, __u8 reason,
+                                               __u16 sport, __u16 dport, const __u8 src[16], const __u8 dst[16],
+                                               __u32 len)
+{
+    if (!reason) return;
+    struct policy_drop_key k = {};
+    k.family = family; k.protocol = proto; k.direction = direction; k.reason = reason;
+    k.src_port = sport; k.dst_port = dport;
+    __builtin_memcpy(k.src_addr, src, 16); __builtin_memcpy(k.dst_addr, dst, 16);
+    struct policy_drop_value zero = {};
+    struct policy_drop_value *v = bpf_map_lookup_elem(&policy_drops, &k);
+    if (!v) {
+        bpf_map_update_elem(&policy_drops, &k, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&policy_drops, &k);
+    }
+    if (v) {
+        __sync_fetch_and_add(&v->packets, 1);
+        __sync_fetch_and_add(&v->bytes, len);
+        v->last_ns = bpf_ktime_get_ns();
+    }
+}
+
+static __always_inline int netpol_denies4(__u64 cgroup_id, __u8 direction, __u32 peer, __u8 proto, __u16 dport)
+{
+    __u32 z = 0; __u32 *en = bpf_map_lookup_elem(&netpol_enabled, &z);
+    if (!en || !*en || !cgroup_id) return 0;
+    struct netpol_peer4_key k = {.cgroup_id=cgroup_id,.peer=peer,.port=dport,.protocol=proto,.direction=direction};
+    if (bpf_map_lookup_elem(&netpol_deny4, &k)) return 1;
+    k.port = 0; /* any-port deny */
+    return bpf_map_lookup_elem(&netpol_deny4, &k) != 0;
+}
+
+static __always_inline int shield_rate_ok(__u8 family, __u8 class_id, const __u8 addr[16], __u32 pps, __u32 burst)
+{
+    if (!pps) return 1;
+    if (!burst) burst = 1;
+    struct shield_src_key k = {.family=family,.class_id=class_id};
+    __builtin_memcpy(k.addr, addr, 16);
+    struct shield_src_state *st = bpf_map_lookup_elem(&shield_sources, &k);
+    __u64 now = bpf_ktime_get_ns();
+    __u64 capacity = (__u64)pps * burst;
+    if (!st) {
+        struct shield_src_state init = {.last_refill_ns=now,.tokens=capacity ? capacity-1 : 0};
+        bpf_map_update_elem(&shield_sources, &k, &init, BPF_NOEXIST);
+        return 1;
+    }
+    __u64 elapsed = now - st->last_refill_ns;
+    if (elapsed > 0 && pps) {
+        __u64 add = (elapsed * pps) / 1000000000ULL;
+        if (add) {
+            st->tokens += add;
+            if (st->tokens > capacity) st->tokens = capacity;
+            st->last_refill_ns = now;
+        }
+    }
+    if (st->tokens == 0) return 0;
+    st->tokens -= 1;
+    return 1;
+}
 
 static __always_inline int enforcing(void)
 {
@@ -901,7 +1120,15 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
     __u16 policy_port = dport;
     __u64 cgroup_id = hook==HOOK_CGROUP ? bpf_get_current_cgroup_id() : 0;
     if (ip->protocol==IPPROTO_TCP) track_tcp_signal(cgroup_id, flags);
-    __u8 reason=0; int blocked=decide4(direction,peer,ip->protocol,policy_port,&reason,1,cgroup_id);
+    __u8 src[16],dst[16]; copy4(src,ip->saddr); copy4(dst,ip->daddr);
+    int syn_new = (ip->protocol==IPPROTO_TCP && (flags & 0x02) && !(flags & 0x10));
+    struct ct_key ctk; ct_fill(FAMILY_V4, ip->protocol, sport, dport, src, dst, &ctk);
+    int established = (!syn_new && ct_hit(&ctk));
+    __u8 reason=0; int blocked=0;
+    if (!established) {
+        blocked=decide4(direction,peer,ip->protocol,policy_port,&reason,1,cgroup_id);
+        if (!blocked && netpol_denies4(cgroup_id,direction,peer,ip->protocol,policy_port)) { blocked=1; reason=REASON_CIDR; }
+    }
     char dns_name[96]={}; int dns_len=0;
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && payload) {
         dns_len=dns_qname(payload,data_end,dns_name);
@@ -914,7 +1141,6 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
         if (sni_len>0) track_tls(cgroup_id,sni,blocked && reason==REASON_SNI);
         if (http_method(payload,data_end,http_m)>0 && http_host(payload,data_end,http_h)>0) track_http(cgroup_id,http_m,http_h);
     }
-    __u8 src[16],dst[16]; copy4(src,ip->saddr); copy4(dst,ip->daddr);
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && dns_len>0) dns_query_track(cgroup_id,FAMILY_V4,dst,sport,payload,data_end,dns_name,dns_len);
     if (direction==DIR_INGRESS && ip->protocol==IPPROTO_UDP && sport==__builtin_bswap16(53) && payload) dns_response_track(cgroup_id,FAMILY_V4,src,dport,payload,data_end,ifindex,len,src,dst);
     update_flow(FAMILY_V4,direction,hook,ip->protocol,sport,dport,src,dst,len,blocked,cgroup_id);
@@ -923,8 +1149,11 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
         struct dest_value zero={}; struct dest_value *lv=bpf_map_lookup_elem(&dest_stats,&lk);
         if(!lv){bpf_map_update_elem(&dest_stats,&lk,&zero,BPF_NOEXIST);lv=bpf_map_lookup_elem(&dest_stats,&lk);} if(lv){__sync_fetch_and_add(&lv->packets,1);__sync_fetch_and_add(&lv->bytes,len);if(blocked)__sync_fetch_and_add(&lv->blocked,1);lv->last_ns=bpf_ktime_get_ns();}
     }
-    if (blocked) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
-    else {
+    if (blocked) {
+        record_policy_drop(FAMILY_V4,ip->protocol,direction,reason,sport,dport,src,dst,len);
+        submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
+    } else {
+        ct_learn_pair(FAMILY_V4,ip->protocol,sport,dport,src,dst);
         // Exact counters are retained; ring buffer is sampled 1/64 by timestamp bits.
         if ((bpf_ktime_get_ns() & 63)==1) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id);
         if(dns_len>0) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id);
@@ -966,16 +1195,27 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
     __u16 policy_port=dport;
     __u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;
     if(proto==IPPROTO_TCP && l4_ok) track_tcp_signal(cgroup_id,flags);
+    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);
+    int syn_new = (proto==IPPROTO_TCP && l4_ok && (flags & 0x02) && !(flags & 0x10));
+    struct ct_key ctk; ct_fill(FAMILY_V6, proto, sport, dport, src, dst, &ctk);
+    int established = (l4_ok && !syn_new && ct_hit(&ctk));
     __u8 reason=0;
     // Exact/CIDR policy remains available even when the extension chain is
     // opaque/truncated or this is a non-first fragment. Port policy is only
     // evaluated when a trustworthy L4 destination port was parsed.
-    int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    int blocked=0;
+    if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
     char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
     char sni[96]={};char http_m[8]={};char http_h[96]={};int sni_len=0;if(direction==DIR_EGRESS&&hook==HOOK_CGROUP&&proto==IPPROTO_TCP&&payload){sni_len=tls_sni(payload,data_end,sni);if(sni_len>0&&!blocked&&enforcing()&&scope_allows(cgroup_id)){struct dns_key sk={};__builtin_memcpy(sk.name,sni,96);if(bpf_map_lookup_elem(&blocked_sni,&sk)){blocked=1;reason=REASON_SNI;}}if(sni_len>0)track_tls(cgroup_id,sni,blocked&&reason==REASON_SNI);if(http_method(payload,data_end,http_m)>0&&http_host(payload,data_end,http_h)>0)track_http(cgroup_id,http_m,http_h);}
-    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
-    if(blocked) submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
-    else { if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id); if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id); }
+    if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
+    if(blocked) {
+        record_policy_drop(FAMILY_V6,proto,direction,reason,sport,dport,src,dst,len);
+        submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
+    } else {
+        if (l4_ok) ct_learn_pair(FAMILY_V6,proto,sport,dport,src,dst);
+        if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id);
+        if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id);
+    }
     return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
 }
 
@@ -1194,3 +1434,61 @@ SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
 }
 
 char LICENSE[] SEC("license") = "GPL";
+
+SEC("xdp")
+int netra_xdp_shield(struct xdp_md *ctx)
+{
+    void *data = (void *)(long)ctx->data;
+    void *end = (void *)(long)ctx->data_end;
+    __u32 z = 0;
+    struct shield_config *cfg = bpf_map_lookup_elem(&shield_cfg, &z);
+    if (!cfg || cfg->mode == 0) return XDP_PASS;
+    struct ethhdr *eth = data;
+    if ((void *)(eth + 1) > end) return XDP_PASS;
+    __u8 src[16] = {};
+    __u8 family = 0;
+    __u8 class_id = 4; /* other */
+    __u32 daddr4 = 0;
+    int protected = cfg->protect_all != 0;
+    if (eth->h_proto == __builtin_bswap16(ETH_P_IP)) {
+        struct iphdr *ip = (void *)(eth + 1);
+        if ((void *)(ip + 1) > end) return XDP_PASS;
+        family = FAMILY_V4; copy4(src, ip->saddr); daddr4 = ip->daddr;
+        if (!protected) {
+            struct shield_ip4_key pk = {.generation = cfg->generation, .addr = daddr4};
+            protected = bpf_map_lookup_elem(&shield_protected4, &pk) != 0;
+        }
+        if (!protected) return XDP_PASS;
+        if (ip->protocol == IPPROTO_TCP) {
+            void *l4 = (void *)ip + ip->ihl * 4;
+            struct tcphdr *tcp = l4;
+            if ((void *)(tcp + 1) <= end && tcp->syn && !tcp->ack) class_id = 1;
+        } else if (ip->protocol == IPPROTO_UDP) class_id = 2;
+        else if (ip->protocol == IPPROTO_ICMP) class_id = 3;
+    } else if (eth->h_proto == __builtin_bswap16(ETH_P_IPV6)) {
+        struct ipv6hdr *ip6 = (void *)(eth + 1);
+        if ((void *)(ip6 + 1) > end) return XDP_PASS;
+        family = FAMILY_V6; copy16(src, &ip6->saddr);
+        if (!cfg->protect_all) return XDP_PASS; /* v6 protected set omitted in v1 */
+        if (ip6->nexthdr == IPPROTO_UDP) class_id = 2;
+        else if (ip6->nexthdr == IPPROTO_ICMPV6) class_id = 3;
+        else if (ip6->nexthdr == IPPROTO_TCP) class_id = 1;
+    } else return XDP_PASS;
+    __u32 pps = cfg->other_pps;
+    if (class_id == 1) pps = cfg->syn_pps;
+    else if (class_id == 2) pps = cfg->udp_pps;
+    else if (class_id == 3) pps = cfg->icmp_pps;
+    int ok = shield_rate_ok(family, class_id, src, pps, cfg->burst_seconds ? cfg->burst_seconds : 2);
+    struct shield_stat_value *st = bpf_map_lookup_elem(&shield_stats, &z);
+    if (ok) {
+        if (st) __sync_fetch_and_add(&st->allowed, 1);
+        return XDP_PASS;
+    }
+    if (cfg->mode == 1) {
+        if (st) __sync_fetch_and_add(&st->audited, 1);
+        return XDP_PASS;
+    }
+    if (st) __sync_fetch_and_add(&st->dropped, 1);
+    return XDP_DROP;
+}
+

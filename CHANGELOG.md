@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.0 — 2026-09-12
+
+- Added optional cgroup-keyed `netpol_deny4` / `netpol_enabled` maps for native deny-list NetworkPolicy-shaped enforcement (off by default).
+- Bundles the v0.17 conntrack/Drop Detective and v0.18 TCX/XDP Shield borrow waves from FluxVM.
+
+## 0.18.0 — 2026-09-12
+
+- Added `NETRA_TCX=auto|off|required` attach semantics for optional interface TCX hooks.
+- Added optional XDP Shield (`NETRA_XDP_SHIELD`) with generation-published protected IPv4 and per-source SYN/UDP/ICMP/other PPS token buckets.
+
+## 0.17.0 — 2026-09-12
+
+- Added LRU `conntrack` map with established-flow learn/hit (SYN always re-evaluates policy).
+- Added `policy_drops` map and `GET /api/v1/ebpf/diagnose` Drop Detective (exact vs probable) from FluxVM’s correlation model.
+- Wired detective findings into the Drop Diagnostics UI and `netractl ebpf diagnose`.
+
 ## 0.15.0 — 2026-09-11
 
 - Added `netra-doctor`, a read-only host readiness preflight for cgroup v2, bpffs, BTF, tracefs, kernel baseline, capabilities, lockdown and memlock.

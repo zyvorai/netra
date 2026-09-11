@@ -39,6 +39,10 @@ spec:
           value: {{ .Values.agent.interfaces | quote }}
         - name: NETRA_XDP_INTERFACES
           value: {{ .Values.agent.xdpInterfaces | quote }}
+        - name: NETRA_TCX
+          value: {{ .Values.agent.tcx | default "auto" | quote }}
+        - name: NETRA_XDP_SHIELD
+          value: {{ .Values.agent.xdpShield | default false | quote }}
         - name: NETRA_BPF_PIN
           value: {{ .Values.agent.pinPath | quote }}
         - name: NETRA_FAILSAFE_AFTER

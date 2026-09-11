@@ -70,6 +70,9 @@ type EBPFFastPathConfig struct {
 	ScopeMode        string              `json:"scopeMode,omitempty"` // all or selected
 	WorkloadScopes   []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
 	Workloads        []WorkloadIdentity  `json:"workloads,omitempty"` // ephemeral node inventory, never persisted intentionally
+	Shield           *ShieldConfig       `json:"shield,omitempty"`
+	NetPolEnabled    bool                `json:"netPolEnabled,omitempty"`
+	NetPolDenies     []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
 	Revision         uint64              `json:"revision"`
 	EnforceUntil     *time.Time          `json:"enforceUntil,omitempty"`
 	LeaseSeconds     int64               `json:"leaseSeconds,omitempty"`
@@ -389,6 +392,77 @@ type DropDiagnosticsResponse struct {
 	Nodes   []NodeDropDiagnostics  `json:"nodes"`
 }
 
+type PolicyDropStat struct {
+	Family    uint8  `json:"family"`
+	Protocol  uint8  `json:"protocol"`
+	Direction uint8  `json:"direction"`
+	Reason    uint8  `json:"reason"`
+	SrcAddr   string `json:"srcAddr,omitempty"`
+	DstAddr   string `json:"dstAddr,omitempty"`
+	SrcPort   uint16 `json:"srcPort,omitempty"`
+	DstPort   uint16 `json:"dstPort,omitempty"`
+	Packets   uint64 `json:"packets"`
+	Bytes     uint64 `json:"bytes"`
+	LastNS    uint64 `json:"lastNs,omitempty"`
+}
+
+type DropDetectiveFinding struct {
+	Node        string `json:"node,omitempty"`
+	Confidence  string `json:"confidence"`
+	Code        string `json:"code"`
+	Stage       string `json:"stage"`
+	Reason      uint8  `json:"reason"`
+	Family      uint8  `json:"family,omitempty"`
+	Protocol    uint8  `json:"protocol,omitempty"`
+	Direction   uint8  `json:"direction,omitempty"`
+	Src         string `json:"src,omitempty"`
+	Dst         string `json:"dst,omitempty"`
+	Packets     uint64 `json:"packets"`
+	Bytes       uint64 `json:"bytes,omitempty"`
+	Explanation string `json:"explanation"`
+	Suggestion  string `json:"suggestion,omitempty"`
+}
+
+type DropDetectiveSummary struct {
+	Text               string `json:"text"`
+	PolicyDropPackets  uint64 `json:"policyDropPackets"`
+	PolicyDropFlows    uint64 `json:"policyDropFlows"`
+	ConntrackEntries   uint64 `json:"conntrackEntries"`
+	ExactFindings      int    `json:"exactFindings"`
+	ProbableFindings   int    `json:"probableFindings"`
+}
+
+type DropDetectiveResponse struct {
+	Summary  DropDetectiveSummary    `json:"summary"`
+	Findings []DropDetectiveFinding  `json:"findings"`
+}
+
+type ShieldConfig struct {
+	Generation    uint32   `json:"generation"`
+	Mode          string   `json:"mode"` // off|audit|enforce
+	ProtectAll    bool     `json:"protectAll,omitempty"`
+	ProtectedIPv4 []string `json:"protectedIpv4,omitempty"`
+	SynPPS        uint32   `json:"synPps,omitempty"`
+	UDPPPS        uint32   `json:"udpPps,omitempty"`
+	ICMPPPS       uint32   `json:"icmpPps,omitempty"`
+	OtherPPS      uint32   `json:"otherPps,omitempty"`
+	BurstSeconds  uint32   `json:"burstSeconds,omitempty"`
+}
+
+type ShieldStats struct {
+	Allowed uint64 `json:"allowed"`
+	Dropped uint64 `json:"dropped"`
+	Audited uint64 `json:"audited"`
+}
+
+type NetPolPeerDeny struct {
+	CgroupID  uint64 `json:"cgroupId"`
+	PeerIPv4  string `json:"peerIpv4"`
+	Port      uint16 `json:"port,omitempty"`
+	Protocol  string `json:"protocol,omitempty"` // TCP|UDP|ANY
+	Direction string `json:"direction,omitempty"` // ingress|egress|both
+}
+
 type AgentReport struct {
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
@@ -407,6 +481,9 @@ type AgentReport struct {
 	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
+	PolicyDrops        []PolicyDropStat        `json:"policyDrops,omitempty"`
+	ConntrackEntries   int                     `json:"conntrackEntries,omitempty"`
+	Shield             *ShieldStats            `json:"shield,omitempty"`
 	Stack              NodeStackStat           `json:"stack,omitempty"`
 	Events             []FastPathEvent         `json:"events"`
 	ObservedAt         time.Time               `json:"observedAt"`
