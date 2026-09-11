@@ -54,6 +54,16 @@ type Agent struct {
 	cgroupScanEvery                    time.Duration
 	scopeMode                          string
 	selectedCgroups                    int
+
+	// procMetaEnabled gates /proc-derived process metadata enrichment
+	// (internal/procmeta). Off by default: resolving a host PID's /proc
+	// entry from inside the agent container requires hostPID or a host
+	// /proc mount, a real expansion of what this already-privileged agent
+	// can see beyond what eBPF hooks already surface. See
+	// docs/process-metadata.md. The actual enrichment lives in
+	// procmeta_linux.go / procmeta_other.go so this file — otherwise
+	// portable — does not have to import a Linux-only package directly.
+	procMetaEnabled bool
 }
 
 func New(log *slog.Logger) *Agent {
@@ -69,6 +79,7 @@ func New(log *slog.Logger) *Agent {
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
+		procMetaEnabled: envBool("NETRA_PROCMETA_ENABLED", false),
 	}
 }
 
@@ -89,6 +100,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+			sweepProcessMetaCache()
 			if !a.enforceUntil.IsZero() && !time.Now().Before(a.enforceUntil) {
 				if err := a.forceObserve(); err != nil {
 					a.log.Error("enforcement lease local expiry", "error", err)
@@ -335,6 +347,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	processMeta := a.readProcessMeta(pidsFromTCPHealth(tcpHealth))
 	tcpPressure, err := a.readTCPPressure()
 	if err != nil {
 		return err
@@ -381,7 +394,26 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	stack := a.readNodeStack()
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops, ConntrackEntries: ctEntries, Shield: shieldStats, Stack: stack, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops, ConntrackEntries: ctEntries, Shield: shieldStats, ProcessMeta: processMeta, Stack: stack, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+}
+
+// pidsFromTCPHealth collects the unique nonzero PIDs observed in the
+// current TCP health snapshot — the richest available source of
+// currently-relevant process identity — for procmeta enrichment.
+func pidsFromTCPHealth(stats []models.TCPHealthStat) []uint32 {
+	seen := map[uint32]struct{}{}
+	var out []uint32
+	for _, t := range stats {
+		if t.PID == 0 {
+			continue
+		}
+		if _, ok := seen[t.PID]; ok {
+			continue
+		}
+		seen[t.PID] = struct{}{}
+		out = append(out, t.PID)
+	}
+	return out
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig

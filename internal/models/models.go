@@ -424,17 +424,17 @@ type DropDetectiveFinding struct {
 }
 
 type DropDetectiveSummary struct {
-	Text               string `json:"text"`
-	PolicyDropPackets  uint64 `json:"policyDropPackets"`
-	PolicyDropFlows    uint64 `json:"policyDropFlows"`
-	ConntrackEntries   uint64 `json:"conntrackEntries"`
-	ExactFindings      int    `json:"exactFindings"`
-	ProbableFindings   int    `json:"probableFindings"`
+	Text              string `json:"text"`
+	PolicyDropPackets uint64 `json:"policyDropPackets"`
+	PolicyDropFlows   uint64 `json:"policyDropFlows"`
+	ConntrackEntries  uint64 `json:"conntrackEntries"`
+	ExactFindings     int    `json:"exactFindings"`
+	ProbableFindings  int    `json:"probableFindings"`
 }
 
 type DropDetectiveResponse struct {
-	Summary  DropDetectiveSummary    `json:"summary"`
-	Findings []DropDetectiveFinding  `json:"findings"`
+	Summary  DropDetectiveSummary   `json:"summary"`
+	Findings []DropDetectiveFinding `json:"findings"`
 }
 
 type ShieldConfig struct {
@@ -459,7 +459,7 @@ type NetPolPeerDeny struct {
 	CgroupID  uint64 `json:"cgroupId"`
 	PeerIPv4  string `json:"peerIpv4"`
 	Port      uint16 `json:"port,omitempty"`
-	Protocol  string `json:"protocol,omitempty"` // TCP|UDP|ANY
+	Protocol  string `json:"protocol,omitempty"`  // TCP|UDP|ANY
 	Direction string `json:"direction,omitempty"` // ingress|egress|both
 }
 
@@ -484,12 +484,43 @@ type AgentReport struct {
 	PolicyDrops        []PolicyDropStat        `json:"policyDrops,omitempty"`
 	ConntrackEntries   int                     `json:"conntrackEntries,omitempty"`
 	Shield             *ShieldStats            `json:"shield,omitempty"`
-	Stack              NodeStackStat           `json:"stack,omitempty"`
-	Events             []FastPathEvent         `json:"events"`
-	ObservedAt         time.Time               `json:"observedAt"`
-	Workloads          []WorkloadIdentity      `json:"workloads,omitempty"`
-	ScopeMode          string                  `json:"scopeMode,omitempty"`
-	SelectedCgroups    int                     `json:"selectedCgroups,omitempty"`
+	// ProcessMeta is /proc-derived process metadata for PIDs observed in
+	// this report (see TCPHealth[].PID), populated only when the agent
+	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
+	// see the host's /proc, a real expansion of what it can observe.
+	ProcessMeta     []ProcessMetaStat  `json:"processMeta,omitempty"`
+	Stack           NodeStackStat      `json:"stack,omitempty"`
+	Events          []FastPathEvent    `json:"events"`
+	ObservedAt      time.Time          `json:"observedAt"`
+	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
+	ScopeMode       string             `json:"scopeMode,omitempty"`
+	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
+}
+
+// ProcessMetaStat is /proc-derived metadata for one process observed on the
+// node, keyed by PID+StartTimeJiffies (PID-reuse-safe). It deliberately
+// does not include argv/cmdline content, matching Netra's existing
+// comm-only process-identity boundary elsewhere. See internal/procmeta.
+type ProcessMetaStat struct {
+	PID              uint32   `json:"pid"`
+	StartTimeJiffies uint64   `json:"startTimeJiffies"`
+	Comm             string   `json:"comm,omitempty"`
+	PPID             int      `json:"ppid,omitempty"`
+	EffectiveUID     uint32   `json:"effectiveUid,omitempty"`
+	NoNewPrivs       bool     `json:"noNewPrivs,omitempty"`
+	SeccompMode      int      `json:"seccompMode,omitempty"`
+	LSMLabel         string   `json:"lsmLabel,omitempty"`
+	Exe              string   `json:"exe,omitempty"`
+	CapEff           uint64   `json:"capEff,omitempty"`
+	CapNames         []string `json:"capNames,omitempty"`
+	ContainerPID     int      `json:"containerPid,omitempty"`
+	KernelThread     bool     `json:"kernelThread,omitempty"`
+	ProcessKind      string   `json:"processKind,omitempty"`
+	CgroupPath       string   `json:"cgroupPath,omitempty"`
+	PodUID           string   `json:"podUid,omitempty"`
+	ContainerID      string   `json:"containerId,omitempty"`
+	QoSClass         string   `json:"qosClass,omitempty"`
+	AttributionError string   `json:"attributionError,omitempty"`
 }
 
 type AgentStatus struct {

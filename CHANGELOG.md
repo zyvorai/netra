@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.0 — 2026-09-12
+
+- Added `internal/procmeta`, an optional, off-by-default `/proc`-derived process metadata reader (Linux-only): capabilities, seccomp/`NoNewPrivs`, LSM label, executable path, cgroup-derived pod/container/QoS attribution, and a kernel-thread/host/container/VM classification heuristic. PID-reuse-safe via `{PID, StartTime}` identity.
+- Deliberately does not collect argv/cmdline content, matching this project's existing comm-only process-identity boundary elsewhere.
+- Wired agent-side only (`internal/agent`, gated by `NETRA_PROCMETA_ENABLED`) — the controller aggregates reports from potentially many remote nodes and has no relationship to any specific node's `/proc`, so enrichment happens where the PID was actually observed. A no-op stub keeps the agent buildable on non-Linux development machines.
+- Enabling `agent.procMetaEnabled` in the Helm chart also adds `hostPID: true` to the agent DaemonSet, a real expansion of what the agent can see; off by default. See `docs/process-metadata.md`.
+- Added `AgentReport.ProcessMeta`, keyed by PID+StartTimeJiffies, populated from the PIDs seen in each sync cycle's TCP health snapshot.
+
 ## 0.20.0 — 2026-09-12
 
 - Added `internal/webhook`, a delivery package for pushing structured alert events to configured HTTP endpoints: HMAC-SHA256 body signing, per-sink severity filtering, bounded per-sink retry with exponential backoff, and concurrent per-sink fan-out so one unreachable sink can't delay delivery to the others.

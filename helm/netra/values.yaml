@@ -53,6 +53,12 @@ agent:
   pinPath: /sys/fs/bpf/netra
   failsafeAfter: 60s
   staleAfter: 45s
+  # Optional /proc-derived process metadata (internal/procmeta). Off by
+  # default: enabling it also enables hostPID on the agent DaemonSet, a
+  # real expansion of what this already-privileged agent can see (every
+  # host process's /proc, not just what eBPF hooks already surface). See
+  # docs/process-metadata.md.
+  procMetaEnabled: false
 persistence:
   enabled: true
   existingClaim: ""

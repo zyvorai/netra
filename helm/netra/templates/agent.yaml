@@ -15,6 +15,14 @@ spec:
       serviceAccountName: netra-agent
       automountServiceAccountToken: false
       hostNetwork: true
+      {{- if .Values.agent.procMetaEnabled }}
+      # Required for internal/procmeta to resolve a host PID's /proc entry
+      # from inside the agent container. This is a real expansion of what
+      # the already-privileged agent can see (every host process's /proc,
+      # not just what eBPF hooks already surface) — see
+      # docs/process-metadata.md. Off unless agent.procMetaEnabled is set.
+      hostPID: true
+      {{- end }}
       dnsPolicy: ClusterFirstWithHostNet
       tolerations:
       - operator: Exists
@@ -47,6 +55,8 @@ spec:
           value: {{ .Values.agent.pinPath | quote }}
         - name: NETRA_FAILSAFE_AFTER
           value: {{ .Values.agent.failsafeAfter | quote }}
+        - name: NETRA_PROCMETA_ENABLED
+          value: {{ .Values.agent.procMetaEnabled | default false | quote }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:
