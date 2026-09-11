@@ -6,6 +6,8 @@ Netra v0.14 does not require Cilium. The node agent owns its own programs and ma
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
+![Netra dashboard — Overview](docs/ux/00-overview.png)
+
 ## Standalone eBPF capabilities
 
 ### Observability
@@ -106,6 +108,9 @@ When enabled, the existing integrations remain available:
 
 Cilium RBAC is not rendered by Helm unless `cilium.enabled=true`. Hubble is disabled by default with `hubble.enabled=false`.
 
+When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVirt) pages: inventory, per-entity Hubble live flows, create/delete CNP rules pinned to the workload selector, and one-click **lock down / unlock** quarantine (`netra-lockdown-*`: deny-all ingress, DNS-only egress) through the same plan → receipt → apply path.
+
+![Pods inventory with one-click lock down / unlock](docs/ux/06-lockdown.png)
 
 ## HTTPS default
 
