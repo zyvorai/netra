@@ -1,9 +1,16 @@
 # Changelog
 
+## v0.9.0 — 2026-09-11
+
+- Added standalone sockops TCP health: connections, SRTT/min RTT, retransmissions, RTOs, closes, cwnd, segments and byte counters.
+- Added exact per-cgroup TCP SYN/SYN-ACK/FIN/RST counters.
+- Added cleartext UDP/53 DNS transaction timing, response-code/failure counters, and workload attribution.
+- Added Network Health API/UI/CLI plus low-cardinality Prometheus health metrics.
+- Preserved workload-scoped enforcement, Pods/VMs inventory, Cilium lockdown, Hubble enrichment, HA, durable state and HTTPS defaults.
+
+
 ## v0.8.0 — 2026-09-11
 
-- Published as open-source **Netra** (`github.com/zyvorai/netra`); default API **HTTPS :30870**.
-- Retained **Pods / VMs** inventory, per-workload Hubble flows, CNP create/delete, and lock down / unlock when `cilium.enabled=true`.
 - Added Kubernetes-aware cgroup attribution for namespace, Pod, immediate owner, container ID and cgroup ID without giving the privileged agent Kubernetes API credentials.
 - Added controller read-only Pod metadata RBAC and node-scoped workload inventory delivery over the authenticated Netra agent channel.
 - Added cgroup-v2 inode/path discovery with configurable `NETRA_CGROUP_SCAN_INTERVAL`.

@@ -4,7 +4,7 @@ COPY web/package.json web/tsconfig.json web/vite.config.ts web/index.html ./web/
 COPY web/src ./web/src
 RUN cd web && npm install && npm run build
 
-FROM golang:1.26-bookworm AS go
+FROM golang:1.27-bookworm AS go
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd

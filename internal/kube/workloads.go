@@ -15,31 +15,26 @@ import (
 )
 
 func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, error) {
-	path := "/api/v1/pods"
+	p := "/api/v1/pods"
 	if strings.TrimSpace(ns) != "" {
-		path = "/api/v1/namespaces/" + esc(ns) + "/pods"
+		p = "/api/v1/namespaces/" + esc(ns) + "/pods"
 	}
-	b, err := c.do(ctx, "GET", path, nil, "")
+	b, err := c.do(ctx, "GET", p, nil, "")
 	if err != nil {
 		return nil, err
 	}
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name            string            `json:"name"`
-				Namespace       string            `json:"namespace"`
-				Labels          map[string]string `json:"labels"`
-				OwnerReferences []struct {
-					Kind string `json:"kind"`
-					Name string `json:"name"`
-				} `json:"ownerReferences"`
+				Name, Namespace string
+				Labels          map[string]string             `json:"labels"`
+				OwnerReferences []struct{ Kind, Name string } `json:"ownerReferences"`
 			} `json:"metadata"`
 			Spec struct {
 				NodeName string `json:"nodeName"`
 			} `json:"spec"`
 			Status struct {
-				Phase             string `json:"phase"`
-				PodIP             string `json:"podIP"`
+				Phase, PodIP      string
 				ContainerStatuses []struct {
 					Ready bool `json:"ready"`
 				} `json:"containerStatuses"`
@@ -58,15 +53,7 @@ func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, err
 				break
 			}
 		}
-		p := models.PodInfo{
-			Name:      it.Metadata.Name,
-			Namespace: it.Metadata.Namespace,
-			Phase:     it.Status.Phase,
-			Node:      it.Spec.NodeName,
-			PodIP:     it.Status.PodIP,
-			Ready:     ready,
-			Labels:    it.Metadata.Labels,
-		}
+		p := models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels}
 		if len(it.Metadata.OwnerReferences) > 0 {
 			p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 			p.OwnerName = it.Metadata.OwnerReferences[0].Name
@@ -83,20 +70,15 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 	}
 	var it struct {
 		Metadata struct {
-			Name            string            `json:"name"`
-			Namespace       string            `json:"namespace"`
-			Labels          map[string]string `json:"labels"`
-			OwnerReferences []struct {
-				Kind string `json:"kind"`
-				Name string `json:"name"`
-			} `json:"ownerReferences"`
+			Name, Namespace string
+			Labels          map[string]string             `json:"labels"`
+			OwnerReferences []struct{ Kind, Name string } `json:"ownerReferences"`
 		} `json:"metadata"`
 		Spec struct {
 			NodeName string `json:"nodeName"`
 		} `json:"spec"`
 		Status struct {
-			Phase             string `json:"phase"`
-			PodIP             string `json:"podIP"`
+			Phase, PodIP      string
 			ContainerStatuses []struct {
 				Ready bool `json:"ready"`
 			} `json:"containerStatuses"`
@@ -112,15 +94,7 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 			break
 		}
 	}
-	p := &models.PodInfo{
-		Name:      it.Metadata.Name,
-		Namespace: it.Metadata.Namespace,
-		Phase:     it.Status.Phase,
-		Node:      it.Spec.NodeName,
-		PodIP:     it.Status.PodIP,
-		Ready:     ready,
-		Labels:    it.Metadata.Labels,
-	}
+	p := &models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels}
 	if len(it.Metadata.OwnerReferences) > 0 {
 		p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 		p.OwnerName = it.Metadata.OwnerReferences[0].Name
@@ -128,13 +102,12 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 	return p, nil
 }
 
-// ListVMs returns VirtualMachineInstances when KubeVirt is installed.
-func (c *Client) ListVMs(ctx context.Context, ns string) (items []models.VMInfo, available bool, err error) {
-	path := "/apis/kubevirt.io/v1/virtualmachineinstances"
+func (c *Client) ListVMs(ctx context.Context, ns string) ([]models.VMInfo, bool, error) {
+	p := "/apis/kubevirt.io/v1/virtualmachineinstances"
 	if strings.TrimSpace(ns) != "" {
-		path = "/apis/kubevirt.io/v1/namespaces/" + esc(ns) + "/virtualmachineinstances"
+		p = "/apis/kubevirt.io/v1/namespaces/" + esc(ns) + "/virtualmachineinstances"
 	}
-	b, status, err := c.doRaw(ctx, "GET", path, nil, "")
+	b, status, err := c.doRaw(ctx, "GET", p, nil, "")
 	if err != nil {
 		return nil, false, err
 	}
@@ -147,14 +120,12 @@ func (c *Client) ListVMs(ctx context.Context, ns string) (items []models.VMInfo,
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name      string            `json:"name"`
-				Namespace string            `json:"namespace"`
-				Labels    map[string]string `json:"labels"`
+				Name, Namespace string
+				Labels          map[string]string `json:"labels"`
 			} `json:"metadata"`
 			Status struct {
-				Phase      string `json:"phase"`
-				NodeName   string `json:"nodeName"`
-				Interfaces []struct {
+				Phase, NodeName string
+				Interfaces      []struct {
 					IP string `json:"ipAddress"`
 				} `json:"interfaces"`
 			} `json:"status"`
@@ -165,14 +136,7 @@ func (c *Client) ListVMs(ctx context.Context, ns string) (items []models.VMInfo,
 	}
 	out := make([]models.VMInfo, 0, len(list.Items))
 	for _, it := range list.Items {
-		vm := models.VMInfo{
-			Name:      it.Metadata.Name,
-			Namespace: it.Metadata.Namespace,
-			Phase:     it.Status.Phase,
-			Node:      it.Status.NodeName,
-			Running:   strings.EqualFold(it.Status.Phase, "Running"),
-			Labels:    it.Metadata.Labels,
-		}
+		vm := models.VMInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Status.NodeName, Running: strings.EqualFold(it.Status.Phase, "Running"), Labels: it.Metadata.Labels}
 		if len(it.Status.Interfaces) > 0 {
 			vm.PodIP = it.Status.Interfaces[0].IP
 		}
@@ -198,14 +162,12 @@ func (c *Client) GetVMI(ctx context.Context, ns, name string) (*models.VMInfo, b
 	}
 	var it struct {
 		Metadata struct {
-			Name      string            `json:"name"`
-			Namespace string            `json:"namespace"`
-			Labels    map[string]string `json:"labels"`
+			Name, Namespace string
+			Labels          map[string]string `json:"labels"`
 		} `json:"metadata"`
 		Status struct {
-			Phase      string `json:"phase"`
-			NodeName   string `json:"nodeName"`
-			Interfaces []struct {
+			Phase, NodeName string
+			Interfaces      []struct {
 				IP string `json:"ipAddress"`
 			} `json:"interfaces"`
 		} `json:"status"`
@@ -213,14 +175,7 @@ func (c *Client) GetVMI(ctx context.Context, ns, name string) (*models.VMInfo, b
 	if err := json.Unmarshal(b, &it); err != nil {
 		return nil, true, fmt.Errorf("decode vmi: %w", err)
 	}
-	vm := &models.VMInfo{
-		Name:      it.Metadata.Name,
-		Namespace: it.Metadata.Namespace,
-		Phase:     it.Status.Phase,
-		Node:      it.Status.NodeName,
-		Running:   strings.EqualFold(it.Status.Phase, "Running"),
-		Labels:    it.Metadata.Labels,
-	}
+	vm := &models.VMInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Status.NodeName, Running: strings.EqualFold(it.Status.Phase, "Running"), Labels: it.Metadata.Labels}
 	if len(it.Status.Interfaces) > 0 {
 		vm.PodIP = it.Status.Interfaces[0].IP
 	}
@@ -246,7 +201,6 @@ func attachVirtLauncher(ctx context.Context, c *Client, vm *models.VMInfo) {
 			if vm.Labels == nil {
 				vm.Labels = map[string]string{}
 			}
-			// Prefer VMI labels; fall back to launcher labels for selector recommendations.
 			for k, v := range p.Labels {
 				if _, ok := vm.Labels[k]; !ok {
 					vm.Labels[k] = v
@@ -256,14 +210,10 @@ func attachVirtLauncher(ctx context.Context, c *Client, vm *models.VMInfo) {
 		}
 	}
 }
-
 func kubeAPIMissing(b []byte) bool {
-	msg := string(b)
-	return strings.Contains(msg, "the server could not find the requested resource") ||
-		strings.Contains(msg, "no matches for kind") ||
-		strings.Contains(msg, "could not find the requested resource")
+	m := string(b)
+	return strings.Contains(m, "the server could not find the requested resource") || strings.Contains(m, "no matches for kind") || strings.Contains(m, "could not find the requested resource")
 }
-
 func (c *Client) doRaw(ctx context.Context, method, p string, body []byte, contentType string) ([]byte, int, error) {
 	var rdr io.Reader
 	if body != nil {

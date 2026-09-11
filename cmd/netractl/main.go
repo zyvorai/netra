@@ -19,10 +19,10 @@ import (
 
 var base = strings.TrimRight(env("NETRA_URL", "https://127.0.0.1:30870"), "/")
 
-func httpClient() *http.Client {
-	c := &http.Client{Timeout: 20 * time.Second}
-	if !strings.EqualFold(env("NETRA_TLS_INSECURE", "true"), "false") {
-		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}
+func httpClient(timeout time.Duration) *http.Client {
+	c := &http.Client{Timeout: timeout}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_TLS_INSECURE")), "true") {
+		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit local/self-signed opt-in
 	}
 	return c
 }
@@ -68,7 +68,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | capabilities
+  ebpf stats | summary | health | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP | deny del IP
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
@@ -325,6 +325,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/agents", nil)
 	case "summary":
 		return request("GET", "/api/v1/ebpf/summary", nil)
+	case "health":
+		return request("GET", "/api/v1/ebpf/health", nil)
 	case "capabilities":
 		return request("GET", "/api/v1/ebpf/capabilities", nil)
 	case "mode":
@@ -548,8 +550,7 @@ func doRequest(method, p string, b []byte, extra map[string]string) ([]byte, int
 	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
-	c := httpClient()
-	r, err := c.Do(req)
+	r, err := httpClient(20 * time.Second).Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -566,7 +567,7 @@ func stream(p string) error {
 		return e
 	}
 	auth(req)
-	r, e := httpClient().Do(req)
+	r, e := httpClient(0).Do(req)
 	if e != nil {
 		return e
 	}

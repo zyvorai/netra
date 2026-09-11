@@ -11,7 +11,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
-      with: {go-version: '1.27.0', cache: true}
+      with: {go-version: '1.27.1', cache: true}
     - run: go mod tidy
     - run: go test ./...
     - run: go vet ./...
@@ -65,11 +65,13 @@ jobs:
       run: |
         awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
         awk '/name: NETRA_HUBBLE_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
-    - name: Standalone agent render must mount cgroup v2
+    - name: Standalone render must expose workload attribution safely
       run: |
+        grep -q 'resources: \["pods"\]' /tmp/netra-agent.yaml
         grep -q '/sys/fs/cgroup' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_ENABLED' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_SCAN_INTERVAL' /tmp/netra-agent.yaml
+        grep -q 'automountServiceAccountToken: false' /tmp/netra-agent.yaml
     - name: HA must reject a chart-managed RWO volume
       run: |
         if helm template bad-ha helm/netra \

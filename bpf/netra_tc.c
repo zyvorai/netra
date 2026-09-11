@@ -22,12 +22,15 @@
 #define HOOK_CGROUP  2
 #define HOOK_XDP     3
 #define HOOK_SOCKET  4
+#define HOOK_SOCKOPS 5
 #define ACT_ALLOW    0
 #define ACT_BLOCK    1
 #define EVT_FLOW     1
 #define EVT_DNS      2
 #define EVT_CONNECT  3
 #define EVT_BLOCK    4
+#define EVT_DNS_RESPONSE 5
+#define EVT_TCP_HEALTH 6
 #define REASON_NONE  0
 #define REASON_EXACT 1
 #define REASON_CIDR  2
@@ -41,6 +44,7 @@
 
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)BPF_FUNC_map_lookup_elem;
 static long (*bpf_map_update_elem)(void *map, const void *key, const void *value, __u64 flags) = (void *)BPF_FUNC_map_update_elem;
+static long (*bpf_map_delete_elem)(void *map, const void *key) = (void *)BPF_FUNC_map_delete_elem;
 static __u64 (*bpf_ktime_get_ns)(void) = (void *)BPF_FUNC_ktime_get_ns;
 static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size, __u64 flags) = (void *)BPF_FUNC_ringbuf_reserve;
 static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *)BPF_FUNC_ringbuf_submit;
@@ -48,6 +52,8 @@ static __u64 (*bpf_get_current_pid_tgid)(void) = (void *)BPF_FUNC_get_current_pi
 static __u64 (*bpf_get_current_uid_gid)(void) = (void *)BPF_FUNC_get_current_uid_gid;
 static long (*bpf_get_current_comm)(void *buf, __u32 size) = (void *)BPF_FUNC_get_current_comm;
 static __u64 (*bpf_get_current_cgroup_id)(void) = (void *)BPF_FUNC_get_current_cgroup_id;
+static __u64 (*bpf_get_socket_cookie)(void *ctx) = (void *)BPF_FUNC_get_socket_cookie;
+static int (*bpf_sock_ops_cb_flags_set)(struct bpf_sock_ops *skops, int flags) = (void *)BPF_FUNC_sock_ops_cb_flags_set;
 
 // Legacy v0.6 destination stats are retained so existing pinned maps can be reused.
 struct dest_key {
@@ -203,6 +209,113 @@ struct {
     __type(value, __u8);
 } enforced_cgroups SEC(".maps");
 
+
+// Socket owner identity is captured at connect() time and joined to sockops
+// callbacks by socket cookie. This avoids attributing sockops callbacks to the
+// kthread/softirq that happened to execute them.
+struct socket_owner_value {
+    __u64 cgroup_id;
+    __u32 pid;
+    __u32 uid;
+    char comm[16];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, __u64);
+    __type(value, struct socket_owner_value);
+} socket_owner SEC(".maps");
+
+struct tcp_health_key {
+    __u64 cgroup_id;
+    __u8 family;
+    __u8 pad[3];
+    __u32 local_ip4;
+    __u32 remote_ip4;
+    __u8 local_ip6[16];
+    __u8 remote_ip6[16];
+    __u16 local_port;
+    __u16 remote_port;
+};
+struct tcp_health_value {
+    __u64 active_established;
+    __u64 passive_established;
+    __u64 closes;
+    __u64 retrans;
+    __u64 rto;
+    __u64 rtt_samples;
+    __u64 srtt_us;
+    __u64 rtt_min_us;
+    __u64 snd_cwnd;
+    __u64 bytes_acked;
+    __u64 bytes_received;
+    __u64 segs_in;
+    __u64 segs_out;
+    __u64 last_ns;
+    __u32 pid;
+    __u32 uid;
+    char comm[16];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct tcp_health_key);
+    __type(value, struct tcp_health_value);
+} tcp_health SEC(".maps");
+
+struct tcp_signal_value {
+    __u64 syn;
+    __u64 syn_ack;
+    __u64 fin;
+    __u64 rst;
+    __u64 packets;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, __u64);
+    __type(value, struct tcp_signal_value);
+} tcp_signals SEC(".maps");
+
+struct dns_pending_key {
+    __u64 cgroup_id;
+    __u8 family;
+    __u8 pad0;
+    __u16 client_port;
+    __u16 txid;
+    __u16 pad1;
+    __u8 server[16];
+};
+struct dns_pending_value {
+    __u64 start_ns;
+    char name[96];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct dns_pending_key);
+    __type(value, struct dns_pending_value);
+} dns_pending SEC(".maps");
+
+struct dns_health_key {
+    __u64 cgroup_id;
+    char name[96];
+};
+struct dns_health_value {
+    __u64 queries;
+    __u64 responses;
+    __u64 failures;
+    __u64 total_latency_us;
+    __u64 max_latency_us;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct dns_health_key);
+    __type(value, struct dns_health_value);
+} dns_health SEC(".maps");
+
 struct obs_event {
     __u64 ts_ns;
     __u64 cgroup_id;
@@ -224,6 +337,9 @@ struct obs_event {
     __u8 reason;
     char comm[16];
     char dns[96];
+    __u32 latency_us;
+    __u8 dns_rcode;
+    __u8 pad_event[3];
 } __attribute__((packed));
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -431,6 +547,102 @@ static __always_inline int dns_qname(void *payload, void *data_end, char out[96]
     return oi;
 }
 
+
+static __always_inline void track_tcp_signal(__u64 cgroup_id, __u8 flags)
+{
+    struct tcp_signal_value zero = {};
+    struct tcp_signal_value *v = bpf_map_lookup_elem(&tcp_signals, &cgroup_id);
+    if (!v) {
+        bpf_map_update_elem(&tcp_signals, &cgroup_id, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&tcp_signals, &cgroup_id);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->packets, 1);
+    if (flags & 0x02) {
+        if (flags & 0x10) __sync_fetch_and_add(&v->syn_ack, 1);
+        else __sync_fetch_and_add(&v->syn, 1);
+    }
+    if (flags & 0x01) __sync_fetch_and_add(&v->fin, 1);
+    if (flags & 0x04) __sync_fetch_and_add(&v->rst, 1);
+}
+
+static __always_inline void dns_query_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
+                                             __u16 client_port, void *payload, void *data_end,
+                                             const char name[96], int name_len)
+{
+    unsigned char *p = payload;
+    if (!cgroup_id || name_len <= 0 || (void *)(p + 12) > data_end) return;
+    struct dns_pending_key pk = {.cgroup_id = cgroup_id, .family = family,
+                                 .client_port = client_port,
+                                 .txid = ((__u16)p[0] << 8) | p[1]};
+    __builtin_memcpy(pk.server, server, 16);
+    struct dns_pending_value pv = {.start_ns = bpf_ktime_get_ns()};
+    __builtin_memcpy(pv.name, name, 96);
+    bpf_map_update_elem(&dns_pending, &pk, &pv, BPF_ANY);
+
+    struct dns_health_key hk = {.cgroup_id = cgroup_id};
+    __builtin_memcpy(hk.name, name, 96);
+    struct dns_health_value zero = {};
+    struct dns_health_value *hv = bpf_map_lookup_elem(&dns_health, &hk);
+    if (!hv) {
+        bpf_map_update_elem(&dns_health, &hk, &zero, BPF_NOEXIST);
+        hv = bpf_map_lookup_elem(&dns_health, &hk);
+    }
+    if (hv) {
+        __sync_fetch_and_add(&hv->queries, 1);
+        hv->last_ns = bpf_ktime_get_ns();
+    }
+}
+
+static __always_inline void dns_response_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
+                                                __u16 client_port, void *payload, void *data_end,
+                                                __u32 ifindex, __u32 len,
+                                                const __u8 src[16], const __u8 dst[16])
+{
+    unsigned char *p = payload;
+    if (!cgroup_id || (void *)(p + 12) > data_end) return;
+    struct dns_pending_key pk = {.cgroup_id = cgroup_id, .family = family,
+                                 .client_port = client_port,
+                                 .txid = ((__u16)p[0] << 8) | p[1]};
+    __builtin_memcpy(pk.server, server, 16);
+    struct dns_pending_value *pv = bpf_map_lookup_elem(&dns_pending, &pk);
+    if (!pv) return;
+
+    __u64 now = bpf_ktime_get_ns();
+    __u64 latency_us = (now - pv->start_ns) / 1000ULL;
+    __u8 rcode = p[3] & 0x0f;
+    struct dns_health_key hk = {.cgroup_id = cgroup_id};
+    __builtin_memcpy(hk.name, pv->name, 96);
+    struct dns_health_value zero = {};
+    struct dns_health_value *hv = bpf_map_lookup_elem(&dns_health, &hk);
+    if (!hv) {
+        bpf_map_update_elem(&dns_health, &hk, &zero, BPF_NOEXIST);
+        hv = bpf_map_lookup_elem(&dns_health, &hk);
+    }
+    if (hv) {
+        __sync_fetch_and_add(&hv->responses, 1);
+        if (rcode) __sync_fetch_and_add(&hv->failures, 1);
+        __sync_fetch_and_add(&hv->total_latency_us, latency_us);
+        if (latency_us > hv->max_latency_us) hv->max_latency_us = latency_us;
+        hv->last_ns = now;
+    }
+    struct obs_event *e = new_event(family, DIR_INGRESS, HOOK_CGROUP, IPPROTO_UDP, ACT_ALLOW, EVT_DNS_RESPONSE, REASON_NONE);
+    if (e) {
+        e->cgroup_id = cgroup_id;
+        e->ifindex = ifindex;
+        e->length = len;
+        e->src_port = __builtin_bswap16(53);
+        e->dst_port = client_port;
+        e->latency_us = (__u32)(latency_us > 0xffffffffULL ? 0xffffffffULL : latency_us);
+        e->dns_rcode = rcode;
+        __builtin_memcpy(e->src_addr, src, 16);
+        __builtin_memcpy(e->dst_addr, dst, 16);
+        __builtin_memcpy(e->dns, pv->name, 96);
+        bpf_ringbuf_submit(e, 0);
+    }
+    bpf_map_delete_elem(&dns_pending, &pk);
+}
+
 static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, __u32 len,
                                      __u8 direction, __u8 hook, int l2, int allow_value)
 {
@@ -454,6 +666,7 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
     __u32 peer = direction==DIR_EGRESS ? ip->daddr : ip->saddr;
     __u16 policy_port = dport;
     __u64 cgroup_id = hook==HOOK_CGROUP ? bpf_get_current_cgroup_id() : 0;
+    if (ip->protocol==IPPROTO_TCP) track_tcp_signal(cgroup_id, flags);
     __u8 reason=0; int blocked=decide4(direction,peer,ip->protocol,policy_port,&reason,1,cgroup_id);
     char dns_name[96]={}; int dns_len=0;
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && payload) {
@@ -461,6 +674,8 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
         if (!blocked && enforcing() && scope_allows(cgroup_id) && dns_len>0) { struct dns_key dk={}; __builtin_memcpy(dk.name,dns_name,96); if (bpf_map_lookup_elem(&blocked_dns,&dk)) { blocked=1; reason=REASON_DNS; } }
     }
     __u8 src[16],dst[16]; copy4(src,ip->saddr); copy4(dst,ip->daddr);
+    if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && dns_len>0) dns_query_track(cgroup_id,FAMILY_V4,dst,sport,payload,data_end,dns_name,dns_len);
+    if (direction==DIR_INGRESS && ip->protocol==IPPROTO_UDP && sport==__builtin_bswap16(53) && payload) dns_response_track(cgroup_id,FAMILY_V4,src,dport,payload,data_end,ifindex,len,src,dst);
     update_flow(FAMILY_V4,direction,hook,ip->protocol,sport,dport,src,dst,len,blocked,cgroup_id);
     if (direction==DIR_EGRESS) {
         struct dest_key lk={.dst_ip=ip->daddr,.dst_port=dport,.protocol=ip->protocol,.pad=0};
@@ -490,9 +705,9 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
     if (proto==IPPROTO_TCP) { struct tcphdr *tcp=l4;if((void *)(tcp+1)>data_end)return allow_value;sport=tcp->source;dport=tcp->dest;flags=*(((unsigned char*)tcp)+13); }
     else if(proto==IPPROTO_UDP){struct udphdr *udp=l4;if((void *)(udp+1)>data_end)return allow_value;sport=udp->source;dport=udp->dest;payload=(void *)(udp+1);}
     const __u8 *peer=direction==DIR_EGRESS?(const __u8 *)&ip6->daddr:(const __u8 *)&ip6->saddr;
-    __u16 policy_port=dport;__u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    __u16 policy_port=dport;__u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;if(proto==IPPROTO_TCP)track_tcp_signal(cgroup_id,flags);__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
     char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
-    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
+    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
     if(blocked) submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
     else { if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id); if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id); }
     return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
@@ -525,18 +740,99 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
     __u32 dst=ctx->user_ip4;__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u8 addr[16];copy4(addr,dst);
     __u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id);
+    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
     submit_socket_event(ctx,FAMILY_V4,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,cgroup_id);
+    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
     submit_socket_event(ctx,FAMILY_V6,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 SEC("cgroup/connect4") int netra_connect4(struct bpf_sock_addr *ctx){return socket4(ctx,IPPROTO_TCP);}
 SEC("cgroup/connect6") int netra_connect6(struct bpf_sock_addr *ctx){return socket6(ctx,IPPROTO_TCP);}
 SEC("cgroup/sendmsg4") int netra_sendmsg4(struct bpf_sock_addr *ctx){return socket4(ctx,IPPROTO_UDP);}
 SEC("cgroup/sendmsg6") int netra_sendmsg6(struct bpf_sock_addr *ctx){return socket6(ctx,IPPROTO_UDP);}
+
+
+static __always_inline void tcp_health_key_from_sockops(struct bpf_sock_ops *skops, __u64 cgroup_id,
+                                                         struct tcp_health_key *k)
+{
+    __builtin_memset(k, 0, sizeof(*k));
+    k->cgroup_id = cgroup_id;
+    k->family = skops->family == 2 ? FAMILY_V4 : FAMILY_V6;
+    if (skops->family == 2) {
+        k->local_ip4 = skops->local_ip4;
+        k->remote_ip4 = skops->remote_ip4;
+    } else {
+        __builtin_memcpy(k->local_ip6, skops->local_ip6, 16);
+        __builtin_memcpy(k->remote_ip6, skops->remote_ip6, 16);
+    }
+    k->local_port = (__u16)skops->local_port;
+    k->remote_port = (__u16)__builtin_bswap32(skops->remote_port);
+}
+
+SEC("sockops") int netra_sockops(struct bpf_sock_ops *skops)
+{
+    if (skops->family != 2 && skops->family != 10) return 0;
+    __u64 cookie = bpf_get_socket_cookie(skops);
+    struct socket_owner_value *owner = cookie ? bpf_map_lookup_elem(&socket_owner, &cookie) : 0;
+    __u64 cgroup_id = owner ? owner->cgroup_id : 0;
+    struct tcp_health_key key;
+    tcp_health_key_from_sockops(skops, cgroup_id, &key);
+    struct tcp_health_value zero = {};
+    struct tcp_health_value *v = bpf_map_lookup_elem(&tcp_health, &key);
+    if (!v) {
+        bpf_map_update_elem(&tcp_health, &key, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&tcp_health, &key);
+    }
+    if (!v) return 0;
+    __u64 now = bpf_ktime_get_ns();
+    if (owner) {
+        v->pid = owner->pid;
+        v->uid = owner->uid;
+        __builtin_memcpy(v->comm, owner->comm, 16);
+    }
+    v->last_ns = now;
+    if (skops->is_fullsock) {
+        v->srtt_us = ((__u64)skops->srtt_us) >> 3;
+        v->rtt_min_us = skops->rtt_min;
+        v->snd_cwnd = skops->snd_cwnd;
+        v->bytes_acked = skops->bytes_acked;
+        v->bytes_received = skops->bytes_received;
+        v->segs_in = skops->segs_in;
+        v->segs_out = skops->segs_out;
+    }
+    switch (skops->op) {
+    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
+        __sync_fetch_and_add(&v->active_established, 1);
+        bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTO_CB_FLAG | BPF_SOCK_OPS_RETRANS_CB_FLAG |
+                                         BPF_SOCK_OPS_STATE_CB_FLAG | BPF_SOCK_OPS_RTT_CB_FLAG);
+        break;
+    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
+        __sync_fetch_and_add(&v->passive_established, 1);
+        bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTO_CB_FLAG | BPF_SOCK_OPS_RETRANS_CB_FLAG |
+                                         BPF_SOCK_OPS_STATE_CB_FLAG | BPF_SOCK_OPS_RTT_CB_FLAG);
+        break;
+    case BPF_SOCK_OPS_RTO_CB:
+        __sync_fetch_and_add(&v->rto, 1);
+        break;
+    case BPF_SOCK_OPS_RETRANS_CB:
+        __sync_fetch_and_add(&v->retrans, 1);
+        break;
+    case BPF_SOCK_OPS_RTT_CB:
+        __sync_fetch_and_add(&v->rtt_samples, 1);
+        break;
+    case BPF_SOCK_OPS_STATE_CB:
+        // args[1] is the new TCP state. TCP_CLOSE is 7 in the Linux UAPI.
+        if (skops->args[1] == 7) __sync_fetch_and_add(&v->closes, 1);
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
 
 SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
 {

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 set -eu
-BASE="${NETRA_URL:-https://127.0.0.1:30870}"
+BASE="${NETRA_URL:-http://127.0.0.1:8080}"
 AUTH=""
 [ -n "${NETRA_API_KEY:-}" ] && AUTH="Authorization: Bearer ${NETRA_API_KEY}"
 curl -fsS "$BASE/healthz"

@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.8.0"
+  tag: "0.9.0"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.8.0"
+  tag: "0.9.0"
 replicaCount: 1
 ha:
   enabled: false
@@ -31,12 +31,10 @@ service:
   type: ClusterIP
   port: 30870
   nodePort: null
-
-# Zorvia-style in-pod HTTPS (self-signed via openssl initContainer).
 tls:
   enabled: true
   opensslImage: alpine/openssl:3.3.2
-
+  agentInsecureSkipVerify: true
 metrics:
   enabled: true
   prometheusAnnotations: false

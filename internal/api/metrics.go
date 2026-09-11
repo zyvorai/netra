@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/observability"
 )
 
@@ -79,6 +80,18 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_ebpf_recent_events", "Recent standalone eBPF events retained in controller agent reports.", float64(summary.Events))
 	metricGauge(w, "netra_ebpf_recent_dns_events", "Recent cleartext DNS query events retained in controller agent reports.", float64(summary.DNSQueries))
 	metricGauge(w, "netra_ebpf_recent_socket_events", "Recent socket-context events retained in controller agent reports.", float64(summary.SocketEvents))
+	healthSummary := health.Build(agents, 10).Summary
+	metricGauge(w, "netra_tcp_connections", "TCP connections observed by the sockops health map.", float64(healthSummary.TCPConnections))
+	metricGauge(w, "netra_tcp_retransmissions", "TCP retransmission callbacks observed by sockops.", float64(healthSummary.TCPRetransmissions))
+	metricGauge(w, "netra_tcp_rtos", "TCP retransmission timeout callbacks observed by sockops.", float64(healthSummary.TCPRTOs))
+	metricGauge(w, "netra_tcp_resets", "TCP packets carrying RST observed by cgroup packet hooks.", float64(healthSummary.TCPResets))
+	metricGauge(w, "netra_tcp_average_srtt_us", "Weighted average smoothed TCP RTT in microseconds from sockops.", float64(healthSummary.AverageSRTTUS))
+	metricGauge(w, "netra_tcp_max_srtt_us", "Maximum current smoothed TCP RTT in microseconds from sockops.", float64(healthSummary.MaxSRTTUS))
+	metricGauge(w, "netra_dns_queries", "Cleartext UDP/53 DNS queries tracked by the standalone datapath.", float64(healthSummary.DNSQueries))
+	metricGauge(w, "netra_dns_responses", "Cleartext UDP/53 DNS responses matched to tracked queries.", float64(healthSummary.DNSResponses))
+	metricGauge(w, "netra_dns_failures", "Matched DNS responses with a non-zero DNS rcode.", float64(healthSummary.DNSFailures))
+	metricGauge(w, "netra_dns_average_latency_us", "Average matched cleartext UDP/53 DNS response latency in microseconds.", float64(healthSummary.AverageDNSLatencyUS))
+	metricGauge(w, "netra_dns_max_latency_us", "Maximum matched cleartext UDP/53 DNS response latency in microseconds.", float64(healthSummary.MaxDNSLatencyUS))
 }
 
 func metricCounter(w http.ResponseWriter, name, help string, value uint64) {

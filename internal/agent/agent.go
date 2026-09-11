@@ -57,10 +57,10 @@ type Agent struct {
 }
 
 func New(log *slog.Logger) *Agent {
-	server := strings.TrimRight(env("NETRA_SERVER", "https://netra.netra-system.svc:30870"), "/")
+	server := strings.TrimRight(env("NETRA_SERVER", "http://netra.netra-system.svc:30870"), "/")
 	client := &http.Client{Timeout: 10 * time.Second}
-	if strings.EqualFold(env("NETRA_TLS_INSECURE", "true"), "true") {
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}
+	if envBool("NETRA_TLS_INSECURE", false) {
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit opt-in for chart-generated self-signed cert
 	}
 	return &Agent{
 		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()),
@@ -113,8 +113,9 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6",
-	"blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms", "rate_v4", "rate_state_v4", "config_map", "scope_config", "enforced_cgroups", "events",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_signals", "dns_pending", "dns_health", "socket_owner",
+	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
+	"rate_v4", "rate_state_v4", "config_map", "scope_config", "enforced_cgroups", "events",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -159,6 +160,7 @@ func (a *Agent) loadAndAttach() error {
 			{"connect6", ebpf.AttachCGroupInet6Connect, "netra_connect6"},
 			{"udp-sendmsg4", ebpf.AttachCGroupUDP4Sendmsg, "netra_sendmsg4"},
 			{"udp-sendmsg6", ebpf.AttachCGroupUDP6Sendmsg, "netra_sendmsg6"},
+			{"sockops", ebpf.AttachCGroupSockOps, "netra_sockops"},
 		} {
 			p := coll.Programs[h.prog]
 			if p == nil {
@@ -275,8 +277,20 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	events := a.drainEvents(300)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	tcpHealth, err := a.readTCPHealth()
+	if err != nil {
+		return err
+	}
+	tcpSignals, err := a.readTCPSignals()
+	if err != nil {
+		return err
+	}
+	dnsHealth, err := a.readDNSHealth()
+	if err != nil {
+		return err
+	}
+	events := a.drainEvents(500)
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPSignals: tcpSignals, DNSHealth: dnsHealth, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
@@ -696,6 +710,31 @@ func (a *Agent) enrichStat(st *models.DestinationStat) {
 	}
 }
 
+func (a *Agent) enrichTCPHealth(st *models.TCPHealthStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName, st.ContainerID = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName, w.ContainerID
+	}
+}
+func (a *Agent) enrichTCPSignal(st *models.TCPSignalStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+func (a *Agent) enrichDNSHealth(st *models.DNSHealthStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+
 func (a *Agent) readStats() ([]models.DestinationStat, error) {
 	m := a.collection.Maps["workload_flow_stats"]
 	if m == nil {
@@ -755,6 +794,103 @@ func (a *Agent) readStats() ([]models.DestinationStat, error) {
 	return out, nil
 }
 
+func (a *Agent) readTCPHealth() ([]models.TCPHealthStat, error) {
+	m := a.collection.Maps["tcp_health"]
+	if m == nil {
+		return nil, fmt.Errorf("tcp_health unavailable")
+	}
+	it := m.Iterate()
+	var k [56]byte
+	var v [136]byte
+	out := make([]models.TCPHealthStat, 0, 256)
+	for it.Next(&k, &v) {
+		family := k[8]
+		localIP, remoteIP := "", ""
+		if family == 4 {
+			localIP = net.IP(k[12:16]).String()
+			remoteIP = net.IP(k[16:20]).String()
+		}
+		if family == 6 {
+			localIP = net.IP(k[20:36]).String()
+			remoteIP = net.IP(k[36:52]).String()
+		}
+		st := models.TCPHealthStat{
+			CgroupID: native.Uint64(k[0:8]), Family: familyName(family), LocalIP: localIP, RemoteIP: remoteIP,
+			LocalPort: native.Uint16(k[52:54]), RemotePort: native.Uint16(k[54:56]),
+			ActiveEstablished: native.Uint64(v[0:8]), PassiveEstablished: native.Uint64(v[8:16]), Closes: native.Uint64(v[16:24]),
+			Retransmissions: native.Uint64(v[24:32]), RTOs: native.Uint64(v[32:40]), RTTSamples: native.Uint64(v[40:48]),
+			SRTTUS: native.Uint64(v[48:56]), MinRTTUS: native.Uint64(v[56:64]), SendCWND: native.Uint64(v[64:72]),
+			BytesAcked: native.Uint64(v[72:80]), BytesReceived: native.Uint64(v[80:88]), SegmentsIn: native.Uint64(v[88:96]), SegmentsOut: native.Uint64(v[96:104]),
+			LastSeenNS: native.Uint64(v[104:112]), PID: native.Uint32(v[112:116]), UID: native.Uint32(v[116:120]), Comm: cString(v[120:136]),
+		}
+		a.enrichTCPHealth(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ai := out[i].Retransmissions*1000 + out[i].RTOs*10000 + out[i].SRTTUS/1000
+		aj := out[j].Retransmissions*1000 + out[j].RTOs*10000 + out[j].SRTTUS/1000
+		return ai > aj
+	})
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readTCPSignals() ([]models.TCPSignalStat, error) {
+	m := a.collection.Maps["tcp_signals"]
+	if m == nil {
+		return nil, fmt.Errorf("tcp_signals unavailable")
+	}
+	it := m.Iterate()
+	var k uint64
+	var v [40]byte
+	out := make([]models.TCPSignalStat, 0, 128)
+	for it.Next(&k, &v) {
+		st := models.TCPSignalStat{CgroupID: k, SYN: native.Uint64(v[0:8]), SYNACK: native.Uint64(v[8:16]), FIN: native.Uint64(v[16:24]), RST: native.Uint64(v[24:32]), Packets: native.Uint64(v[32:40])}
+		a.enrichTCPSignal(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RST > out[j].RST })
+	return out, nil
+}
+
+func (a *Agent) readDNSHealth() ([]models.DNSHealthStat, error) {
+	m := a.collection.Maps["dns_health"]
+	if m == nil {
+		return nil, fmt.Errorf("dns_health unavailable")
+	}
+	it := m.Iterate()
+	var k [104]byte
+	var v [48]byte
+	out := make([]models.DNSHealthStat, 0, 128)
+	for it.Next(&k, &v) {
+		st := models.DNSHealthStat{CgroupID: native.Uint64(k[0:8]), Name: cString(k[8:104]), Queries: native.Uint64(v[0:8]), Responses: native.Uint64(v[8:16]), Failures: native.Uint64(v[16:24]), TotalLatencyUS: native.Uint64(v[24:32]), MaxLatencyUS: native.Uint64(v[32:40]), LastSeenNS: native.Uint64(v[40:48])}
+		a.enrichDNSHealth(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		fi, fj := out[i].Failures, out[j].Failures
+		if fi != fj {
+			return fi > fj
+		}
+		return out[i].MaxLatencyUS > out[j].MaxLatencyUS
+	})
+	if len(out) > 500 {
+		out = out[:500]
+	}
+	return out, nil
+}
+
 func (a *Agent) readEvents(ctx context.Context) {
 	m := a.collection.Maps["events"]
 	if m == nil {
@@ -776,7 +912,7 @@ func (a *Agent) readEvents(ctx context.Context) {
 			return
 		}
 		b := record.RawSample
-		if len(b) < 188 {
+		if len(b) < 196 {
 			continue
 		}
 		family := b[68]
@@ -788,7 +924,7 @@ func (a *Agent) readEvents(ctx context.Context) {
 			src = net.IP(b[32:48]).String()
 			dst = net.IP(b[48:64]).String()
 		}
-		e := models.FastPathEvent{TimestampNS: native.Uint64(b[0:8]), CgroupID: native.Uint64(b[8:16]), PID: native.Uint32(b[16:20]), UID: native.Uint32(b[20:24]), InterfaceIndex: native.Uint32(b[24:28]), Length: native.Uint32(b[28:32]), SourceIP: src, DestinationIP: dst, SourcePort: binary.BigEndian.Uint16(b[64:66]), DestinationPort: binary.BigEndian.Uint16(b[66:68]), Family: familyName(family), Protocol: protoName(b[69]), Direction: dirName(b[70]), Hook: hookName(b[71]), Action: actionName(b[72]), Type: eventName(b[73]), TCPFlags: b[74], Reason: reasonName(b[75]), Comm: cString(b[76:92]), DNSQuery: cString(b[92:188]), ObservedAt: time.Now().UTC()}
+		e := models.FastPathEvent{TimestampNS: native.Uint64(b[0:8]), CgroupID: native.Uint64(b[8:16]), PID: native.Uint32(b[16:20]), UID: native.Uint32(b[20:24]), InterfaceIndex: native.Uint32(b[24:28]), Length: native.Uint32(b[28:32]), SourceIP: src, DestinationIP: dst, SourcePort: binary.BigEndian.Uint16(b[64:66]), DestinationPort: binary.BigEndian.Uint16(b[66:68]), Family: familyName(family), Protocol: protoName(b[69]), Direction: dirName(b[70]), Hook: hookName(b[71]), Action: actionName(b[72]), Type: eventName(b[73]), TCPFlags: b[74], Reason: reasonName(b[75]), Comm: cString(b[76:92]), DNSQuery: cString(b[92:188]), LatencyUS: native.Uint32(b[188:192]), DNSRcode: b[192], ObservedAt: time.Now().UTC()}
 		a.enrichEvent(&e)
 		select {
 		case a.events <- e:
@@ -860,6 +996,8 @@ func hookName(v byte) string {
 		return "xdp"
 	case 4:
 		return "socket"
+	case 5:
+		return "sockops"
 	default:
 		return "unknown"
 	}
@@ -889,6 +1027,10 @@ func eventName(v byte) string {
 		return "connect"
 	case 4:
 		return "block"
+	case 5:
+		return "dns-response"
+	case 6:
+		return "tcp-health"
 	default:
 		return "event"
 	}

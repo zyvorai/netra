@@ -2,7 +2,7 @@
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
-Netra v0.8 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
+Netra v0.9 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
@@ -18,6 +18,10 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - Socket context for new TCP connect / UDP sendmsg operations: PID, UID, cgroup ID and Linux process `comm`.
 - Kubernetes attribution on cgroup traffic: namespace, pod, immediate owner, container ID and cgroup ID.
 - Exact workload network topology derived from cgroup-attributed tuple counters.
+- TCP connection health from cgroup sockops: active/passive establishes, closes, SRTT/min RTT, retransmissions, RTOs, congestion window, segments and byte counters.
+- Exact TCP SYN/SYN-ACK/FIN/RST counters by cgroup.
+- Cleartext UDP/53 DNS request/response latency, response-code and failure counters.
+- Deterministic network-health signals for high RTT, retransmit/RTO pressure, reset ratio, DNS failure ratio and DNS latency.
 - Top destinations, top DNS names, top processes, block reasons and hook/protocol/direction summaries.
 - Stale-agent detection and per-node hook coverage in the dashboard.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
@@ -46,16 +50,17 @@ These controls are intentionally an emergency/containment layer, not a replaceme
 | `cgroup_skb/egress` | ✅ | CNI-independent descendant workload egress observation/control |
 | `cgroup/connect4`, `connect6` | ✅ | new TCP socket process/UID context and deny |
 | `cgroup/sendmsg4`, `sendmsg6` | ✅ | UDP send process/UID context and deny |
+| `sockops` | ✅ | TCP connection lifecycle, RTT, retransmit/RTO and connection counters |
 | TCX ingress/egress | optional | interface-level visibility/control on selected interfaces |
 | XDP ingress | optional | earliest ingress CIDR/port drop on selected interfaces |
 
 The default agent can therefore run **cgroup-only**: no `cilium_host`, no Cilium maps, and no assumption about the Kubernetes CNI.
 
-> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.8 adds `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
+> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.9 includes `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
 
 ## Important visibility boundaries
 
-Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.8. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
+Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.9. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
 
 ## Optional Cilium / Hubble integration
 
@@ -69,6 +74,11 @@ When enabled, the existing integrations remain available:
 - native Hubble Relay gRPC flow streaming and drop explanation.
 
 Cilium RBAC is not rendered by Helm unless `cilium.enabled=true`. Hubble is disabled by default with `hubble.enabled=false`.
+
+
+## HTTPS default
+
+`netrad` listens on `:30870` by default. Helm enables in-pod HTTPS by default and generates a self-signed P-256 certificate in an init container. The agent chart explicitly opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` only when TLS is terminated by a trusted proxy/ingress. Plain manifests intentionally remain HTTP unless you provide `NETRA_TLS_CERT` and `NETRA_TLS_KEY`.
 
 ## Architecture
 
@@ -128,7 +138,7 @@ docs/high-availability.md HA runbook
 
 Standalone mode requires Linux with cgroup v2, bpffs at `/sys/fs/bpf`, and kernel BPF support. The ring-buffer-based implementation has a practical **Linux 5.8+** baseline; use a modern LTS kernel in production. TCX is optional and has a newer kernel requirement (Linux 6.6+ is the practical baseline used by this project). XDP support depends on the selected interface/driver and is off unless explicitly configured.
 
-Build requirements are Go 1.26, Node 22 and Clang/LLVM with a BPF target.
+Build requirements are Go 1.27, Node 22 and Clang/LLVM with a BPF target.
 
 ## Build
 
@@ -144,8 +154,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.8.0 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.8.0 .
+docker build -t ghcr.io/zyvorai/netra:0.9.0 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.9.0 .
 ```
 
 ## Standalone Helm install
@@ -194,9 +204,12 @@ For plain manifests, see `deploy/README.md`. `deploy/rbac-cilium.yaml` is intent
 ```bash
 export NETRA_URL=https://127.0.0.1:30870
 export NETRA_API_KEY='...'
+# Only for the chart-generated self-signed certificate:
+export NETRA_TLS_INSECURE=true
 
 netractl ebpf summary
 netractl ebpf capabilities
+netractl ebpf health
 netractl ebpf workloads
 netractl ebpf scope show
 

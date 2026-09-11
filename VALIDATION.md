@@ -1,4 +1,20 @@
-# Validation record — Netra v0.8.0
+# Validation record — Netra v0.9.0
+
+## v0.9 release-candidate checks
+
+Passed locally in the packaging environment:
+
+- `gofmt` across `cmd/` and `internal/`.
+- `go test` and `go vet` for dependency-free packages: health, policy, store, kube helpers, workload matching, cgroup metadata, observability, and `netractl`.
+- strict `clang -Wall -Wextra -Werror -fsyntax-only` for `bpf/netra_tc.c`.
+- all plain `deploy/*.yaml` parsed with PyYAML; example JSON parsed; shell scripts passed `bash -n`.
+- TypeScript compiler found no parser-class errors; dependency/type diagnostics are expected because this offline workspace has no `web/node_modules`.
+
+New v0.9 source includes cgroup sockops TCP health, exact TCP signal counters, UDP/53 DNS response timing/failure counters, Network Health API/UI/CLI, and low-cardinality Prometheus health metrics.
+
+Not executable in this environment and therefore CI/integration gates: complete Go 1.27 dependency build, npm/Vite/Vitest build, Helm render/lint, real `clang -target bpf` object generation plus kernel verifier/load, and live cgroup/sockops runtime validation on target Linux/Kubernetes nodes.
+
+## Prior standalone/workload validation details
 
 This record separates checks actually executed in the packaging workspace from dependency-complete CI and real-kernel/cluster integration gates.
 
@@ -72,6 +88,19 @@ The installed Swift-distributed Clang has no `bpfel` backend. Strict C syntax pa
 
 Netra v0.8 materially narrows the risk of node-wide emergency controls, but workload identity is operational metadata rather than a cryptographic authorization primitive. Real cgroup layout/runtime behavior must be validated on the target fleet before enabling enforcement.
 
+## Workspace merge verification — 2026-09-11
+
+Merged `netra-v0.9.0` into `zyvorai/netra` with Netra lab overlays retained (Apple button CSS, `scripts/deploy-remote.sh`, TLS/30870 Helm gates, kubevirt inventory RBAC, route/lockdown unit tests).
+
+Executed here:
+
+- `go mod tidy` (regenerated `go.sum`; archive sums were truncated)
+- `go test ./...`, `go build` for `netrad`/`netractl`/`netra-agent`
+- `npm --prefix web run build` / `typecheck` (fixed `useRef` initial value in `LiveFlowTerminal`)
+- Helm template asserts: HTTPS :30870, `NETRA_TLS_CERT`/`gen-cert`, kubevirt RBAC, `NETRA_CGROUP_SCAN_INTERVAL`, tokenless agent
+
 ## Lab smoke — 2026-09-11 (`https://212.8.248.187:30870`)
 
-Deployed Netra **0.8.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus `kubectl rollout restart deploy/netra`. Feature checks: health/version, HTTPS UI, status/flows/policies/topology/metrics, pods/VMs/workload detail, lockdown create+delete, `ebpf/{summary,capabilities,config,workloads,topology}`, scope preview (`POST` with `scopes`), `scopeMode` on config, Apple-style CSS. **22/22 passed.** Full selected-mode enforcement lease soak remains an open cluster gate above.
+Deployed Netra **0.9.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus rollout restart. Fixed `.dockerignore` so host-built `web/dist` can be copied into `Dockerfile.runtime`.
+
+Feature checks passed: health/version `0.9.0`, HTTPS UI, status/flows/policies/topology/metrics, pods/VMs/workload detail, lockdown plan (`POST /api/v1/policies/lockdown`), scope preview, `ebpf/{summary,capabilities,config,workloads,topology,health}` (`summary`/`tcp`/`dns`/`signals`), Apple + health CSS, `scopeMode` on config. Lockdown DELETE without a prior apply correctly returns 404 (UI unlock uses the workload name after apply).

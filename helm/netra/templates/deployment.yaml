@@ -60,17 +60,12 @@ spec:
         image: {{ .Values.tls.opensslImage | quote }}
         command: ["/bin/sh", "-c"]
         args:
-          - |
-            openssl req -x509 -nodes -days 3650 \
-              -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-              -keyout /certs/tls.key -out /certs/tls.crt \
-              -subj "/CN=netra/O=ZyvorAI Labs Private Limited" \
-              -addext "subjectAltName=DNS:netra,DNS:netra.{{ .Release.Namespace }}.svc,DNS:netra.{{ .Release.Namespace }}.svc.cluster.local,DNS:localhost,IP:127.0.0.1"
-            chown 65532:65532 /certs/tls.key /certs/tls.crt
-            chmod 600 /certs/tls.key && chmod 644 /certs/tls.crt
+        - |
+          openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /certs/tls.key -out /certs/tls.crt -subj "/CN=netra/O=Zyvor AI Labs" -addext "subjectAltName=DNS:netra,DNS:netra.{{ .Release.Namespace }}.svc,DNS:localhost,IP:127.0.0.1"
+          chown 65532:65532 /certs/tls.key /certs/tls.crt
+          chmod 600 /certs/tls.key
         securityContext: {runAsUser: 0, runAsNonRoot: false}
-        volumeMounts:
-        - {name: tls-certs, mountPath: /certs}
+        volumeMounts: [{name: tls-certs, mountPath: /certs}]
       {{- end }}
       containers:
       - name: netra
@@ -80,8 +75,11 @@ spec:
         - name: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
           containerPort: 30870
         env:
-        - name: NETRA_LISTEN
-          value: ":30870"
+        - {name: NETRA_LISTEN, value: ":30870"}
+        {{- if .Values.tls.enabled }}
+        - {name: NETRA_TLS_CERT, value: /certs/tls.crt}
+        - {name: NETRA_TLS_KEY, value: /certs/tls.key}
+        {{- end }}
         - name: NETRA_CILIUM_ENABLED
           value: {{ .Values.cilium.enabled | quote }}
         - name: NETRA_HUBBLE_ENABLED
@@ -96,10 +94,6 @@ spec:
           value: {{ .Values.policy.requirePreflight | quote }}
         - name: NETRA_HA_ENABLED
           value: {{ .Values.ha.enabled | quote }}
-        {{- if .Values.tls.enabled }}
-        - {name: NETRA_TLS_CERT, value: /certs/tls.crt}
-        - {name: NETRA_TLS_KEY, value: /certs/tls.key}
-        {{- end }}
         {{- if .Values.ha.enabled }}
         - name: NETRA_HA_LEASE_NAME
           value: {{ .Values.ha.leaseName | quote }}
@@ -135,7 +129,8 @@ spec:
         - {name: tls-certs, mountPath: /certs, readOnly: true}
         {{- end }}
         {{- if .Values.persistence.enabled }}
-        - {name: state, mountPath: /var/lib/netra}
+        - name: state
+          mountPath: /var/lib/netra
         {{- end }}
         {{- end }}
         securityContext:

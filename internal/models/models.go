@@ -116,11 +116,104 @@ type FastPathEvent struct {
 	CgroupID        uint64    `json:"cgroupId,omitempty"`
 	Comm            string    `json:"comm,omitempty"`
 	DNSQuery        string    `json:"dnsQuery,omitempty"`
+	LatencyUS       uint32    `json:"latencyUs,omitempty"`
+	DNSRcode        uint8     `json:"dnsRcode,omitempty"`
 	Namespace       string    `json:"namespace,omitempty"`
 	Pod             string    `json:"pod,omitempty"`
 	WorkloadKind    string    `json:"workloadKind,omitempty"`
 	WorkloadName    string    `json:"workloadName,omitempty"`
 	ContainerID     string    `json:"containerId,omitempty"`
+}
+
+type TCPHealthStat struct {
+	CgroupID           uint64 `json:"cgroupId,omitempty"`
+	Family             string `json:"family"`
+	LocalIP            string `json:"localIp"`
+	RemoteIP           string `json:"remoteIp"`
+	LocalPort          uint16 `json:"localPort"`
+	RemotePort         uint16 `json:"remotePort"`
+	ActiveEstablished  uint64 `json:"activeEstablished"`
+	PassiveEstablished uint64 `json:"passiveEstablished"`
+	Closes             uint64 `json:"closes"`
+	Retransmissions    uint64 `json:"retransmissions"`
+	RTOs               uint64 `json:"rtos"`
+	RTTSamples         uint64 `json:"rttSamples"`
+	SRTTUS             uint64 `json:"srttUs"`
+	MinRTTUS           uint64 `json:"minRttUs"`
+	SendCWND           uint64 `json:"sendCwnd"`
+	BytesAcked         uint64 `json:"bytesAcked"`
+	BytesReceived      uint64 `json:"bytesReceived"`
+	SegmentsIn         uint64 `json:"segmentsIn"`
+	SegmentsOut        uint64 `json:"segmentsOut"`
+	LastSeenNS         uint64 `json:"lastSeenNs"`
+	PID                uint32 `json:"pid,omitempty"`
+	UID                uint32 `json:"uid,omitempty"`
+	Comm               string `json:"comm,omitempty"`
+	Namespace          string `json:"namespace,omitempty"`
+	Pod                string `json:"pod,omitempty"`
+	WorkloadKind       string `json:"workloadKind,omitempty"`
+	WorkloadName       string `json:"workloadName,omitempty"`
+	ContainerID        string `json:"containerId,omitempty"`
+}
+
+type TCPSignalStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	SYN          uint64 `json:"syn"`
+	SYNACK       uint64 `json:"synAck"`
+	FIN          uint64 `json:"fin"`
+	RST          uint64 `json:"rst"`
+	Packets      uint64 `json:"packets"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
+type DNSHealthStat struct {
+	CgroupID       uint64 `json:"cgroupId,omitempty"`
+	Name           string `json:"name"`
+	Queries        uint64 `json:"queries"`
+	Responses      uint64 `json:"responses"`
+	Failures       uint64 `json:"failures"`
+	TotalLatencyUS uint64 `json:"totalLatencyUs"`
+	MaxLatencyUS   uint64 `json:"maxLatencyUs"`
+	LastSeenNS     uint64 `json:"lastSeenNs"`
+	Namespace      string `json:"namespace,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	WorkloadKind   string `json:"workloadKind,omitempty"`
+	WorkloadName   string `json:"workloadName,omitempty"`
+}
+
+type NetworkHealthAnomaly struct {
+	Severity string  `json:"severity"`
+	Kind     string  `json:"kind"`
+	Subject  string  `json:"subject"`
+	Message  string  `json:"message"`
+	Value    float64 `json:"value,omitempty"`
+}
+
+type NetworkHealthSummary struct {
+	TCPConnections      uint64                 `json:"tcpConnections"`
+	TCPRetransmissions  uint64                 `json:"tcpRetransmissions"`
+	TCPRTOs             uint64                 `json:"tcpRtos"`
+	TCPResets           uint64                 `json:"tcpResets"`
+	AverageSRTTUS       uint64                 `json:"averageSrttUs"`
+	MaxSRTTUS           uint64                 `json:"maxSrttUs"`
+	DNSQueries          uint64                 `json:"dnsQueries"`
+	DNSResponses        uint64                 `json:"dnsResponses"`
+	DNSFailures         uint64                 `json:"dnsFailures"`
+	AverageDNSLatencyUS uint64                 `json:"averageDnsLatencyUs"`
+	MaxDNSLatencyUS     uint64                 `json:"maxDnsLatencyUs"`
+	TopTCPProblems      []TCPHealthStat        `json:"topTcpProblems"`
+	TopDNSProblems      []DNSHealthStat        `json:"topDnsProblems"`
+	Anomalies           []NetworkHealthAnomaly `json:"anomalies"`
+}
+
+type NetworkHealthResponse struct {
+	Summary NetworkHealthSummary `json:"summary"`
+	TCP     []TCPHealthStat      `json:"tcp"`
+	DNS     []DNSHealthStat      `json:"dns"`
+	Signals []TCPSignalStat      `json:"signals"`
 }
 
 type AgentReport struct {
@@ -132,6 +225,9 @@ type AgentReport struct {
 	CgroupPath      string             `json:"cgroupPath,omitempty"`
 	Standalone      bool               `json:"standalone"`
 	Stats           []DestinationStat  `json:"stats"`
+	TCPHealth       []TCPHealthStat    `json:"tcpHealth,omitempty"`
+	TCPSignals      []TCPSignalStat    `json:"tcpSignals,omitempty"`
+	DNSHealth       []DNSHealthStat    `json:"dnsHealth,omitempty"`
 	Events          []FastPathEvent    `json:"events"`
 	ObservedAt      time.Time          `json:"observedAt"`
 	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
@@ -220,6 +316,7 @@ type FlowSummary struct {
 	TopBlockedWorkloads []NamedCount      `json:"topBlockedWorkloads,omitempty"`
 }
 
+// PodInfo is the operator-facing Kubernetes pod inventory record.
 type PodInfo struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`

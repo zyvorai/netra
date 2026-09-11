@@ -1,4 +1,4 @@
-FROM golang:1.26-bookworm AS go
+FROM golang:1.27-bookworm AS go
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd

@@ -6,9 +6,4 @@ spec:
   type: {{ .Values.service.type }}
   selector: {app.kubernetes.io/name: netra}
   ports:
-  - name: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
-    port: {{ .Values.service.port }}
-    targetPort: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
-    {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
-    nodePort: {{ .Values.service.nodePort }}
-    {{- end }}
+  - {name: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}, port: {{ .Values.service.port }}, targetPort: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }} }
