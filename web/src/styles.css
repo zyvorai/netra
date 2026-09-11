@@ -1,0 +1,60 @@
+:root {
+  --bg: #f3f1ec;
+  --ink: #121212;
+  --muted: #5c5a56;
+  --line: #d9d4cb;
+  --terminal: #0b0b0b;
+  --accent: #1a5cff;
+  font-family: "SF Pro Display", "Segoe UI", "Helvetica Neue", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #ffffff 0%, transparent 55%),
+    linear-gradient(180deg, #f7f5f0 0%, var(--bg) 40%, #ebe7df 100%);
+  min-height: 100%;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+.page { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+.hero { margin-bottom: 1.75rem; }
+.brand {
+  font-size: clamp(2.8rem, 6vw, 4.5rem);
+  letter-spacing: -0.04em;
+  margin: 0;
+  font-weight: 650;
+}
+.lede { color: var(--muted); font-size: 1.1rem; margin: 0.4rem 0 0; max-width: 36rem; }
+.tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; }
+.tabs button, .actions button {
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.7);
+  padding: 0.55rem 1rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  font: inherit;
+}
+.tabs button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.hint { color: var(--muted); margin: 0 0 0.75rem; }
+.terminal {
+  background: var(--terminal);
+  color: #d7f7c8;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding: 1rem;
+  border-radius: 0.35rem;
+  min-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.panel label { display: grid; gap: 0.35rem; margin-bottom: 0.85rem; font-size: 0.9rem; }
+.panel input[type="text"], .panel input:not([type]) {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  font: inherit;
+  background: #fff;
+}
+.row { display: flex !important; align-items: center; gap: 0.5rem; }
+.actions { margin-bottom: 1rem; }
+.actions button { background: var(--accent); color: #fff; border-color: var(--accent); }

@@ -1,0 +1,9 @@
+bin/
+web/node_modules/
+web/dist/
+bpf/*.o
+.DS_Store
+*.log
+.env
+.idea/
+.vscode/

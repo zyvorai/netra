@@ -1,0 +1,37 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/zyvorai/netra
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+agent:
+  enabled: false
+  image:
+    repository: ghcr.io/zyvorai/netra-agent
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  interfaces: cilium_host
+  failsafeAfter: 60s
+
+service:
+  type: ClusterIP
+  port: 8080
+
+auth:
+  # Leave empty for local/dev. Set independently for shared installs.
+  apiKey: ""
+  agentKey: ""
+
+hubble:
+  address: "hubble-relay.kube-system.svc:80"
+
+serviceAccount:
+  create: true
+  name: netra
+
+agentServiceAccount:
+  create: true
+  name: netra-agent
+
+resources: {}

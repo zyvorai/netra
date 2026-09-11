@@ -1,0 +1,17 @@
+apiVersion: v2
+name: netra
+description: Cilium egress control + Hubble observability + optional Netra eBPF fast path
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/zyvorai/netra
+sources:
+  - https://github.com/zyvorai/netra
+keywords:
+  - cilium
+  - hubble
+  - ebpf
+  - network-policy
+maintainers:
+  - name: Zyvor AI Labs
+    url: https://zyvor.dev
