@@ -170,6 +170,9 @@ func TestPersistentStoreSurvivesRestartAndFailsOpen(t *testing.T) {
 	if _, err := s.AddProcess("curl", "test"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.AddSNI("blocked.example", "test"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetMode("enforce", time.Hour, "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +189,7 @@ func TestPersistentStoreSurvivesRestartAndFailsOpen(t *testing.T) {
 	}
 	defer s.Close()
 	cfg := s.Config()
-	if cfg.Mode != "observe" || len(cfg.BlockedIPv4) != 1 || cfg.BlockedIPv4[0] != "203.0.113.20" || len(cfg.BlockedDNS) != 1 || cfg.BlockedDNS[0] != "blocked.example" || len(cfg.BlockedProcesses) != 1 || cfg.BlockedProcesses[0] != "curl" {
+	if cfg.Mode != "observe" || len(cfg.BlockedIPv4) != 1 || cfg.BlockedIPv4[0] != "203.0.113.20" || len(cfg.BlockedDNS) != 1 || cfg.BlockedDNS[0] != "blocked.example" || len(cfg.BlockedProcesses) != 1 || cfg.BlockedProcesses[0] != "curl" || len(cfg.BlockedSNI) != 1 || cfg.BlockedSNI[0] != "blocked.example" {
 		t.Fatalf("restart state=%#v", cfg)
 	}
 	if got := s.PolicyHistory("payments", "egress", 10); len(got) != 1 {
@@ -278,11 +281,14 @@ func TestStandaloneEBPFRules(t *testing.T) {
 	if _, err := s.AddProcess("curl", "test"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.AddSNI("api.example.com", "test"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetRateLimit(models.EBPFRateLimit{Destination: "203.0.113.8", PPS: 100}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	c := s.Config()
-	if len(c.BlockedIPv6) != 1 || len(c.BlockedCIDRs) != 1 || len(c.BlockedPorts) != 1 || len(c.BlockedUIDs) != 1 || len(c.BlockedDNS) != 1 || len(c.BlockedProcesses) != 1 || len(c.RateLimits) != 1 {
+	if len(c.BlockedIPv6) != 1 || len(c.BlockedCIDRs) != 1 || len(c.BlockedPorts) != 1 || len(c.BlockedUIDs) != 1 || len(c.BlockedDNS) != 1 || len(c.BlockedProcesses) != 1 || len(c.BlockedSNI) != 1 || len(c.RateLimits) != 1 {
 		t.Fatalf("rules missing: %#v", c)
 	}
 	// Config must be a deep copy.
@@ -290,8 +296,9 @@ func TestStandaloneEBPFRules(t *testing.T) {
 	c.BlockedUIDs[0] = 1
 	c.BlockedDNS[0] = "mutated.example"
 	c.BlockedProcesses[0] = "mutated"
+	c.BlockedSNI[0] = "mutated.example"
 	c2 := s.Config()
-	if c2.BlockedIPv6[0] == "mutated" || c2.BlockedUIDs[0] == 1 || c2.BlockedDNS[0] == "mutated.example" || c2.BlockedProcesses[0] == "mutated" {
+	if c2.BlockedIPv6[0] == "mutated" || c2.BlockedUIDs[0] == 1 || c2.BlockedDNS[0] == "mutated.example" || c2.BlockedProcesses[0] == "mutated" || c2.BlockedSNI[0] == "mutated.example" {
 		t.Fatal("Config leaked mutable slices")
 	}
 }

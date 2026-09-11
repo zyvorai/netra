@@ -29,7 +29,7 @@ export default function Health() {
         <div><b>{ms(s.averageSrttUs)} ms</b><span>avg SRTT</span></div>
         <div><b>{s.tcpRetransmissions || 0}</b><span>retransmits</span></div>
         <div><b>{s.tcpRtos || 0}</b><span>RTOs</span></div>
-        <div><b>{s.tcpResets || 0}</b><span>RST packets</span></div>
+        <div><b>{s.tcpResets || 0}</b><span>RST packets</span></div><div><b>{s.healthScore ?? 100}</b><span>health score /100</span></div><div><b>{s.connectionAttempts || 0}</b><span>socket attempts</span></div><div><b>{s.estimatedConnectFailures || 0}</b><span>est. TCP failures</span></div>
       </div>
     </section>
 

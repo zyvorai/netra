@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/health"
+	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/observability"
 )
 
@@ -63,6 +64,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_fastpath_blocked_uids", "UID socket-deny rules in the Netra datapath.", float64(len(cfg.BlockedUIDs)))
 	metricGauge(w, "netra_fastpath_blocked_dns_names", "Exact cleartext DNS-name rules in the Netra datapath.", float64(len(cfg.BlockedDNS)))
 	metricGauge(w, "netra_fastpath_blocked_processes", "Linux comm socket-deny rules in the Netra datapath.", float64(len(cfg.BlockedProcesses)))
+	metricGauge(w, "netra_fastpath_blocked_sni_names", "Exact TLS SNI deny rules in the Netra datapath.", float64(len(cfg.BlockedSNI)))
 	metricGauge(w, "netra_fastpath_rate_limits", "Exact IPv4 destination PPS rules in the Netra datapath.", float64(len(cfg.RateLimits)))
 	scopeSelected := 0
 	if cfg.ScopeMode == "selected" {
@@ -92,6 +94,15 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_dns_failures", "Matched DNS responses with a non-zero DNS rcode.", float64(healthSummary.DNSFailures))
 	metricGauge(w, "netra_dns_average_latency_us", "Average matched cleartext UDP/53 DNS response latency in microseconds.", float64(healthSummary.AverageDNSLatencyUS))
 	metricGauge(w, "netra_dns_max_latency_us", "Maximum matched cleartext UDP/53 DNS response latency in microseconds.", float64(healthSummary.MaxDNSLatencyUS))
+	metricGauge(w, "netra_connection_attempts", "Socket connect/sendmsg attempts observed by cgroup hooks.", float64(healthSummary.ConnectionAttempts))
+	metricGauge(w, "netra_estimated_connect_failures", "Estimated TCP attempts not matched by active establishment counters; cumulative heuristic.", float64(healthSummary.EstimatedConnectFailures))
+	metricGauge(w, "netra_network_health_score", "Deterministic 0-100 network health heuristic.", float64(healthSummary.HealthScore))
+	l7s := l7.Build(agents, 10).Summary
+	metricGauge(w, "netra_tls_sni_handshakes", "Best-effort TLS ClientHello records with parsed SNI.", float64(l7s.TLSHandshakes))
+	metricGauge(w, "netra_tls_sni_blocked", "Best-effort TLS ClientHello records blocked by exact SNI rules.", float64(l7s.TLSBlocked))
+	metricGauge(w, "netra_http1_requests", "Best-effort cleartext HTTP/1 requests with parsed Host metadata.", float64(l7s.HTTPRequests))
+	metricGauge(w, "netra_l7_unique_sni", "Unique parsed TLS SNI names in latest node maps.", float64(l7s.UniqueSNI))
+	metricGauge(w, "netra_l7_unique_http_hosts", "Unique parsed cleartext HTTP Host values in latest node maps.", float64(l7s.UniqueHTTPHosts))
 }
 
 func metricCounter(w http.ResponseWriter, name, help string, value uint64) {

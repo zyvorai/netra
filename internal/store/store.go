@@ -374,6 +374,51 @@ func (s *Store) DelDNS(name, actor string) (models.EBPFFastPathConfig, error) {
 	}
 	return cloneConfig(s.config), nil
 }
+func (s *Store) AddSNI(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedSNI {
+		if x == name {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedSNI = append(s.config.BlockedSNI, name)
+	sort.Strings(s.config.BlockedSNI)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.sni.add", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelSNI(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]string, 0, len(s.config.BlockedSNI))
+	for _, x := range s.config.BlockedSNI {
+		if x != name {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedSNI) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedSNI = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.sni.delete", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) AddProcess(name, actor string) (models.EBPFFastPathConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -471,6 +516,12 @@ func (s *Store) Report(r models.AgentReport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r.Stats = append([]models.DestinationStat(nil), r.Stats...)
+	r.TCPHealth = append([]models.TCPHealthStat(nil), r.TCPHealth...)
+	r.TCPSignals = append([]models.TCPSignalStat(nil), r.TCPSignals...)
+	r.DNSHealth = append([]models.DNSHealthStat(nil), r.DNSHealth...)
+	r.TLSMetadata = append([]models.TLSMetadataStat(nil), r.TLSMetadata...)
+	r.HTTPMetadata = append([]models.HTTPMetadataStat(nil), r.HTTPMetadata...)
+	r.ConnectionAttempts = append([]models.ConnectionAttemptStat(nil), r.ConnectionAttempts...)
 	r.Events = append([]models.FastPathEvent(nil), r.Events...)
 	r.Workloads = cloneWorkloads(r.Workloads)
 	if prev, ok := s.agents[r.Node]; ok && len(prev.Events) > 0 {
@@ -488,6 +539,12 @@ func (s *Store) Agents() []models.AgentReport {
 	out := make([]models.AgentReport, 0, len(s.agents))
 	for _, r := range s.agents {
 		r.Stats = append([]models.DestinationStat(nil), r.Stats...)
+		r.TCPHealth = append([]models.TCPHealthStat(nil), r.TCPHealth...)
+		r.TCPSignals = append([]models.TCPSignalStat(nil), r.TCPSignals...)
+		r.DNSHealth = append([]models.DNSHealthStat(nil), r.DNSHealth...)
+		r.TLSMetadata = append([]models.TLSMetadataStat(nil), r.TLSMetadata...)
+		r.HTTPMetadata = append([]models.HTTPMetadataStat(nil), r.HTTPMetadata...)
+		r.ConnectionAttempts = append([]models.ConnectionAttemptStat(nil), r.ConnectionAttempts...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
 		r.Workloads = cloneWorkloads(r.Workloads)
 		out = append(out, r)
@@ -502,6 +559,12 @@ func (s *Store) AgentStatuses(now time.Time, staleAfter time.Duration) []models.
 	out := make([]models.AgentStatus, 0, len(s.agents))
 	for _, r := range s.agents {
 		r.Stats = append([]models.DestinationStat(nil), r.Stats...)
+		r.TCPHealth = append([]models.TCPHealthStat(nil), r.TCPHealth...)
+		r.TCPSignals = append([]models.TCPSignalStat(nil), r.TCPSignals...)
+		r.DNSHealth = append([]models.DNSHealthStat(nil), r.DNSHealth...)
+		r.TLSMetadata = append([]models.TLSMetadataStat(nil), r.TLSMetadata...)
+		r.HTTPMetadata = append([]models.HTTPMetadataStat(nil), r.HTTPMetadata...)
+		r.ConnectionAttempts = append([]models.ConnectionAttemptStat(nil), r.ConnectionAttempts...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
 		r.Workloads = cloneWorkloads(r.Workloads)
 		age := now.Sub(r.ObservedAt)
@@ -744,6 +807,7 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedUIDs = append([]uint32(nil), c.BlockedUIDs...)
 	c.BlockedDNS = append([]string(nil), c.BlockedDNS...)
 	c.BlockedProcesses = append([]string(nil), c.BlockedProcesses...)
+	c.BlockedSNI = append([]string(nil), c.BlockedSNI...)
 	c.RateLimits = append([]models.EBPFRateLimit(nil), c.RateLimits...)
 	c.WorkloadScopes = cloneScopes(c.WorkloadScopes)
 	c.Workloads = cloneWorkloads(c.Workloads)

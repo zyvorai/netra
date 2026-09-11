@@ -15,7 +15,7 @@ kubectl -n netra-system port-forward svc/netra 30870:30870
 curl -skf https://127.0.0.1:30870/livez
 ```
 
-Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Overview**, **Pods**, **VMs**, **Network Health**, **Policies**, **Live flows**, **eBPF**, **Audit**.
+Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Overview**, **Pods**, **VMs**, **Network Health**, **L7 Metadata**, **Policies**, **Live flows**, **eBPF**, **Audit**.
 
 - **Pods / VMs** — pick a workload for scoped live flows, create/delete CNP rules, lock down / unlock.
 - **Policies** — guided builder + JSON workbench with preflight receipts.
@@ -23,7 +23,7 @@ Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Ov
 
 ## Path B — Remote full stack (K3s + Cilium + Netra)
 
-SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.9.0`); after deploy, restart the Deployment so the new layers are picked up:
+SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.10.0`); after deploy, restart the Deployment so the new layers are picked up:
 
 ```bash
 NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh HOST USER --k8s

@@ -65,6 +65,7 @@ type EBPFFastPathConfig struct {
 	BlockedUIDs      []uint32            `json:"blockedUids,omitempty"`
 	BlockedDNS       []string            `json:"blockedDns,omitempty"`
 	BlockedProcesses []string            `json:"blockedProcesses,omitempty"`
+	BlockedSNI       []string            `json:"blockedSni,omitempty"`
 	RateLimits       []EBPFRateLimit     `json:"rateLimits,omitempty"`
 	ScopeMode        string              `json:"scopeMode,omitempty"` // all or selected
 	WorkloadScopes   []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
@@ -123,6 +124,65 @@ type FastPathEvent struct {
 	WorkloadKind    string    `json:"workloadKind,omitempty"`
 	WorkloadName    string    `json:"workloadName,omitempty"`
 	ContainerID     string    `json:"containerId,omitempty"`
+}
+
+type TLSMetadataStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	SNI          string `json:"sni"`
+	Handshakes   uint64 `json:"handshakes"`
+	Blocked      uint64 `json:"blocked"`
+	LastSeenNS   uint64 `json:"lastSeenNs"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
+type HTTPMetadataStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	Method       string `json:"method"`
+	Host         string `json:"host"`
+	Requests     uint64 `json:"requests"`
+	LastSeenNS   uint64 `json:"lastSeenNs"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
+type ConnectionAttemptStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	Family       string `json:"family"`
+	Protocol     string `json:"protocol"`
+	RemoteIP     string `json:"remoteIp"`
+	RemotePort   uint16 `json:"remotePort"`
+	Attempts     uint64 `json:"attempts"`
+	Blocked      uint64 `json:"blocked"`
+	LastSeenNS   uint64 `json:"lastSeenNs"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
+type L7ObservabilitySummary struct {
+	TLSHandshakes   uint64       `json:"tlsHandshakes"`
+	TLSBlocked      uint64       `json:"tlsBlocked"`
+	HTTPRequests    uint64       `json:"httpRequests"`
+	ConnectAttempts uint64       `json:"connectAttempts"`
+	ConnectBlocked  uint64       `json:"connectBlocked"`
+	UniqueSNI       int          `json:"uniqueSni"`
+	UniqueHTTPHosts int          `json:"uniqueHttpHosts"`
+	TopSNI          []NamedCount `json:"topSni"`
+	TopHTTPHosts    []NamedCount `json:"topHttpHosts"`
+	TopRemotePorts  []NamedCount `json:"topRemotePorts"`
+}
+
+type L7ObservabilityResponse struct {
+	Summary     L7ObservabilitySummary  `json:"summary"`
+	TLS         []TLSMetadataStat       `json:"tls"`
+	HTTP        []HTTPMetadataStat      `json:"http"`
+	Connections []ConnectionAttemptStat `json:"connections"`
 }
 
 type TCPHealthStat struct {
@@ -193,20 +253,23 @@ type NetworkHealthAnomaly struct {
 }
 
 type NetworkHealthSummary struct {
-	TCPConnections      uint64                 `json:"tcpConnections"`
-	TCPRetransmissions  uint64                 `json:"tcpRetransmissions"`
-	TCPRTOs             uint64                 `json:"tcpRtos"`
-	TCPResets           uint64                 `json:"tcpResets"`
-	AverageSRTTUS       uint64                 `json:"averageSrttUs"`
-	MaxSRTTUS           uint64                 `json:"maxSrttUs"`
-	DNSQueries          uint64                 `json:"dnsQueries"`
-	DNSResponses        uint64                 `json:"dnsResponses"`
-	DNSFailures         uint64                 `json:"dnsFailures"`
-	AverageDNSLatencyUS uint64                 `json:"averageDnsLatencyUs"`
-	MaxDNSLatencyUS     uint64                 `json:"maxDnsLatencyUs"`
-	TopTCPProblems      []TCPHealthStat        `json:"topTcpProblems"`
-	TopDNSProblems      []DNSHealthStat        `json:"topDnsProblems"`
-	Anomalies           []NetworkHealthAnomaly `json:"anomalies"`
+	TCPConnections           uint64                 `json:"tcpConnections"`
+	TCPRetransmissions       uint64                 `json:"tcpRetransmissions"`
+	TCPRTOs                  uint64                 `json:"tcpRtos"`
+	TCPResets                uint64                 `json:"tcpResets"`
+	AverageSRTTUS            uint64                 `json:"averageSrttUs"`
+	MaxSRTTUS                uint64                 `json:"maxSrttUs"`
+	DNSQueries               uint64                 `json:"dnsQueries"`
+	DNSResponses             uint64                 `json:"dnsResponses"`
+	DNSFailures              uint64                 `json:"dnsFailures"`
+	AverageDNSLatencyUS      uint64                 `json:"averageDnsLatencyUs"`
+	MaxDNSLatencyUS          uint64                 `json:"maxDnsLatencyUs"`
+	ConnectionAttempts       uint64                 `json:"connectionAttempts"`
+	EstimatedConnectFailures uint64                 `json:"estimatedConnectFailures"`
+	HealthScore              int                    `json:"healthScore"`
+	TopTCPProblems           []TCPHealthStat        `json:"topTcpProblems"`
+	TopDNSProblems           []DNSHealthStat        `json:"topDnsProblems"`
+	Anomalies                []NetworkHealthAnomaly `json:"anomalies"`
 }
 
 type NetworkHealthResponse struct {
@@ -217,22 +280,25 @@ type NetworkHealthResponse struct {
 }
 
 type AgentReport struct {
-	Node            string             `json:"node"`
-	Mode            string             `json:"mode"`
-	Interfaces      []string           `json:"interfaces"`
-	XDPInterfaces   []string           `json:"xdpInterfaces,omitempty"`
-	Hooks           []string           `json:"hooks,omitempty"`
-	CgroupPath      string             `json:"cgroupPath,omitempty"`
-	Standalone      bool               `json:"standalone"`
-	Stats           []DestinationStat  `json:"stats"`
-	TCPHealth       []TCPHealthStat    `json:"tcpHealth,omitempty"`
-	TCPSignals      []TCPSignalStat    `json:"tcpSignals,omitempty"`
-	DNSHealth       []DNSHealthStat    `json:"dnsHealth,omitempty"`
-	Events          []FastPathEvent    `json:"events"`
-	ObservedAt      time.Time          `json:"observedAt"`
-	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
-	ScopeMode       string             `json:"scopeMode,omitempty"`
-	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
+	Node               string                  `json:"node"`
+	Mode               string                  `json:"mode"`
+	Interfaces         []string                `json:"interfaces"`
+	XDPInterfaces      []string                `json:"xdpInterfaces,omitempty"`
+	Hooks              []string                `json:"hooks,omitempty"`
+	CgroupPath         string                  `json:"cgroupPath,omitempty"`
+	Standalone         bool                    `json:"standalone"`
+	Stats              []DestinationStat       `json:"stats"`
+	TCPHealth          []TCPHealthStat         `json:"tcpHealth,omitempty"`
+	TCPSignals         []TCPSignalStat         `json:"tcpSignals,omitempty"`
+	DNSHealth          []DNSHealthStat         `json:"dnsHealth,omitempty"`
+	TLSMetadata        []TLSMetadataStat       `json:"tlsMetadata,omitempty"`
+	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
+	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
+	Events             []FastPathEvent         `json:"events"`
+	ObservedAt         time.Time               `json:"observedAt"`
+	Workloads          []WorkloadIdentity      `json:"workloads,omitempty"`
+	ScopeMode          string                  `json:"scopeMode,omitempty"`
+	SelectedCgroups    int                     `json:"selectedCgroups,omitempty"`
 }
 
 type AgentStatus struct {

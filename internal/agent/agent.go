@@ -113,9 +113,9 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_signals", "dns_pending", "dns_health", "socket_owner",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
-	"rate_v4", "rate_state_v4", "config_map", "scope_config", "enforced_cgroups", "events",
+	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -289,8 +289,20 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	tlsMeta, err := a.readTLSMetadata()
+	if err != nil {
+		return err
+	}
+	httpMeta, err := a.readHTTPMetadata()
+	if err != nil {
+		return err
+	}
+	connAttempts, err := a.readConnectionAttempts()
+	if err != nil {
+		return err
+	}
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPSignals: tcpSignals, DNSHealth: dnsHealth, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
@@ -349,6 +361,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.replaceStringMap("blocked_comms", cfg.BlockedProcesses, 16); err != nil {
+		return err
+	}
+	if err := a.replaceStringMap("blocked_sni", cfg.BlockedSNI, 96); err != nil {
 		return err
 	}
 	if err := a.replaceRates(cfg.RateLimits); err != nil {
@@ -734,6 +749,30 @@ func (a *Agent) enrichDNSHealth(st *models.DNSHealthStat) {
 		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
 	}
 }
+func (a *Agent) enrichTLSMetadata(st *models.TLSMetadataStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+func (a *Agent) enrichHTTPMetadata(st *models.HTTPMetadataStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+func (a *Agent) enrichConnectionAttempt(st *models.ConnectionAttemptStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
 
 func (a *Agent) readStats() ([]models.DestinationStat, error) {
 	m := a.collection.Maps["workload_flow_stats"]
@@ -887,6 +926,85 @@ func (a *Agent) readDNSHealth() ([]models.DNSHealthStat, error) {
 	})
 	if len(out) > 500 {
 		out = out[:500]
+	}
+	return out, nil
+}
+
+func (a *Agent) readTLSMetadata() ([]models.TLSMetadataStat, error) {
+	m := a.collection.Maps["tls_sni_stats"]
+	if m == nil {
+		return nil, fmt.Errorf("tls_sni_stats unavailable")
+	}
+	it := m.Iterate()
+	var k [104]byte
+	var v [24]byte
+	out := make([]models.TLSMetadataStat, 0, 128)
+	for it.Next(&k, &v) {
+		st := models.TLSMetadataStat{CgroupID: native.Uint64(k[0:8]), SNI: cString(k[8:104]), Handshakes: native.Uint64(v[0:8]), Blocked: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24])}
+		a.enrichTLSMetadata(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Handshakes > out[j].Handshakes })
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readHTTPMetadata() ([]models.HTTPMetadataStat, error) {
+	m := a.collection.Maps["http_host_stats"]
+	if m == nil {
+		return nil, fmt.Errorf("http_host_stats unavailable")
+	}
+	it := m.Iterate()
+	var k [112]byte
+	var v [16]byte
+	out := make([]models.HTTPMetadataStat, 0, 128)
+	for it.Next(&k, &v) {
+		st := models.HTTPMetadataStat{CgroupID: native.Uint64(k[0:8]), Host: cString(k[8:104]), Method: cString(k[104:112]), Requests: native.Uint64(v[0:8]), LastSeenNS: native.Uint64(v[8:16])}
+		a.enrichHTTPMetadata(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Requests > out[j].Requests })
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readConnectionAttempts() ([]models.ConnectionAttemptStat, error) {
+	m := a.collection.Maps["connect_attempts"]
+	if m == nil {
+		return nil, fmt.Errorf("connect_attempts unavailable")
+	}
+	it := m.Iterate()
+	var k [28]byte
+	var v [24]byte
+	out := make([]models.ConnectionAttemptStat, 0, 256)
+	for it.Next(&k, &v) {
+		family := k[8]
+		remote := ""
+		if family == 4 {
+			remote = net.IP(k[12:16]).String()
+		} else if family == 6 {
+			remote = net.IP(k[12:28]).String()
+		}
+		st := models.ConnectionAttemptStat{CgroupID: native.Uint64(k[0:8]), Family: familyName(family), Protocol: protoName(k[9]), RemotePort: binary.BigEndian.Uint16(k[10:12]), RemoteIP: remote, Attempts: native.Uint64(v[0:8]), Blocked: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24])}
+		a.enrichConnectionAttempt(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Attempts > out[j].Attempts })
+	if len(out) > 2000 {
+		out = out[:2000]
 	}
 	return out, nil
 }
@@ -1051,6 +1169,8 @@ func reasonName(v byte) string {
 		return "dns"
 	case 7:
 		return "process"
+	case 8:
+		return "tls-sni"
 	default:
 		return ""
 	}

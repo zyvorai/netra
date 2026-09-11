@@ -32,6 +32,8 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"DELETE", "/api/v1/policies/lockdown/default/demo"},
 		{"GET", "/api/v1/ebpf/summary"},
 		{"GET", "/api/v1/ebpf/health"},
+		{"GET", "/api/v1/ebpf/l7"},
+		{"POST", "/api/v1/ebpf/sni"},
 		{"GET", "/api/v1/ebpf/capabilities"},
 		{"GET", "/api/v1/ebpf/workloads"},
 		{"GET", "/api/v1/ebpf/topology"},

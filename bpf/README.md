@@ -44,3 +44,12 @@ The ring buffer contains selected header/process/workload metadata only. Netra d
 All custom deny behavior is inactive in observe mode. Controller leases and the node failsafe control `config_map`; the agent forces observe on startup and if it cannot refresh desired state within the configured failsafe interval.
 
 v0.8 limitations: no IPv6 extension-header walk, no TCP DNS parser, no DoH/DoT inspection, process-`comm` rules affect new connect/sendmsg operations only, pod owner attribution uses the immediate controller OwnerReference, and the PPS limiter is emergency containment rather than QoS/shaping.
+
+## v0.10 metadata maps
+
+- `tls_sni_stats`: exact counters keyed by cgroup ID + parsed TLS ClientHello SNI.
+- `http_host_stats`: exact counters keyed by cgroup ID + cleartext HTTP/1 Host + method.
+- `connect_attempts`: cgroup socket-attempt counters keyed by family/protocol/remote IP/remote port.
+- `blocked_sni`: exact normalized TLS SNI emergency deny entries.
+
+TLS and HTTP parsing is metadata-only and best-effort on a single skb. Netra does not reassemble TCP streams or export payload bytes. SNI-specific enforcement applies only when an ordinary ClientHello hostname is fully parsed; fragmented ClientHello, ECH and QUIC traffic fail open for the SNI rule.

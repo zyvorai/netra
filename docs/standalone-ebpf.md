@@ -1,4 +1,4 @@
-# Standalone eBPF datapath — v0.9
+# Standalone eBPF datapath — v0.10
 
 Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge of the installed CNI. The default attachment point is the root cgroup v2 hierarchy, so descendant workload traffic is covered independently of virtual-interface naming.
 
@@ -11,7 +11,7 @@ Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge
 
 ## Workload attribution and selected enforcement
 
-Netra v0.9 includes cgroup-to-Pod attribution without giving the privileged agent Kubernetes credentials. The controller reads Pod metadata; the agent scans host cgroup v2, derives cgroup IDs from inode identity, joins pod/container path components to that inventory, and enriches cgroup events/counters locally.
+Netra v0.10 includes cgroup-to-Pod attribution without giving the privileged agent Kubernetes credentials. The controller reads Pod metadata; the agent scans host cgroup v2, derives cgroup IDs from inode identity, joins pod/container path components to that inventory, and enriches cgroup events/counters locally.
 
 `scopeMode=all` preserves node-wide enforcement. `scopeMode=selected` populates an `enforced_cgroups` BPF map from namespace/pod/immediate-owner/label/cgroup-ID selectors. In selected mode, un-attributed cgroups fail open, and optional TCX/XDP remain observe-only because those hooks cannot provide the workload cgroup identity used by this policy gate. See `docs/workload-scoping.md`.
 
@@ -27,11 +27,18 @@ Rules are staged in controller state and synchronized to every agent. Observe mo
 | UID | n/a | n/a | — | new sockets | ✅ |
 | process `comm` | n/a | n/a | — | new sockets | ✅ |
 | exact DNS qname | protocol-level | protocol-level | — | UDP/53 | packet hook |
+| exact TLS SNI | TLS metadata | TLS metadata | — | parsed ClientHello | cgroup packet hook |
 | destination PPS | ✅ exact IPv4 | — | — | ✅ | — |
 
 ## DNS visibility
 
-The BPF parser reads only enough of a normal UDP/53 DNS question to reconstruct a bounded qname. It rejects compression pointers in the question-name parser and lowercases ASCII before lookup. It intentionally does not claim visibility into encrypted DNS, TCP DNS, arbitrary payloads, HTTP, TLS SNI or application content.
+The BPF parser reads only enough of a normal UDP/53 DNS question to reconstruct a bounded qname. It rejects compression pointers in the question-name parser and lowercases ASCII before lookup. It intentionally does not claim visibility into encrypted DNS, TCP DNS, or arbitrary payloads. v0.10 separately adds metadata-only, best-effort parsing of TLS ClientHello SNI and cleartext HTTP/1 method + Host when those fields are fully present in one egress skb; there is no TCP reassembly, TLS decryption, ECH/QUIC parsing, or request-body export.
+
+## TLS and HTTP metadata
+
+The cgroup egress parser can record an ordinary TLS ClientHello SNI and cleartext HTTP/1 method + `Host` from a single skb. These observations feed `tls_sni_stats` and `http_host_stats`. Exact SNI deny is lease-bound and fails open whenever the SNI cannot be parsed. See `docs/l7-metadata.md`.
+
+`connect_attempts` is updated from cgroup TCP connect and UDP sendmsg hooks and is used for workload fan-out and estimated connection-failure diagnostics.
 
 ## Process identity
 

@@ -1,6 +1,6 @@
-# Netra Network Health — v0.9
+# Netra Network Health — v0.10
 
-Netra v0.9 adds deep TCP and DNS health telemetry without requiring Cilium, Hubble, a service mesh, or application instrumentation.
+Netra v0.10 adds deep TCP and DNS health telemetry without requiring Cilium, Hubble, a service mesh, or application instrumentation.
 
 ## TCP health
 
@@ -28,3 +28,8 @@ Use the exact counters as evidence and correlate with application/runtime data b
 ## Privacy and limits
 
 Netra does not copy arbitrary packet payloads to userspace. TCP health is kernel/socket metadata. DNS parsing is deliberately limited to the cleartext DNS header/question needed for qname and transaction timing. Kernel and runtime support must be validated on target nodes; real BPF verifier/runtime tests remain an integration gate.
+
+
+## v0.10 connection-attempt signals
+
+Netra now joins exact cgroup TCP connect-attempt counters with sockops active-establishment counters to report an explicitly **estimated** connection-failure count. It also surfaces high unique remote endpoint fan-out as an investigation signal. These counters are cumulative and are not proof of a port scan or failed transaction.

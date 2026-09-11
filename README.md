@@ -2,7 +2,7 @@
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
-Netra v0.9 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
+Netra v0.10 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
@@ -21,6 +21,9 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - TCP connection health from cgroup sockops: active/passive establishes, closes, SRTT/min RTT, retransmissions, RTOs, congestion window, segments and byte counters.
 - Exact TCP SYN/SYN-ACK/FIN/RST counters by cgroup.
 - Cleartext UDP/53 DNS request/response latency, response-code and failure counters.
+- Best-effort TLS ClientHello SNI metadata from single egress skbs, attributed to cgroup/workload.
+- Best-effort cleartext HTTP/1 method + Host metadata from single egress skbs; no request body collection.
+- Exact per-workload TCP-connect / UDP-sendmsg destination-attempt counters for fan-out and connection-health analysis.
 - Deterministic network-health signals for high RTT, retransmit/RTO pressure, reset ratio, DNS failure ratio and DNS latency.
 - Top destinations, top DNS names, top processes, block reasons and hook/protocol/direction summaries.
 - Stale-agent detection and per-node hook coverage in the dashboard.
@@ -34,6 +37,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - Linux UID deny for new socket operations.
 - Linux process-`comm` deny for new socket operations.
 - Exact cleartext DNS-name deny for UDP/53 queries.
+- Exact TLS SNI deny when an ordinary ClientHello SNI is successfully parsed in the current egress skb.
 - Exact IPv4 destination PPS ceiling using a simple fixed one-second window.
 - Optional XDP early-ingress CIDR/port drop on explicitly selected interfaces.
 - Workload-scoped enforcement by namespace, pod, immediate owner, exact labels, or cgroup ID.
@@ -56,11 +60,11 @@ These controls are intentionally an emergency/containment layer, not a replaceme
 
 The default agent can therefore run **cgroup-only**: no `cilium_host`, no Cilium maps, and no assumption about the Kubernetes CNI.
 
-> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.9 includes `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
+> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.10 includes `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
 
 ## Important visibility boundaries
 
-Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.9. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
+Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. TLS metadata parsing is best-effort and limited to ordinary ClientHello SNI found in a single egress skb; there is no TCP stream reassembly, ECH decryption, QUIC parsing, or certificate inspection. Cleartext HTTP metadata is limited to an HTTP/1 method and `Host` header visible in one skb; request paths/bodies are not exported. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.10. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
 
 ## Optional Cilium / Hubble integration
 
@@ -117,6 +121,8 @@ cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 internal/agent/          BPF loading, hook attachment and reporting
 internal/observability/  standalone eBPF summaries and workload topology
+internal/health/          TCP/DNS/connect health scoring and anomaly signals
+internal/l7/              TLS SNI / HTTP Host / socket-attempt aggregation
 internal/cgroupmeta/     cgroup-v2 Kubernetes path/inode discovery
 internal/workload/       workload selector matching and cgroup joins
 internal/api/            REST/SSE API
@@ -131,6 +137,7 @@ helm/netra/             Helm chart
 deploy/                  plain manifests
 docs/standalone-ebpf.md  eBPF hook/map/limitation reference
 docs/workload-scoping.md workload attribution/scoping runbook
+docs/l7-metadata.md      metadata-only L7 behavior and limitations
 docs/high-availability.md HA runbook
 ```
 
@@ -154,8 +161,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.9.0 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.9.0 .
+docker build -t ghcr.io/zyvorai/netra:0.10.0 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.10.0 .
 ```
 
 ## Standalone Helm install

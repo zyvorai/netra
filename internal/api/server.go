@@ -24,6 +24,7 @@ import (
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
+	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/policy"
@@ -60,13 +61,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.9.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.10.0"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.9.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.10.0"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.9.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.10.0"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -105,10 +106,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/ebpf/dns/delete", s.auth(http.HandlerFunc(s.ebpfDNSDelete)))
 	mux.Handle("POST /api/v1/ebpf/process", s.auth(http.HandlerFunc(s.ebpfProcessAdd)))
 	mux.Handle("POST /api/v1/ebpf/process/delete", s.auth(http.HandlerFunc(s.ebpfProcessDelete)))
+	mux.Handle("POST /api/v1/ebpf/sni", s.auth(http.HandlerFunc(s.ebpfSNIAdd)))
+	mux.Handle("POST /api/v1/ebpf/sni/delete", s.auth(http.HandlerFunc(s.ebpfSNIDelete)))
 	mux.Handle("PUT /api/v1/ebpf/rate", s.auth(http.HandlerFunc(s.ebpfRateSet)))
 	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
 	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
+	mux.Handle("GET /api/v1/ebpf/l7", s.auth(http.HandlerFunc(s.ebpfL7)))
 	mux.Handle("GET /api/v1/ebpf/capabilities", s.auth(http.HandlerFunc(s.ebpfCapabilities)))
 	mux.Handle("GET /api/v1/agents", s.auth(http.HandlerFunc(s.agents)))
 	mux.Handle("GET /api/v1/audit", s.auth(http.HandlerFunc(s.audit)))
@@ -186,7 +190,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			stale++
 		}
 	}
-	out := map[string]any{"version": "0.9.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
+	out := map[string]any{"version": "0.10.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
 	if err != nil {
 		out["hubbleError"] = err.Error()
 	} else {
@@ -1053,6 +1057,35 @@ func (s *Server) ebpfProcessMutate(w http.ResponseWriter, r *http.Request, del b
 	writeJSON(w, 200, cfg)
 }
 
+func (s *Server) ebpfSNIAdd(w http.ResponseWriter, r *http.Request)    { s.ebpfSNIMutate(w, r, false) }
+func (s *Server) ebpfSNIDelete(w http.ResponseWriter, r *http.Request) { s.ebpfSNIMutate(w, r, true) }
+func (s *Server) ebpfSNIMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	name, err := normalizeDNSName(x.Name)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelSNI(name, actor(r))
+	} else {
+		cfg, err = s.store.AddSNI(name, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist SNI rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
 func (s *Server) ebpfRateSet(w http.ResponseWriter, r *http.Request) {
 	var x models.EBPFRateLimit
 	if err := decodeJSON(r, &x, 1<<16); err != nil {
@@ -1103,8 +1136,18 @@ func (s *Server) ebpfHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, health.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), topN))
 }
+func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	writeJSON(w, 200, l7.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {
@@ -1112,7 +1155,7 @@ func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {
 }
 func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 	var x models.AgentReport
-	if err := decodeJSON(r, &x, 4<<20); err != nil {
+	if err := decodeJSON(r, &x, 8<<20); err != nil {
 		errorJSON(w, 400, err.Error())
 		return
 	}

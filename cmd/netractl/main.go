@@ -68,7 +68,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | health | capabilities
+  ebpf stats | summary | health | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP | deny del IP
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
@@ -76,6 +76,7 @@ func usage() {
   ebpf uid add UID | uid del UID
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
+  ebpf sni add NAME | sni del NAME
   ebpf rate set IPv4 PPS | rate del IPv4
   ebpf workloads [node]
   ebpf scope show | scope all
@@ -327,6 +328,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/summary", nil)
 	case "health":
 		return request("GET", "/api/v1/ebpf/health", nil)
+	case "l7":
+		return request("GET", "/api/v1/ebpf/l7", nil)
 	case "capabilities":
 		return request("GET", "/api/v1/ebpf/capabilities", nil)
 	case "mode":
@@ -413,6 +416,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/dns/delete", b)
+		}
+	case "sni":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("sni add|del NAME")
+		}
+		b, _ := json.Marshal(map[string]string{"name": os.Args[4]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/sni", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/sni/delete", b)
 		}
 	case "process":
 		if len(os.Args) < 5 {

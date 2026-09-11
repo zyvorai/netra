@@ -18,12 +18,15 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 	resp := models.NetworkHealthResponse{}
 	var srttTotal, srttWeight uint64
 	var dnsLatencyTotal, dnsResponses uint64
+	tcpAttempts := map[uint64]uint64{}
+	activeEstablished := map[uint64]uint64{}
 	for _, a := range agents {
 		resp.TCP = append(resp.TCP, a.TCPHealth...)
 		resp.DNS = append(resp.DNS, a.DNSHealth...)
 		resp.Signals = append(resp.Signals, a.TCPSignals...)
 		for _, t := range a.TCPHealth {
 			connections := t.ActiveEstablished + t.PassiveEstablished
+			activeEstablished[t.CgroupID] += t.ActiveEstablished
 			resp.Summary.TCPConnections += connections
 			resp.Summary.TCPRetransmissions += t.Retransmissions
 			resp.Summary.TCPRTOs += t.RTOs
@@ -39,6 +42,12 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 		}
 		for _, sig := range a.TCPSignals {
 			resp.Summary.TCPResets += sig.RST
+		}
+		for _, c := range a.ConnectionAttempts {
+			if c.Protocol == "TCP" {
+				resp.Summary.ConnectionAttempts += c.Attempts
+				tcpAttempts[c.CgroupID] += c.Attempts
+			}
 		}
 		for _, d := range a.DNSHealth {
 			resp.Summary.DNSQueries += d.Queries
@@ -57,6 +66,12 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 	if dnsResponses > 0 {
 		resp.Summary.AverageDNSLatencyUS = dnsLatencyTotal / dnsResponses
 	}
+	for cg, attempts := range tcpAttempts {
+		if attempts > activeEstablished[cg] {
+			resp.Summary.EstimatedConnectFailures += attempts - activeEstablished[cg]
+		}
+	}
+	resp.Summary.HealthScore = score(resp.Summary)
 
 	sort.Slice(resp.TCP, func(i, j int) bool { return tcpScore(resp.TCP[i]) > tcpScore(resp.TCP[j]) })
 	sort.Slice(resp.DNS, func(i, j int) bool { return dnsScore(resp.DNS[i]) > dnsScore(resp.DNS[j]) })
@@ -97,6 +112,50 @@ func subject(ns, pod, comm, remote string, port uint16) string {
 	return "node traffic"
 }
 
+func score(s models.NetworkHealthSummary) int {
+	score := 100
+	if s.AverageSRTTUS >= 500000 {
+		score -= 20
+	} else if s.AverageSRTTUS >= 200000 {
+		score -= 10
+	}
+	if s.TCPRTOs > 0 {
+		score -= 10
+	}
+	if s.TCPConnections > 0 {
+		r := float64(s.TCPRetransmissions) / float64(s.TCPConnections)
+		if r >= .5 {
+			score -= 20
+		} else if r >= .1 {
+			score -= 10
+		} else if r > 0 {
+			score -= 3
+		}
+	}
+	if s.DNSResponses > 0 {
+		r := float64(s.DNSFailures) / float64(s.DNSResponses)
+		if r >= .2 {
+			score -= 15
+		} else if r >= .05 {
+			score -= 7
+		}
+	}
+	if s.ConnectionAttempts > 0 {
+		r := float64(s.EstimatedConnectFailures) / float64(s.ConnectionAttempts)
+		if r >= .5 {
+			score -= 20
+		} else if r >= .2 {
+			score -= 10
+		} else if r >= .05 {
+			score -= 5
+		}
+	}
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
 func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 	out := make([]models.NetworkHealthAnomaly, 0, 32)
 	for _, a := range agents {
@@ -130,6 +189,37 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 			}
 			if avg >= 200_000 || d.MaxLatencyUS >= 1_000_000 {
 				out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "dns-latency", Subject: sub, Message: fmt.Sprintf("DNS latency avg %.1f ms, max %.1f ms", float64(avg)/1000, float64(d.MaxLatencyUS)/1000), Value: float64(avg) / 1000})
+			}
+		}
+	}
+	for _, a := range agents {
+		attempts := map[uint64]uint64{}
+		endpoints := map[uint64]map[string]struct{}{}
+		labels := map[uint64]string{}
+		established := map[uint64]uint64{}
+		for _, t := range a.TCPHealth {
+			established[t.CgroupID] += t.ActiveEstablished
+			labels[t.CgroupID] = subject(t.Namespace, t.Pod, t.Comm, "", 0)
+		}
+		for _, c := range a.ConnectionAttempts {
+			if c.Protocol != "TCP" {
+				continue
+			}
+			attempts[c.CgroupID] += c.Attempts
+			if endpoints[c.CgroupID] == nil {
+				endpoints[c.CgroupID] = map[string]struct{}{}
+			}
+			endpoints[c.CgroupID][fmt.Sprintf("%s:%d", c.RemoteIP, c.RemotePort)] = struct{}{}
+			if labels[c.CgroupID] == "" {
+				labels[c.CgroupID] = subject(c.Namespace, c.Pod, "", "", 0)
+			}
+		}
+		for cg, n := range attempts {
+			if n >= 20 && established[cg]*100 < n*50 {
+				out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "connect-failure", Subject: labels[cg], Message: fmt.Sprintf("%d TCP connect attempts but only %d active establishments observed; counters are cumulative and this is an estimate", n, established[cg]), Value: float64(n - established[cg])})
+			}
+			if n >= 50 && len(endpoints[cg]) >= 25 {
+				out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "connection-fanout", Subject: labels[cg], Message: fmt.Sprintf("%d TCP attempts across %d unique remote endpoints; investigate scanning or unexpected fan-out", n, len(endpoints[cg])), Value: float64(len(endpoints[cg]))})
 			}
 		}
 	}

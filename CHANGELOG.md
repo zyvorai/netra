@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.10.0 — 2026-09-11
+
+- Added metadata-only TLS ClientHello SNI observability, attributed to cgroup/Kubernetes workload, without copying payloads to userspace.
+- Added cleartext HTTP/1 method + Host observability for requests visible in one egress skb; no path/body export and no TLS decryption.
+- Added exact per-cgroup socket destination-attempt counters for TCP connect and UDP sendmsg operations.
+- Added leased exact TLS SNI deny rules with fail-open behavior when SNI cannot be confidently parsed.
+- Added `GET /api/v1/ebpf/l7`, `netractl ebpf l7`, `netractl ebpf sni add|del`, and a dedicated L7 Metadata dashboard.
+- Extended Network Health with deterministic 0–100 scoring, estimated TCP connect failures, and high-fanout/possible-scan signals.
+- Added low-cardinality Prometheus metrics for L7 metadata, SNI containment, connection attempts, estimated failures, and health score.
+- Increased authenticated agent-report body allowance to 8 MiB for larger exact observability maps.
+- Preserved standalone operation, workload-scoped enforcement, HTTPS defaults, HA, Pods/VM lockdown, and optional Cilium/Hubble integration.
+
 ## v0.9.0 — 2026-09-11
 
 - Added standalone sockops TCP health: connections, SRTT/min RTT, retransmissions, RTOs, closes, cwnd, segments and byte counters.

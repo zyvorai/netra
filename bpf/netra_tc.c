@@ -39,6 +39,7 @@
 #define REASON_RATE  5
 #define REASON_DNS   6
 #define REASON_PROCESS 7
+#define REASON_SNI 8
 #define FAMILY_V4    4
 #define FAMILY_V6    6
 
@@ -316,6 +317,46 @@ struct {
     __type(value, struct dns_health_value);
 } dns_health SEC(".maps");
 
+struct tls_meta_key { __u64 cgroup_id; char sni[96]; };
+struct tls_meta_value { __u64 handshakes; __u64 blocked; __u64 last_ns; };
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct tls_meta_key);
+    __type(value, struct tls_meta_value);
+} tls_sni_stats SEC(".maps");
+
+struct http_meta_key { __u64 cgroup_id; char host[96]; char method[8]; };
+struct http_meta_value { __u64 requests; __u64 last_ns; };
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct http_meta_key);
+    __type(value, struct http_meta_value);
+} http_host_stats SEC(".maps");
+
+struct connect_attempt_key {
+    __u64 cgroup_id;
+    __u8 family;
+    __u8 protocol;
+    __u16 remote_port;
+    __u8 remote[16];
+} __attribute__((packed));
+struct connect_attempt_value { __u64 attempts; __u64 blocked; __u64 last_ns; };
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct connect_attempt_key);
+    __type(value, struct connect_attempt_value);
+} connect_attempts SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct dns_key);
+    __type(value, __u8);
+} blocked_sni SEC(".maps");
+
 struct obs_event {
     __u64 ts_ns;
     __u64 cgroup_id;
@@ -548,6 +589,129 @@ static __always_inline int dns_qname(void *payload, void *data_end, char out[96]
 }
 
 
+static __always_inline unsigned char lower_ascii(unsigned char c)
+{
+    if (c >= 'A' && c <= 'Z') return c + ('a' - 'A');
+    return c;
+}
+
+static __always_inline int hostname_char(unsigned char c)
+{
+    c = lower_ascii(c);
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+}
+
+// Best-effort TLS ClientHello SNI parser. It intentionally does not reassemble
+// TCP streams and therefore only reports an SNI present in this skb.
+static __always_inline int tls_sni(void *payload, void *data_end, char out[96])
+{
+    unsigned char *p = payload;
+    if ((void *)(p + 9) > data_end || p[0] != 0x16 || p[5] != 0x01) return 0;
+    for (int i = 43; i < 512; i++) {
+        if ((void *)(p + i + 9) > data_end) break;
+        if (p[i] != 0 || p[i + 1] != 0 || p[i + 6] != 0) continue;
+        __u16 ext_len = ((__u16)p[i + 2] << 8) | p[i + 3];
+        __u16 list_len = ((__u16)p[i + 4] << 8) | p[i + 5];
+        __u16 name_len = ((__u16)p[i + 7] << 8) | p[i + 8];
+        if (!name_len || name_len > 95 || ext_len < (__u16)(5 + name_len) || list_len < (__u16)(3 + name_len)) continue;
+        if ((void *)(p + i + 9 + name_len) > data_end) continue;
+        int ok = 1;
+        for (int j = 0; j < 95; j++) {
+            if (j >= name_len) break;
+            unsigned char c = p[i + 9 + j];
+            if (!hostname_char(c)) { ok = 0; break; }
+            out[j] = (char)lower_ascii(c);
+        }
+        if (!ok) { __builtin_memset(out, 0, 96); continue; }
+        out[name_len] = 0;
+        return name_len;
+    }
+    return 0;
+}
+
+static __always_inline int http_method(void *payload, void *data_end, char out[8])
+{
+    unsigned char *p = payload;
+    if ((void *)(p + 8) > data_end) return 0;
+    if (p[0]=='G'&&p[1]=='E'&&p[2]=='T'&&p[3]==' ') { __builtin_memcpy(out,"GET",4); return 3; }
+    if (p[0]=='P'&&p[1]=='O'&&p[2]=='S'&&p[3]=='T'&&p[4]==' ') { __builtin_memcpy(out,"POST",5); return 4; }
+    if (p[0]=='P'&&p[1]=='U'&&p[2]=='T'&&p[3]==' ') { __builtin_memcpy(out,"PUT",4); return 3; }
+    if (p[0]=='H'&&p[1]=='E'&&p[2]=='A'&&p[3]=='D'&&p[4]==' ') { __builtin_memcpy(out,"HEAD",5); return 4; }
+    if (p[0]=='P'&&p[1]=='A'&&p[2]=='T'&&p[3]=='C'&&p[4]=='H'&&p[5]==' ') { __builtin_memcpy(out,"PATCH",6); return 5; }
+    if (p[0]=='D'&&p[1]=='E'&&p[2]=='L'&&p[3]=='E'&&p[4]=='T'&&p[5]=='E'&&p[6]==' ') { __builtin_memcpy(out,"DELETE",7); return 6; }
+    if (p[0]=='O'&&p[1]=='P'&&p[2]=='T'&&p[3]=='I'&&p[4]=='O'&&p[5]=='N'&&p[6]=='S'&&p[7]==' ') { __builtin_memcpy(out,"OPTIONS",8); return 7; }
+    return 0;
+}
+
+static __always_inline int http_host(void *payload, void *data_end, char out[96])
+{
+    unsigned char *p = payload;
+    for (int i = 0; i < 512; i++) {
+        if ((void *)(p + i + 6) > data_end) break;
+        if (i > 0 && p[i - 1] != '\n') continue;
+        if (lower_ascii(p[i])!='h'||lower_ascii(p[i+1])!='o'||lower_ascii(p[i+2])!='s'||lower_ascii(p[i+3])!='t'||p[i+4]!=':') continue;
+        int pos = i + 5;
+        for (int s = 0; s < 8; s++) {
+            if ((void *)(p + pos + 1) > data_end) return 0;
+            if (p[pos] != ' ' && p[pos] != '\t') break;
+            pos++;
+        }
+        int oi = 0;
+        for (int j = 0; j < 95; j++) {
+            if ((void *)(p + pos + 1) > data_end) break;
+            unsigned char c = p[pos++];
+            if (c == '\r' || c == '\n') break;
+            if (c < 0x21 || c > 0x7e) return 0;
+            out[oi++] = (char)lower_ascii(c);
+        }
+        if (oi > 0) { out[oi] = 0; return oi; }
+    }
+    return 0;
+}
+
+static __always_inline void track_tls(__u64 cgroup_id, const char sni[96], int blocked)
+{
+    if (!cgroup_id || !sni[0]) return;
+    struct tls_meta_key k = {.cgroup_id = cgroup_id};
+    __builtin_memcpy(k.sni, sni, 96);
+    struct tls_meta_value zero = {};
+    struct tls_meta_value *v = bpf_map_lookup_elem(&tls_sni_stats, &k);
+    if (!v) { bpf_map_update_elem(&tls_sni_stats, &k, &zero, BPF_NOEXIST); v = bpf_map_lookup_elem(&tls_sni_stats, &k); }
+    if (!v) return;
+    __sync_fetch_and_add(&v->handshakes, 1);
+    if (blocked) __sync_fetch_and_add(&v->blocked, 1);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
+static __always_inline void track_http(__u64 cgroup_id, const char method[8], const char host[96])
+{
+    if (!cgroup_id || !method[0] || !host[0]) return;
+    struct http_meta_key k = {.cgroup_id = cgroup_id};
+    __builtin_memcpy(k.method, method, 8);
+    __builtin_memcpy(k.host, host, 96);
+    struct http_meta_value zero = {};
+    struct http_meta_value *v = bpf_map_lookup_elem(&http_host_stats, &k);
+    if (!v) { bpf_map_update_elem(&http_host_stats, &k, &zero, BPF_NOEXIST); v = bpf_map_lookup_elem(&http_host_stats, &k); }
+    if (!v) return;
+    __sync_fetch_and_add(&v->requests, 1);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
+static __always_inline void track_connect_attempt(__u64 cgroup_id, __u8 family, __u8 proto,
+                                                   const __u8 remote[16], __u16 port, int blocked)
+{
+    if (!cgroup_id) return;
+    struct connect_attempt_key k = {.cgroup_id=cgroup_id,.family=family,.protocol=proto,.remote_port=port};
+    __builtin_memcpy(k.remote, remote, 16);
+    struct connect_attempt_value zero = {};
+    struct connect_attempt_value *v = bpf_map_lookup_elem(&connect_attempts, &k);
+    if (!v) { bpf_map_update_elem(&connect_attempts, &k, &zero, BPF_NOEXIST); v = bpf_map_lookup_elem(&connect_attempts, &k); }
+    if (!v) return;
+    __sync_fetch_and_add(&v->attempts, 1);
+    if (blocked) __sync_fetch_and_add(&v->blocked, 1);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
 static __always_inline void track_tcp_signal(__u64 cgroup_id, __u8 flags)
 {
     struct tcp_signal_value zero = {};
@@ -657,8 +821,9 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
     if (l4>data_end) return allow_value;
     __u16 sport=0,dport=0; __u8 flags=0; void *payload=0;
     if (ip->protocol==IPPROTO_TCP) {
-        struct tcphdr *tcp=l4; if ((void *)(tcp+1)>data_end) return allow_value;
+        struct tcphdr *tcp=l4; if ((void *)(tcp+1)>data_end || tcp->doff < 5) return allow_value;
         sport=tcp->source; dport=tcp->dest; flags=*(((unsigned char *)tcp)+13);
+        payload=(void *)tcp + ((__u32)tcp->doff * 4); if (payload > data_end) payload=0;
     } else if (ip->protocol==IPPROTO_UDP) {
         struct udphdr *udp=l4; if ((void *)(udp+1)>data_end) return allow_value;
         sport=udp->source; dport=udp->dest; payload=(void *)(udp+1);
@@ -672,6 +837,13 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && payload) {
         dns_len=dns_qname(payload,data_end,dns_name);
         if (!blocked && enforcing() && scope_allows(cgroup_id) && dns_len>0) { struct dns_key dk={}; __builtin_memcpy(dk.name,dns_name,96); if (bpf_map_lookup_elem(&blocked_dns,&dk)) { blocked=1; reason=REASON_DNS; } }
+    }
+    char sni[96]={}; char http_m[8]={}; char http_h[96]={}; int sni_len=0;
+    if (direction==DIR_EGRESS && hook==HOOK_CGROUP && ip->protocol==IPPROTO_TCP && payload) {
+        sni_len=tls_sni(payload,data_end,sni);
+        if (sni_len>0 && !blocked && enforcing() && scope_allows(cgroup_id)) { struct dns_key sk={}; __builtin_memcpy(sk.name,sni,96); if (bpf_map_lookup_elem(&blocked_sni,&sk)) { blocked=1; reason=REASON_SNI; } }
+        if (sni_len>0) track_tls(cgroup_id,sni,blocked && reason==REASON_SNI);
+        if (http_method(payload,data_end,http_m)>0 && http_host(payload,data_end,http_h)>0) track_http(cgroup_id,http_m,http_h);
     }
     __u8 src[16],dst[16]; copy4(src,ip->saddr); copy4(dst,ip->daddr);
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && dns_len>0) dns_query_track(cgroup_id,FAMILY_V4,dst,sport,payload,data_end,dns_name,dns_len);
@@ -702,11 +874,12 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
     } else ip6=data;
     if ((void *)(ip6+1)>data_end) return allow_value;
     void *l4=(void *)(ip6+1); __u8 proto=ip6->nexthdr; __u16 sport=0,dport=0; __u8 flags=0; void *payload=0;
-    if (proto==IPPROTO_TCP) { struct tcphdr *tcp=l4;if((void *)(tcp+1)>data_end)return allow_value;sport=tcp->source;dport=tcp->dest;flags=*(((unsigned char*)tcp)+13); }
+    if (proto==IPPROTO_TCP) { struct tcphdr *tcp=l4;if((void *)(tcp+1)>data_end || tcp->doff<5)return allow_value;sport=tcp->source;dport=tcp->dest;flags=*(((unsigned char*)tcp)+13);payload=(void *)tcp+((__u32)tcp->doff*4);if(payload>data_end)payload=0; }
     else if(proto==IPPROTO_UDP){struct udphdr *udp=l4;if((void *)(udp+1)>data_end)return allow_value;sport=udp->source;dport=udp->dest;payload=(void *)(udp+1);}
     const __u8 *peer=direction==DIR_EGRESS?(const __u8 *)&ip6->daddr:(const __u8 *)&ip6->saddr;
     __u16 policy_port=dport;__u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;if(proto==IPPROTO_TCP)track_tcp_signal(cgroup_id,flags);__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
     char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
+    char sni[96]={};char http_m[8]={};char http_h[96]={};int sni_len=0;if(direction==DIR_EGRESS&&hook==HOOK_CGROUP&&proto==IPPROTO_TCP&&payload){sni_len=tls_sni(payload,data_end,sni);if(sni_len>0&&!blocked&&enforcing()&&scope_allows(cgroup_id)){struct dns_key sk={};__builtin_memcpy(sk.name,sni,96);if(bpf_map_lookup_elem(&blocked_sni,&sk)){blocked=1;reason=REASON_SNI;}}if(sni_len>0)track_tls(cgroup_id,sni,blocked&&reason==REASON_SNI);if(http_method(payload,data_end,http_m)>0&&http_host(payload,data_end,http_h)>0)track_http(cgroup_id,http_m,http_h);}
     __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
     if(blocked) submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
     else { if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id); if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id); }
@@ -741,6 +914,7 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
     __u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id);
     if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
+    track_connect_attempt(cgroup_id,FAMILY_V4,proto,addr,dport,blocked);
     submit_socket_event(ctx,FAMILY_V4,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
@@ -748,6 +922,7 @@ static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
     __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,cgroup_id);
     if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
+    track_connect_attempt(cgroup_id,FAMILY_V6,proto,addr,dport,blocked);
     submit_socket_event(ctx,FAMILY_V6,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 SEC("cgroup/connect4") int netra_connect4(struct bpf_sock_addr *ctx){return socket4(ctx,IPPROTO_TCP);}
