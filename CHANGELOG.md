@@ -5,6 +5,7 @@
 - Published as open-source **Netra** (`github.com/zyvorai/netra`); default API **HTTPS :30870**.
 - Retained **Pods / VMs** inventory, per-workload Hubble flows, create/delete CNP rules, and lock down / unlock when `cilium.enabled=true`.
 - Apple.com-style pill buttons in the React UI.
+- CI: Go 1.27; Helm gates for TLS :30870, inventory RBAC (pods/kubevirt), and Cilium/Hubble enable flags; API route registration + lockdown helper unit tests.
 
 - Made Cilium and Hubble optional: Netra now has a standalone eBPF datapath that can run with any Kubernetes CNI or on ordinary cgroup-v2 Linux nodes.
 - Added default cgroup skb ingress/egress hooks plus connect4/connect6 and UDP sendmsg4/sendmsg6 process-aware socket hooks.

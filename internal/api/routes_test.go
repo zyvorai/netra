@@ -1,0 +1,54 @@
+// Copyright 2026 Zyvor AI Labs · https://zyvor.dev
+// SPDX-License-Identifier: Apache-2.0
+package api
+
+import (
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+// TestRegisteredAPIRoutes ensures critical mux patterns stay wired.
+// Requests intentionally omit the API token so auth returns 401 instead of
+// exercising nil kube/store dependencies — anything other than 404 proves registration.
+func TestRegisteredAPIRoutes(t *testing.T) {
+	s := &Server{
+		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		apiKey:        "ci-test-token",
+		metricsData:   &telemetry{},
+		ciliumEnabled: true,
+	}
+	h := s.Handler()
+	paths := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/v1/pods"},
+		{"GET", "/api/v1/vms"},
+		{"GET", "/api/v1/workloads/pod/default/demo"},
+		{"POST", "/api/v1/policies/lockdown"},
+		{"DELETE", "/api/v1/policies/lockdown/default/demo"},
+		{"GET", "/api/v1/ebpf/summary"},
+		{"GET", "/api/v1/ebpf/capabilities"},
+		{"GET", "/livez"},
+	}
+	for _, tc := range paths {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s returned 404; route missing", tc.method, tc.path)
+		}
+		if tc.path == "/livez" {
+			if rec.Code != http.StatusOK {
+				t.Fatalf("livez status %d", rec.Code)
+			}
+			continue
+		}
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s: want 401 without token, got %d body=%s", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}

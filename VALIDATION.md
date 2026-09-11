@@ -5,8 +5,8 @@ This record separates checks actually executed in the packaging workspace from d
 ## Passed in the packaging workspace
 
 - `gofmt` parsed/formatted the full Go source tree touched by v0.7.
-- The module remains pinned to `go 1.26.0`. For dependency-free local checks only, the module `go` directive was temporarily lowered to the available Go 1.23 toolchain and restored immediately afterward.
-- `go test` and `go vet` passed for `internal/policy`, `internal/store`, `internal/kube`, `internal/flowstats`, `internal/observability`, `internal/ha`, and `cmd/netractl`.
+- The module is pinned to `go 1.27.0` (`toolchain go1.27.1`).
+- `go test` and `go vet` passed for `internal/policy`, `internal/store`, `internal/kube`, `internal/flowstats`, `internal/observability`, `internal/ha`, `internal/api` (route registration), and `cmd/netractl`.
 - Store regressions cover standalone IPv6/CIDR/port/UID/DNS/process/rate configuration, defensive config copies, restart persistence of DNS/process rules, fail-open restart behavior, durable one-shot preflight receipts, policy history/archive handling, corruption rejection and exclusive-writer locking.
 - CLI regressions include durable Cilium preflight receipt propagation, high-risk confirmation, history archive import/export, and standalone DNS/process eBPF commands.
 - Standalone observability aggregation tests verify exact packet/byte/blocked totals, exact protocol/direction/hook packet dimensions, DNS summaries, process summaries and top destinations.
@@ -28,9 +28,9 @@ This record separates checks actually executed in the packaging workspace from d
 
 ## CI gates included in the repository
 
-1. **Go 1.26** — dependency resolution, `go test ./...`, `go vet ./...`, and controller/CLI/agent builds.
+1. **Go 1.27** — dependency resolution, `go test ./...` (including API route registration and lockdown helpers), `go vet ./...`, and controller/CLI/agent builds.
 2. **Node 22** — package install, TypeScript typecheck, Vitest, and Vite production build.
-3. **Helm** — secure-default auth rejection, lint/render, standalone agent render, proof that default standalone render contains no Cilium RBAC, optional Cilium/Hubble render, and HA/RWX render validation.
+3. **Helm** — secure-default auth rejection, lint/render, TLS :30870 + inventory RBAC (pods/kubevirt) on the default chart, proof that default standalone render contains no Cilium RBAC and leaves Cilium/Hubble disabled, optional Cilium/Hubble enable-env render, standalone agent cgroup mount, and HA/RWX render validation.
 4. **eBPF** — Ubuntu LLVM/Clang emits a real `bpfel` object with `-Wall -Wextra -Werror`.
 
 ## Packaging-environment limitations

@@ -11,7 +11,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
-      with: {go-version: '1.26.0', cache: true}
+      with: {go-version: '1.27.0', cache: true}
     - run: go mod tidy
     - run: go test ./...
     - run: go vet ./...
@@ -45,10 +45,26 @@ jobs:
           echo "standalone chart unexpectedly rendered Cilium RBAC" >&2
           exit 1
         fi
+    - name: Default render must expose HTTPS 30870 with TLS and inventory RBAC
+      run: |
+        grep -q 'containerPort: 30870' /tmp/netra.yaml
+        grep -q 'NETRA_LISTEN' /tmp/netra.yaml
+        grep -q 'NETRA_TLS_CERT' /tmp/netra.yaml
+        grep -q 'gen-cert' /tmp/netra.yaml
+        grep -q 'resources: \["pods"\]' /tmp/netra.yaml
+        grep -q 'kubevirt.io' /tmp/netra.yaml
+        # Helm renders env as name/value pairs; Cilium must stay off by default.
+        awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 ~ /"true"/) exit 1}' /tmp/netra.yaml
+        grep -q 'name: NETRA_CILIUM_ENABLED' /tmp/netra.yaml
+        grep -q 'name: NETRA_HUBBLE_ENABLED' /tmp/netra.yaml
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true --set cilium.enabled=true --set hubble.enabled=true >/tmp/netra-cilium.yaml
     - name: Optional Cilium render must include policy RBAC
       run: grep -q 'cilium.io' /tmp/netra-cilium.yaml
+    - name: Optional Cilium render must enable Cilium and Hubble env
+      run: |
+        awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
+        awk '/name: NETRA_HUBBLE_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
     - name: Standalone agent render must mount cgroup v2
       run: |
         grep -q '/sys/fs/cgroup' /tmp/netra-agent.yaml
