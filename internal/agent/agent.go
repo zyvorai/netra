@@ -26,6 +26,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
+	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/workload"
 )
@@ -64,6 +65,13 @@ type Agent struct {
 	// procmeta_linux.go / procmeta_other.go so this file — otherwise
 	// portable — does not have to import a Linux-only package directly.
 	procMetaEnabled bool
+
+	// attachedProgs tracks which loaded BPF programs successfully attached.
+	attachedProgs map[string]bool
+	// progStats holds the EnableStats closer so kernel run-count collection stays on.
+	progStats io.Closer
+	// prevCaps remembers CapEff by pid^startTime for observe-only cap-change watch.
+	prevCaps map[uint64]uint64
 }
 
 func New(log *slog.Logger) *Agent {
@@ -80,6 +88,8 @@ func New(log *slog.Logger) *Agent {
 		http: client, events: make(chan models.FastPathEvent, 4096),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
 		procMetaEnabled: envBool("NETRA_PROCMETA_ENABLED", false),
+		attachedProgs:   map[string]bool{},
+		prevCaps:        map[uint64]uint64{},
 	}
 }
 
@@ -151,6 +161,7 @@ func (a *Agent) loadAndAttach() error {
 		return fmt.Errorf("load BPF collection: %w", err)
 	}
 	a.collection = coll
+	a.enableProgStats()
 	for _, name := range mapNames {
 		if m := coll.Maps[name]; m != nil {
 			p := filepath.Join(a.pinPath, name)
@@ -185,6 +196,7 @@ func (a *Agent) loadAndAttach() error {
 			}
 			a.links = append(a.links, lnk)
 			a.hooks = append(a.hooks, h.name)
+			a.markAttached(h.prog)
 		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
@@ -199,6 +211,7 @@ func (a *Agent) loadAndAttach() error {
 			} else {
 				a.links = append(a.links, lnk)
 				a.hooks = append(a.hooks, "raw-tracepoint:kfree_skb")
+				a.markAttached("netra_kfree_skb")
 			}
 		}
 	}
@@ -237,6 +250,7 @@ func (a *Agent) loadAndAttach() error {
 			}
 			a.links = append(a.links, lnk)
 			a.hooks = append(a.hooks, h.name+":"+name)
+			a.markAttached(h.prog)
 			attached++
 		}
 		if attached == 0 && tcxMode == "auto" {
@@ -269,7 +283,12 @@ func (a *Agent) loadAndAttach() error {
 			return fmt.Errorf("attach XDP to %s: %w", name, err)
 		}
 		a.links = append(a.links, lnk)
+		hookName := "netra_xdp_ingress"
+		if useShield {
+			hookName = "netra_xdp_shield"
+		}
 		a.hooks = append(a.hooks, hook+name)
+		a.markAttached(hookName)
 	}
 	sort.Strings(a.hooks)
 	a.log.Info("Netra standalone datapath attached", "cgroup", a.cgroupEnabled, "cgroupPath", a.cgroupPath, "interfaces", a.interfaces, "xdpInterfaces", a.xdpInterfaces, "hooks", a.hooks)
@@ -319,6 +338,10 @@ func (a *Agent) Close() {
 	for _, l := range a.links {
 		_ = l.Close()
 	}
+	if a.progStats != nil {
+		_ = a.progStats.Close()
+		a.progStats = nil
+	}
 	if a.collection != nil {
 		a.collection.Close()
 	}
@@ -348,6 +371,8 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	processMeta := a.readProcessMeta(pidsFromTCPHealth(tcpHealth))
+	a.enrichSocketOwnership(tcpHealth, processMeta)
+	capChanges := a.watchCapChanges(processMeta)
 	tcpPressure, err := a.readTCPPressure()
 	if err != nil {
 		return err
@@ -393,8 +418,39 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	stack := a.readNodeStack()
+	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
+	histJSON := models.NetworkHistogramReport{
+		TCPRetransmissions: models.HistogramSnapshot{
+			Name: histReport.TCPRetransmissions.Name, Bounds: histReport.TCPRetransmissions.Bounds,
+			CumulativeCounts: histReport.TCPRetransmissions.CumulativeCounts, Sum: histReport.TCPRetransmissions.Sum, Count: histReport.TCPRetransmissions.Count,
+		},
+		TCPSRTTUS: models.HistogramSnapshot{
+			Name: histReport.TCPSRTTUS.Name, Bounds: histReport.TCPSRTTUS.Bounds,
+			CumulativeCounts: histReport.TCPSRTTUS.CumulativeCounts, Sum: histReport.TCPSRTTUS.Sum, Count: histReport.TCPSRTTUS.Count,
+		},
+		TCPConnectUS: models.HistogramSnapshot{
+			Name: histReport.TCPConnectUS.Name, Bounds: histReport.TCPConnectUS.Bounds,
+			CumulativeCounts: histReport.TCPConnectUS.CumulativeCounts, Sum: histReport.TCPConnectUS.Sum, Count: histReport.TCPConnectUS.Count,
+		},
+		Host: models.NetworkHostCounters{
+			ListenOverflows: histReport.Host.ListenOverflows,
+			ListenDrops:     histReport.Host.ListenDrops,
+			SoftirqNETRX:    histReport.Host.SoftirqNETRX,
+		},
+	}
+	programs := a.readProgramHealth()
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops, ConntrackEntries: ctEntries, Shield: shieldStats, ProcessMeta: processMeta, Stack: stack, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{
+		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
+		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
+		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
+		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops,
+		ConntrackEntries: ctEntries, Shield: shieldStats, ProcessMeta: processMeta,
+		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
+		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
+		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
+	})
 }
 
 // pidsFromTCPHealth collects the unique nonzero PIDs observed in the

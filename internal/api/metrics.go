@@ -5,13 +5,16 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"sync/atomic"
 	"time"
 
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/health"
+	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/l7"
+	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 )
@@ -140,6 +143,114 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_rate_baseline_entries", "Persisted traffic-rate baseline metric entries.", float64(len(rateBaseline.Entries)))
 	metricGauge(w, "netra_rate_drift_findings", "Current delta-based traffic-rate anomalies above baseline thresholds.", float64(len(rateDrift.Findings)))
 	metricGauge(w, "netra_dependency_edges", "Workload egress dependency edges derived from exact standalone eBPF counters before Kubernetes service resolution.", float64(len(observability.Topology(agents, 5000))))
+
+	writeNetworkHistograms(w, agents)
+	writeProgramHealth(w, agents)
+}
+
+func writeNetworkHistograms(w http.ResponseWriter, agents []models.AgentStatus) {
+	var retrans, srtt, connect []histograms.Snapshot
+	var listenOverflows, listenDrops, softirq uint64
+	for _, a := range agents {
+		if a.Stale || a.Histograms == nil {
+			continue
+		}
+		h := a.Histograms
+		retrans = append(retrans, histograms.Snapshot{
+			Name: h.TCPRetransmissions.Name, Bounds: h.TCPRetransmissions.Bounds,
+			CumulativeCounts: h.TCPRetransmissions.CumulativeCounts, Sum: h.TCPRetransmissions.Sum, Count: h.TCPRetransmissions.Count,
+		})
+		srtt = append(srtt, histograms.Snapshot{
+			Name: h.TCPSRTTUS.Name, Bounds: h.TCPSRTTUS.Bounds,
+			CumulativeCounts: h.TCPSRTTUS.CumulativeCounts, Sum: h.TCPSRTTUS.Sum, Count: h.TCPSRTTUS.Count,
+		})
+		connect = append(connect, histograms.Snapshot{
+			Name: h.TCPConnectUS.Name, Bounds: h.TCPConnectUS.Bounds,
+			CumulativeCounts: h.TCPConnectUS.CumulativeCounts, Sum: h.TCPConnectUS.Sum, Count: h.TCPConnectUS.Count,
+		})
+		listenOverflows += h.Host.ListenOverflows
+		listenDrops += h.Host.ListenDrops
+		softirq += h.Host.SoftirqNETRX
+	}
+	metricHistogram(w, "netra_tcp_retransmissions", "Per-flow TCP retransmission counts from sockops health snapshots.", histograms.Merge(retrans...))
+	metricHistogram(w, "netra_tcp_srtt_us", "Per-flow smoothed TCP RTT in microseconds from sockops.", histograms.Merge(srtt...))
+	metricHistogram(w, "netra_tcp_connect_us", "Average measured TCP connect-establishment latency in microseconds.", histograms.Merge(connect...))
+	metricGauge(w, "netra_tcp_listen_overflows", "Kernel TcpExt ListenOverflows summed across fresh agents.", float64(listenOverflows))
+	metricGauge(w, "netra_tcp_listen_drops", "Kernel TcpExt ListenDrops summed across fresh agents.", float64(listenDrops))
+	metricGauge(w, "netra_softirq_net_rx", "Cumulative softirq NET_RX counts summed across fresh agents.", float64(softirq))
+}
+
+func writeProgramHealth(w http.ResponseWriter, agents []models.AgentStatus) {
+	type agg struct {
+		attached int
+		nodes    int
+		runs     uint64
+		runtime  uint64
+	}
+	byName := map[string]*agg{}
+	for _, a := range agents {
+		if a.Stale {
+			continue
+		}
+		for _, p := range a.Programs {
+			x := byName[p.Name]
+			if x == nil {
+				x = &agg{}
+				byName[p.Name] = x
+			}
+			x.nodes++
+			if p.Attached {
+				x.attached++
+			}
+			x.runs += p.RunCount
+			x.runtime += p.RunTimeNS
+		}
+	}
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		fmt.Fprintf(w, "# HELP netra_ebpf_program_attached Whether a Netra BPF program is attached on a reporting node (1=yes).\n# TYPE netra_ebpf_program_attached gauge\n")
+		for _, n := range names {
+			x := byName[n]
+			v := 0.0
+			if x.attached > 0 {
+				v = float64(x.attached) / float64(x.nodes)
+			}
+			fmt.Fprintf(w, "netra_ebpf_program_attached{program=%q} %.4f\n", n, v)
+		}
+		fmt.Fprintf(w, "# HELP netra_ebpf_program_run_count_total Cumulative BPF program run counts from kernel stats when available.\n# TYPE netra_ebpf_program_run_count_total counter\n")
+		for _, n := range names {
+			fmt.Fprintf(w, "netra_ebpf_program_run_count_total{program=%q} %d\n", n, byName[n].runs)
+		}
+		fmt.Fprintf(w, "# HELP netra_ebpf_program_run_time_seconds_total Cumulative BPF program runtime from kernel stats when available.\n# TYPE netra_ebpf_program_run_time_seconds_total counter\n")
+		for _, n := range names {
+			fmt.Fprintf(w, "netra_ebpf_program_run_time_seconds_total{program=%q} %.9f\n", n, float64(byName[n].runtime)/1e9)
+		}
+	}
+}
+
+func metricHistogram(w http.ResponseWriter, name, help string, s histograms.Snapshot) {
+	if s.Count == 0 && len(s.CumulativeCounts) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s histogram\n", name, help, name)
+	for i, le := range s.Bounds {
+		c := uint64(0)
+		if i < len(s.CumulativeCounts) {
+			c = s.CumulativeCounts[i]
+		}
+		fmt.Fprintf(w, "%s_bucket{le=\"%g\"} %d\n", name, le, c)
+	}
+	inf := uint64(0)
+	if len(s.CumulativeCounts) > 0 {
+		inf = s.CumulativeCounts[len(s.CumulativeCounts)-1]
+	}
+	fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n", name, inf)
+	fmt.Fprintf(w, "%s_sum %.0f\n", name, s.Sum)
+	fmt.Fprintf(w, "%s_count %d\n", name, s.Count)
 }
 
 func metricCounter(w http.ResponseWriter, name, help string, value uint64) {

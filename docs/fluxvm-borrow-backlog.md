@@ -2,6 +2,8 @@
 
 These FluxVM eBPF surfaces are intentionally **not** ported yet. Track them here so future work does not re-discover the boundary.
 
+Related: patterns from Cloudflare ebpf_exporter and Cilium Tetragon are tracked in [`exporter-tetragon-borrow-backlog.md`](exporter-tetragon-borrow-backlog.md).
+
 ## Edge TCP intelligence (`fluxvm_tcp_intel.bpf.c`)
 
 Passive TC/TCX handshake/RTT histograms on the edge. Useful where sockops cannot see NAT boundaries. Netra already covers sockops TCP health + path diagnostics; edge TCP intel should stay observe-only and avoid duplicating sockops metrics if added.

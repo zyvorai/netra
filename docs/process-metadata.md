@@ -35,6 +35,8 @@ This sets `NETRA_PROCMETA_ENABLED=true` on the agent **and** adds `hostPID: true
 
 Once enabled, the agent collects the unique nonzero PIDs seen in the current `TCPHealth` snapshot each sync cycle, resolves each through a bounded, TTL'd cache (`procmeta.Cache`, 30s TTL / 8192 entries by default), and reports the results in `AgentReport.ProcessMeta`, keyed by `pid` + `startTimeJiffies`. A PID that has already exited by the time it's resolved gets an entry with only `attributionError` set, rather than being dropped — so a caller can still see that enrichment was attempted.
 
+When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events.
+
 ## Limits
 
 - Linux only. On any other OS the agent's `readProcessMeta` is a no-op regardless of the flag.

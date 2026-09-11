@@ -108,6 +108,7 @@ func Run(opts Options) Report {
 		checkCapabilities(root),
 		checkUnprivilegedBPF(root),
 		checkLockdown(root),
+		checkTetragon(root),
 	)
 
 	if root == "/" {

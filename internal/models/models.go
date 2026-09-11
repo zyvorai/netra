@@ -212,11 +212,66 @@ type TCPHealthStat struct {
 	PID                uint32 `json:"pid,omitempty"`
 	UID                uint32 `json:"uid,omitempty"`
 	Comm               string `json:"comm,omitempty"`
-	Namespace          string `json:"namespace,omitempty"`
-	Pod                string `json:"pod,omitempty"`
-	WorkloadKind       string `json:"workloadKind,omitempty"`
-	WorkloadName       string `json:"workloadName,omitempty"`
-	ContainerID        string `json:"containerId,omitempty"`
+	// StartTimeJiffies + Exe are filled when procmeta is enabled and the
+	// socket owner's PID still matches a live process incarnation.
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	// OwnershipStale is set when the eBPF-attributed PID could not be
+	// confirmed in /proc (exited or reused). PID/comm are cleared in that case.
+	OwnershipStale bool   `json:"ownershipStale,omitempty"`
+	Namespace      string `json:"namespace,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	WorkloadKind   string `json:"workloadKind,omitempty"`
+	WorkloadName   string `json:"workloadName,omitempty"`
+	ContainerID    string `json:"containerId,omitempty"`
+}
+
+// BPFProgramStat is per-program attach + optional kernel run stats from the agent.
+type BPFProgramStat struct {
+	Name             string `json:"name"`
+	Type             string `json:"type,omitempty"`
+	ID               uint32 `json:"id,omitempty"`
+	Attached         bool   `json:"attached"`
+	RunCount         uint64 `json:"runCount,omitempty"`
+	RunTimeNS        uint64 `json:"runTimeNs,omitempty"`
+	RecursionMisses  uint64 `json:"recursionMisses,omitempty"`
+	InfoError        string `json:"infoError,omitempty"`
+}
+
+// CapChangeEvent is an observe-only notice that CapEff changed for a
+// process that currently owns a Netra-tracked socket (procmeta gated).
+type CapChangeEvent struct {
+	PID              uint32 `json:"pid"`
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	PreviousCapEff   uint64 `json:"previousCapEff"`
+	CurrentCapEff    uint64 `json:"currentCapEff"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+}
+
+// NetworkHistogramReport mirrors histograms.Report JSON for AgentReport
+// without importing the histograms package into models.
+type NetworkHistogramReport struct {
+	TCPRetransmissions HistogramSnapshot `json:"tcpRetransmissions"`
+	TCPSRTTUS          HistogramSnapshot `json:"tcpSrttUs"`
+	TCPConnectUS       HistogramSnapshot `json:"tcpConnectUs"`
+	Host               NetworkHostCounters `json:"host"`
+}
+
+type HistogramSnapshot struct {
+	Name             string    `json:"name"`
+	Bounds           []float64 `json:"bounds"`
+	CumulativeCounts []uint64  `json:"cumulativeCounts"`
+	Sum              float64   `json:"sum"`
+	Count            uint64    `json:"count"`
+}
+
+type NetworkHostCounters struct {
+	ListenOverflows uint64 `json:"listenOverflows"`
+	ListenDrops     uint64 `json:"listenDrops"`
+	SoftirqNETRX    uint64 `json:"softirqNetRx"`
 }
 
 type TCPSignalStat struct {
@@ -489,6 +544,9 @@ type AgentReport struct {
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
 	// see the host's /proc, a real expansion of what it can observe.
 	ProcessMeta     []ProcessMetaStat  `json:"processMeta,omitempty"`
+	Programs        []BPFProgramStat   `json:"programs,omitempty"`
+	Histograms      *NetworkHistogramReport `json:"histograms,omitempty"`
+	CapChanges      []CapChangeEvent   `json:"capChanges,omitempty"`
 	Stack           NodeStackStat      `json:"stack,omitempty"`
 	Events          []FastPathEvent    `json:"events"`
 	ObservedAt      time.Time          `json:"observedAt"`

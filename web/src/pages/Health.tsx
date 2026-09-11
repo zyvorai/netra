@@ -58,7 +58,7 @@ export default function Health() {
     <div className="span3"><TerminalFrame title="tcp health · sockops exact state">
       <div className="flowhead obs"><span>WORKLOAD / PROCESS</span><span>REMOTE</span><span>RTT</span><span>LOSS SIGNALS</span><span>CONNECTION</span></div>
       {(data?.tcp || []).map((t:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{t.namespace ? `${t.namespace}/${t.pod}` : (t.comm || `cgroup ${t.cgroupId || 0}`)}{t.pid ? ` · pid=${t.pid}` : ''}</span>
+        <span>{t.namespace ? `${t.namespace}/${t.pod}` : (t.comm || `cgroup ${t.cgroupId || 0}`)}{t.pid ? ` · pid=${t.pid}` : ''}{t.exe ? ` · ${t.exe}` : ''}{t.ownershipStale ? ' · stale-owner' : ''}</span>
         <span>{t.remoteIp}:{t.remotePort}</span>
         <span>{ms(t.srttUs)} ms · min {ms(t.minRttUs)} ms</span>
         <span>retrans {t.retransmissions} · RTO {t.rtos}</span>

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.0 — 2026-09-12
+
+- Borrowed observe-only patterns from Cloudflare ebpf_exporter and Cilium Tetragon (no vendoring, no TracingPolicy engine). See `docs/exporter-tetragon-borrow-backlog.md`.
+- Added agent-side network histograms (TCP retransmissions, SRTT, connect latency) plus host listen-overflow / softirq NET_RX counters; exported as Prometheus histograms/gauges on `/metrics`.
+- Added per-program BPF attach + optional kernel run stats on `AgentReport.programs` and `netra_ebpf_program_*` metrics; eBPF UI shows attach/run health.
+- Hardened process↔socket ownership when `NETRA_PROCMETA_ENABLED`: confirm `pid+startTimeJiffies`, clear stale PID attribution, surface `exe` on TCP health rows.
+- Added observe-only capability-change watch for socket-owning processes (`capChanges`) and a `netra-doctor` Tetragon coexistence info check.
+
 ## 0.21.0 — 2026-09-12
 
 - Added `internal/procmeta`, an optional, off-by-default `/proc`-derived process metadata reader (Linux-only): capabilities, seccomp/`NoNewPrivs`, LSM label, executable path, cgroup-derived pod/container/QoS attribution, and a kernel-thread/host/container/VM classification heuristic. PID-reuse-safe via `{PID, StartTime}` identity.
