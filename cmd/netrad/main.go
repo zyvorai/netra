@@ -9,15 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/zyvorai/netra/internal/alert"
 	"github.com/zyvorai/netra/internal/api"
 	"github.com/zyvorai/netra/internal/ha"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/store"
+	"github.com/zyvorai/netra/internal/webhook"
 )
 
 const version = "0.19.0"
@@ -48,6 +52,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	dispatcher, alertCfg := buildAlerting(log)
+	if dispatcher != nil {
+		dispatcher.Start(envInt("NETRA_ALERT_WORKERS", 2))
+		defer dispatcher.Stop()
+	}
+
 	stateFile := strings.TrimSpace(os.Getenv("NETRA_STATE_FILE"))
 	haEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true")
 	if haEnabled {
@@ -55,7 +65,7 @@ func main() {
 			log.Error("HA startup refused", "reason", "NETRA_STATE_FILE is required in HA mode")
 			os.Exit(1)
 		}
-		runHA(ctx, log, k, h, stateFile)
+		runHA(ctx, log, k, h, stateFile, dispatcher, alertCfg)
 		return
 	}
 
@@ -66,10 +76,55 @@ func main() {
 	}
 	defer st.Close()
 	handler := api.New(log, k, h, st).Handler()
+
+	if dispatcher != nil {
+		var pollerWG sync.WaitGroup
+		pctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		pollerWG.Add(1)
+		go func() {
+			defer pollerWG.Done()
+			alert.New(log, st, dispatcher.Publish, alertCfg).Run(pctx)
+		}()
+		defer pollerWG.Wait()
+	}
+
 	runHTTP(ctx, log, handler, st.Persistent(), false)
 }
 
-func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string) {
+// buildAlerting constructs the webhook dispatcher and alert-poller config
+// from env vars. It returns a nil dispatcher (alerting fully disabled) when
+// NETRA_ALERT_WEBHOOKS is unset, matching the off-by-default convention
+// used for every other optional feature in this codebase.
+func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
+	cfg := alert.Config{
+		Interval:   envDuration("NETRA_ALERT_POLL_INTERVAL", 30*time.Second),
+		Cooldown:   envDuration("NETRA_ALERT_COOLDOWN", 5*time.Minute),
+		StaleAfter: envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second),
+		TopN:       envInt("NETRA_ALERT_TOPN", 0),
+	}
+	raw := strings.TrimSpace(os.Getenv("NETRA_ALERT_WEBHOOKS"))
+	if raw == "" {
+		return nil, cfg
+	}
+	sinkCfgs, err := webhook.ParseConfigs(raw)
+	if err != nil {
+		log.Error("alert webhook config", "error", err)
+		os.Exit(1)
+	}
+	d := webhook.NewDispatcher(envInt("NETRA_ALERT_QUEUE_SIZE", 256))
+	for _, sc := range sinkCfgs {
+		sink, err := webhook.New(sc)
+		if err != nil {
+			log.Error("alert webhook sink", "name", sc.Name, "error", err)
+			os.Exit(1)
+		}
+		d.Add(sink)
+	}
+	return d, cfg
+}
+
+func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *webhook.Dispatcher, alertCfg alert.Config) {
 	identity := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
 	if identity == "" {
 		identity, _ = os.Hostname()
@@ -88,8 +143,18 @@ func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Clie
 	}
 
 	gate := ha.NewGate(identity, version)
-	go electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod)
+	// Tracked (not fire-and-forget) so runHA can wait for electionLoop —
+	// and therefore any alert poller it started on this replica's last
+	// leadership stint — to fully stop before the caller stops the shared
+	// dispatcher, so in-flight alert deliveries aren't cut off mid-shutdown.
+	var electionWG sync.WaitGroup
+	electionWG.Add(1)
+	go func() {
+		defer electionWG.Done()
+		electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod, dispatcher, alertCfg)
+	}()
 	runHTTP(ctx, log, gate, true, true)
+	electionWG.Wait()
 }
 
 func electionLoop(
@@ -100,15 +165,28 @@ func electionLoop(
 	gate *ha.Gate,
 	stateFile, namespace, leaseName, identity string,
 	leaseDuration, renewDeadline, retryPeriod time.Duration,
+	dispatcher *webhook.Dispatcher,
+	alertCfg alert.Config,
 ) {
 	var st *store.Store
 	var lastRenew time.Time
+	// pollerCancel/pollerWG track the alert poller started on this
+	// replica's current leadership stint, if any (only when dispatcher !=
+	// nil). Tied 1:1 to the store's own open/close lifecycle rather than to
+	// ha.Gate, which exposes no "give me the current store" query.
+	var pollerCancel func()
+	var pollerWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
 			return
 		}
 		gate.Demote()
+		if pollerCancel != nil {
+			pollerCancel()
+			pollerWG.Wait()
+			pollerCancel = nil
+		}
 		if st != nil {
 			if err := st.Close(); err != nil {
 				log.Error("close leader state", "error", err)
@@ -156,6 +234,15 @@ func electionLoop(
 		}
 		st = opened
 		gate.Promote(api.New(log, k, h, st).Handler())
+		if dispatcher != nil {
+			pctx, cancel := context.WithCancel(ctx)
+			pollerCancel = cancel
+			pollerWG.Add(1)
+			go func() {
+				defer pollerWG.Done()
+				alert.New(log, st, dispatcher.Publish, alertCfg).Run(pctx)
+			}()
+		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)
 	}
 
@@ -210,6 +297,15 @@ func env(k, d string) string {
 func envDuration(k string, d time.Duration) time.Duration {
 	if raw := strings.TrimSpace(os.Getenv(k)); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err == nil {
+			return parsed
+		}
+	}
+	return d
+}
+
+func envInt(k string, d int) int {
+	if raw := strings.TrimSpace(os.Getenv(k)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
 			return parsed
 		}
 	}

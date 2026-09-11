@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.19.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.20.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -74,6 +74,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Stale-agent detection and per-node hook coverage in the dashboard.
 - Kernel skb drop-reason counters through an optional raw `kfree_skb` tracepoint, plus Linux softnet and interface drop/error counters.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
+- Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). See `docs/alerting.md`.
 
 ### Emergency enforcement
 
@@ -223,6 +224,7 @@ docs/drop-detective.md    conntrack + policy Drop Detective
 docs/tcx-and-shield.md    TCX modes + XDP Shield
 docs/native-netpol.md     optional native deny-list NetPol maps
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
+docs/alerting.md          webhook alert dispatcher + poller runbook
 ```
 
 ## Prerequisites

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.0 — 2026-09-12
+
+- Added `internal/webhook`, a delivery package for pushing structured alert events to configured HTTP endpoints: HMAC-SHA256 body signing, per-sink severity filtering, bounded per-sink retry with exponential backoff, and concurrent per-sink fan-out so one unreachable sink can't delay delivery to the others.
+- Added `internal/alert`, a controller-side poller that periodically evaluates the existing `health`/`pathdiag`/`dropdiag` anomaly sources (previously only computed on demand, per HTTP request, with no background aggregation point) and publishes new/escalated findings through the dispatcher, with severity-escalation-aware cooldown deduplication.
+- Alerting is off by default (`NETRA_ALERT_WEBHOOKS` unset) and, when HA is enabled, runs only on the active leader replica, tied to the same store open/close lifecycle already used for the HTTP handler.
+- Added `docs/alerting.md`.
+- Did not add: new anomaly-detection thresholds, dedup-state persistence across restarts/failover, or exactly-once delivery guarantees.
+
 ## 0.19.0 — 2026-09-12
 
 - Added optional cgroup-keyed `netpol_deny4` / `netpol_enabled` maps for native deny-list NetworkPolicy-shaped enforcement (off by default).
