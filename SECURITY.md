@@ -1,33 +1,52 @@
 # Security
 
-Please do not file public issues for suspected vulnerabilities. Report security issues privately to the Zyvor maintainers through the security contact configured for the GitHub organization.
+Report suspected vulnerabilities privately to the Zyvor maintainers through the security contact configured for the GitHub organization. Do not publish exploitable details in a public issue before coordination.
 
-Netra's custom eBPF path is intentionally opt-in, observe-first, and isolated from Cilium maps. The agent is privileged by necessity and should only run on trusted nodes. Use independent controller and agent credentials for any shared deployment.
+## Standalone eBPF threat boundary
 
+The Netra agent is privileged because it loads host kernel BPF programs, pins maps in bpffs and attaches to host cgroup/interface hooks. Run it only on trusted nodes. The agent uses a dedicated ServiceAccount with `automountServiceAccountToken: false`; it does not need Kubernetes API credentials.
+
+Netra programs/maps live below `/sys/fs/bpf/netra` and do not read or modify Cilium-owned maps. Cilium and Hubble are optional in v0.7. Helm does not render CiliumNetworkPolicy RBAC unless `cilium.enabled=true`, and the controller rejects live Cilium policy operations while `NETRA_CILIUM_ENABLED` is disabled.
+
+XDP and TCX attachment are opt-in. The standalone default is root-cgroup v2 attachment, which avoids coupling policy behavior to a CNI-specific host interface.
+Root-cgroup attachment is intentionally broad and can cover host/system processes as well as container workloads. Treat broad CIDR/port/UID/process rules as node-level controls, test them in observe mode, and maintain an out-of-band recovery path before enforcing on production nodes.
+
+## Enforcement safety
+
+The custom datapath starts in observe mode. Enforce mode is time-limited and fail-open:
+
+- agent startup writes observe before controller synchronization;
+- enforcement requires a controller-issued lease with an expiry;
+- nodes locally expire the lease even if the controller is unreachable;
+- failure to refresh desired state for `NETRA_FAILSAFE_AFTER` forces observe;
+- controller restart and HA leadership change force observe before serving as leader.
+
+Rules may remain staged/persisted while enforcement is off. This is intentional: operators can inspect the configuration before deliberately re-enabling a lease.
+
+DNS-name blocking is limited to exact cleartext UDP/53 qnames. It does not inspect DoH/DoT/TCP DNS. Process-name blocking uses Linux `comm` and affects new connect/sendmsg operations; it is not a workload identity or process-kill mechanism. The destination PPS feature is emergency containment rather than a fair queue/QoS implementation.
 
 ## Authentication defaults
 
-Netra refuses controller startup when either `NETRA_API_KEY` or `NETRA_AGENT_KEY` is missing. `NETRA_ALLOW_UNAUTHENTICATED=true` is an explicit local-development escape hatch and should not be used on a shared cluster. The Helm chart enforces the same rule and can consume an existing Secret instead of storing credentials in values.
+The controller refuses startup when either `NETRA_API_KEY` or `NETRA_AGENT_KEY` is missing. `NETRA_ALLOW_UNAUTHENTICATED=true` is an explicit local-development escape hatch and should not be used on shared networks. Helm enforces the same default and supports `auth.existingSecret`.
 
-`/metrics` is intentionally unauthenticated for in-cluster Prometheus scraping, but it exports aggregate low-cardinality counters only; it does not expose destination IP labels, flow payloads, API keys, or policy bodies. Restrict Service reachability with cluster/network controls when required by your threat model.
+Use independent API and agent secrets. Rotate them through your normal Secret-management process. Restrict access to the controller Service with NetworkPolicy/firewall controls appropriate to your environment.
 
-## Policy change controls
+`/metrics` is intentionally unauthenticated for in-cluster Prometheus scraping but contains aggregate, low-cardinality operational data only. It does not export packet payloads, API keys or policy bodies.
 
-Non-dry-run CiliumNetworkPolicy apply requires a fresh preflight receipt by default. Receipts are one-shot, expire after five minutes, and are bound to the exact candidate bytes. High/critical plans also require explicit matching risk confirmation. Keep `NETRA_REQUIRE_PREFLIGHT=true` in shared environments.
+## Packet/process data
 
-Rollback snapshots deliberately remove Kubernetes server-owned metadata and `status` before reuse. With `NETRA_STATE_FILE` configured, revision history and audit metadata survive controller restarts, but the history is bounded and must not replace GitOps/source control or an independent backup strategy. History archives contain full policy manifests and should be treated as sensitive cluster configuration.
+The ring buffer exports selected packet-header metadata and process context. Netra does not copy arbitrary packet payload bytes to userspace. Cleartext DNS qnames are intentionally extracted and may be sensitive; apply retention/access controls to any external logs or metrics pipeline that consumes Netra events.
 
+Process events can include PID, UID, cgroup ID and `comm`. Treat them as operational telemetry.
 
-## Durable state
+## Optional Cilium policy controls
 
-The file backend writes atomically and holds an exclusive process lock. In v0.6 HA mode this lock is a second split-brain barrier behind Kubernetes Lease election; only the elected replica that also owns the file lock becomes Ready. Keep the PVC, persisted preflight receipts, and exported history archives access-controlled and encrypted according to your cluster storage policy.
+When Cilium integration is enabled, non-dry-run `CiliumNetworkPolicy` apply requires a fresh preflight receipt by default. Receipts are one-shot, expire after five minutes and are bound to the exact candidate bytes. High/critical plans also require explicit matching risk confirmation. Keep `NETRA_REQUIRE_PREFLIGHT=true` in shared environments.
 
-Netra intentionally fails open on controller restart for its custom eBPF emergency path: blocked IPv4 entries are restored, but an `enforce` mode/lease recorded on disk is reset to `observe`. CiliumNetworkPolicy remains the durable enforcement mechanism.
+Rollback snapshots remove Kubernetes server-owned metadata and `status`. Exported history contains full policy manifests and should be treated as sensitive cluster configuration.
 
-Replace-mode history import requires `X-Netra-Confirm-History-Replace: replace`. Imported CNP snapshots are sanitized and their namespace/name identity must match the archive metadata before they enter rollback history. Import itself never changes a live CNP.
+## Durable state and HA
 
-## High availability
+The file backend uses atomic temporary-file + fsync + rename semantics and an exclusive process lock. HA adds Kubernetes Lease election as the first ownership barrier. Use RWX storage that provides coherent POSIX advisory locking and filesystem semantics; do not use object-backed mounts that cannot guarantee these properties.
 
-Netra v0.6 HA is active/passive. A controller must hold both the Kubernetes Lease and the shared state-file lock before it becomes Ready. Use an RWX backend with reliable POSIX advisory locking. Do not place the shared state file on object-backed mounts that do not provide coherent rename/fsync/flock semantics.
-
-Preflight receipts are persisted because they authorize a later policy apply. Receipt consumption is written before the apply path proceeds, making the token one-shot across leader failover. Leader promotion always reopens state through the fail-open path; emergency eBPF enforcement is therefore reset to observe after leadership changes.
+Preflight receipt issuance and one-shot consumption are persisted. Leader promotion reopens state through the fail-open path so emergency eBPF enforcement is reset to observe after failover.

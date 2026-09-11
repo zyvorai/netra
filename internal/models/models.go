@@ -18,18 +18,45 @@ type BuildPolicyRequest struct {
 	IncludeDNS bool              `json:"includeDns,omitempty"`
 }
 
+type EBPFCIDRRule struct {
+	CIDR      string `json:"cidr"`
+	Direction string `json:"direction"` // egress, ingress, both
+}
+
+type EBPFPortRule struct {
+	Protocol  string `json:"protocol"` // TCP, UDP, ANY
+	Port      uint16 `json:"port"`
+	Direction string `json:"direction"` // egress, ingress, both
+}
+
+type EBPFRateLimit struct {
+	Destination string `json:"destination"` // IPv4 exact destination in v0.7
+	PPS         uint32 `json:"pps"`
+}
+
 type EBPFFastPathConfig struct {
-	Mode         string     `json:"mode"`
-	BlockedIPv4  []string   `json:"blockedIPv4"`
-	Revision     uint64     `json:"revision"`
-	EnforceUntil *time.Time `json:"enforceUntil,omitempty"`
-	LeaseSeconds int64      `json:"leaseSeconds,omitempty"`
+	Mode             string          `json:"mode"`
+	BlockedIPv4      []string        `json:"blockedIPv4"`
+	BlockedIPv6      []string        `json:"blockedIPv6,omitempty"`
+	BlockedCIDRs     []EBPFCIDRRule  `json:"blockedCidrs,omitempty"`
+	BlockedPorts     []EBPFPortRule  `json:"blockedPorts,omitempty"`
+	BlockedUIDs      []uint32        `json:"blockedUids,omitempty"`
+	BlockedDNS       []string        `json:"blockedDns,omitempty"`
+	BlockedProcesses []string        `json:"blockedProcesses,omitempty"`
+	RateLimits       []EBPFRateLimit `json:"rateLimits,omitempty"`
+	Revision         uint64          `json:"revision"`
+	EnforceUntil     *time.Time      `json:"enforceUntil,omitempty"`
+	LeaseSeconds     int64           `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
+	SourceIP      string `json:"sourceIp,omitempty"`
+	SourcePort    uint16 `json:"sourcePort,omitempty"`
 	DestinationIP string `json:"destinationIp"`
 	Port          uint16 `json:"port"`
 	Protocol      string `json:"protocol"`
+	Direction     string `json:"direction,omitempty"`
+	Hook          string `json:"hook,omitempty"`
 	Packets       uint64 `json:"packets"`
 	Bytes         uint64 `json:"bytes"`
 	Blocked       uint64 `json:"blocked"`
@@ -39,6 +66,10 @@ type DestinationStat struct {
 type FastPathEvent struct {
 	TimestampNS     uint64    `json:"timestampNs"`
 	ObservedAt      time.Time `json:"observedAt"`
+	Type            string    `json:"type,omitempty"`
+	Direction       string    `json:"direction,omitempty"`
+	Hook            string    `json:"hook,omitempty"`
+	Family          string    `json:"family,omitempty"`
 	SourceIP        string    `json:"sourceIp"`
 	DestinationIP   string    `json:"destinationIp"`
 	InterfaceIndex  uint32    `json:"interfaceIndex"`
@@ -46,22 +77,49 @@ type FastPathEvent struct {
 	SourcePort      uint16    `json:"sourcePort"`
 	DestinationPort uint16    `json:"destinationPort"`
 	Protocol        string    `json:"protocol"`
+	TCPFlags        uint8     `json:"tcpFlags,omitempty"`
 	Action          string    `json:"action"`
+	Reason          string    `json:"reason,omitempty"`
+	PID             uint32    `json:"pid,omitempty"`
+	UID             uint32    `json:"uid,omitempty"`
+	CgroupID        uint64    `json:"cgroupId,omitempty"`
+	Comm            string    `json:"comm,omitempty"`
+	DNSQuery        string    `json:"dnsQuery,omitempty"`
 }
 
 type AgentReport struct {
-	Node       string            `json:"node"`
-	Mode       string            `json:"mode"`
-	Interfaces []string          `json:"interfaces"`
-	Stats      []DestinationStat `json:"stats"`
-	Events     []FastPathEvent   `json:"events"`
-	ObservedAt time.Time         `json:"observedAt"`
+	Node          string            `json:"node"`
+	Mode          string            `json:"mode"`
+	Interfaces    []string          `json:"interfaces"`
+	XDPInterfaces []string          `json:"xdpInterfaces,omitempty"`
+	Hooks         []string          `json:"hooks,omitempty"`
+	CgroupPath    string            `json:"cgroupPath,omitempty"`
+	Standalone    bool              `json:"standalone"`
+	Stats         []DestinationStat `json:"stats"`
+	Events        []FastPathEvent   `json:"events"`
+	ObservedAt    time.Time         `json:"observedAt"`
 }
 
 type AgentStatus struct {
 	AgentReport
 	Stale      bool  `json:"stale"`
 	AgeSeconds int64 `json:"ageSeconds"`
+}
+
+type EBPFObservabilitySummary struct {
+	Events          uint64            `json:"events"`
+	Blocked         uint64            `json:"blocked"`
+	DNSQueries      uint64            `json:"dnsQueries"`
+	SocketEvents    uint64            `json:"socketEvents"`
+	Packets         uint64            `json:"packets"`
+	Bytes           uint64            `json:"bytes"`
+	Protocols       map[string]uint64 `json:"protocols"`
+	Directions      map[string]uint64 `json:"directions"`
+	Hooks           map[string]uint64 `json:"hooks"`
+	BlockReasons    []NamedCount      `json:"blockReasons"`
+	TopDNS          []NamedCount      `json:"topDns"`
+	TopProcesses    []NamedCount      `json:"topProcesses"`
+	TopDestinations []NamedCount      `json:"topDestinations"`
 }
 
 type AuditEvent struct {

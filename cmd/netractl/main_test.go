@@ -123,3 +123,43 @@ func TestPolicyArchiveExportImport(t *testing.T) {
 		t.Fatal("import endpoint was not called")
 	}
 }
+
+func TestEBPFDNSAndProcessCommands(t *testing.T) {
+	seen := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch r.URL.Path {
+		case "/api/v1/ebpf/dns":
+			if string(body) != `{"name":"telemetry.example.com"}` {
+				t.Fatalf("dns body=%s", body)
+			}
+			seen["dns"] = true
+		case "/api/v1/ebpf/process":
+			if string(body) != `{"name":"curl"}` {
+				t.Fatalf("process body=%s", body)
+			}
+			seen["process"] = true
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	oldBase, oldArgs := base, os.Args
+	base = srv.URL
+	defer func() { base, os.Args = oldBase, oldArgs }()
+
+	os.Args = []string{"netractl", "ebpf", "dns", "add", "telemetry.example.com"}
+	if err := ebpf(); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{"netractl", "ebpf", "process", "add", "curl"}
+	if err := ebpf(); err != nil {
+		t.Fatal(err)
+	}
+	if !seen["dns"] || !seen["process"] {
+		t.Fatalf("seen=%#v", seen)
+	}
+}

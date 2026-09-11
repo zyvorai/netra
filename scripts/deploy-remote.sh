@@ -154,21 +154,21 @@ build_image() {
       echo "podman or working docker required to build controller image" >&2
       exit 1
     fi
-    \$runtime build -f Dockerfile.runtime -t ghcr.io/zyvorai/netra:0.6.0 .
+    \$runtime build -f Dockerfile.runtime -t ghcr.io/zyvorai/netra:0.7.0 .
     return 0
   fi
   if [[ -z "\$runtime" ]]; then
     echo "podman or working docker required to build controller image" >&2
     exit 1
   fi
-  \$runtime build -t ghcr.io/zyvorai/netra:0.6.0 .
+  \$runtime build -t ghcr.io/zyvorai/netra:0.7.0 .
 }
 
 import_image() {
   if command -v podman >/dev/null 2>&1; then
-    podman save ghcr.io/zyvorai/netra:0.6.0 | sudo k3s ctr images import -
+    podman save ghcr.io/zyvorai/netra:0.7.0 | sudo k3s ctr images import -
   else
-    docker save ghcr.io/zyvorai/netra:0.6.0 | sudo k3s ctr images import -
+    docker save ghcr.io/zyvorai/netra:0.7.0 | sudo k3s ctr images import -
   fi
 }
 
@@ -186,12 +186,14 @@ helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \
   "\${HELM_AUTH[@]}" \
   --set image.repository=ghcr.io/zyvorai/netra \
-  --set image.tag=0.6.0 \
+  --set image.tag=0.7.0 \
   --set image.pullPolicy=IfNotPresent \
   --set hubble.address=hubble-relay.kube-system.svc:80 \
   --set service.type=NodePort \
   --set service.port=30870 \
   --set service.nodePort=30870 \
+  --set cilium.enabled=true \
+  --set hubble.enabled=true \
   --wait --timeout 300s
 
 kubectl -n netra-system rollout status deploy/netra --timeout=180s

@@ -5,5 +5,7 @@ resources:
 - rbac.yaml
 - pvc.yaml
 - controller.yaml
-# Opt in only after validating kernel/TCX/interface requirements:
+# Opt in after validating cgroup-v2/BPF requirements; TCX/XDP interfaces are optional:
 # - agent.yaml
+# Optional Cilium policy integration:
+# - rbac-cilium.yaml

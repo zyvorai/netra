@@ -24,6 +24,7 @@ import (
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/policy"
 	"github.com/zyvorai/netra/internal/store"
 )
@@ -38,6 +39,7 @@ type Server struct {
 	webDir           string
 	agentStaleAfter  time.Duration
 	requirePreflight bool
+	ciliumEnabled    bool
 	metricsData      *telemetry
 }
 
@@ -49,33 +51,34 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 		}
 	}
 	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
-	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, metricsData: &telemetry{}}
+	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
+	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, metricsData: &telemetry{}}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.6.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.7.0"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.6.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.7.0"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.6.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.7.0"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
-	mux.Handle("GET /api/v1/policies", s.auth(http.HandlerFunc(s.listPolicies)))
+	mux.Handle("GET /api/v1/policies", s.auth(s.cilium(http.HandlerFunc(s.listPolicies))))
 	mux.Handle("POST /api/v1/policies/build", s.auth(http.HandlerFunc(s.buildPolicy)))
-	mux.Handle("POST /api/v1/policies/plan", s.auth(http.HandlerFunc(s.planPolicy)))
-	mux.Handle("POST /api/v1/policies/apply", s.auth(http.HandlerFunc(s.applyPolicy)))
-	mux.Handle("POST /api/v1/policies/lockdown", s.auth(http.HandlerFunc(s.lockdownPolicy)))
-	mux.Handle("DELETE /api/v1/policies/lockdown/{namespace}/{name}", s.auth(http.HandlerFunc(s.unlockPolicy)))
+	mux.Handle("POST /api/v1/policies/plan", s.auth(s.cilium(http.HandlerFunc(s.planPolicy))))
+	mux.Handle("POST /api/v1/policies/apply", s.auth(s.cilium(http.HandlerFunc(s.applyPolicy))))
+	mux.Handle("POST /api/v1/policies/lockdown", s.auth(s.cilium(http.HandlerFunc(s.lockdownPolicy))))
+	mux.Handle("DELETE /api/v1/policies/lockdown/{namespace}/{name}", s.auth(s.cilium(http.HandlerFunc(s.unlockPolicy))))
 	mux.Handle("GET /api/v1/policies/history", s.auth(http.HandlerFunc(s.policyHistory)))
 	mux.Handle("GET /api/v1/policies/history/export", s.auth(http.HandlerFunc(s.exportPolicyHistory)))
 	mux.Handle("POST /api/v1/policies/history/import", s.auth(http.HandlerFunc(s.importPolicyHistory)))
-	mux.Handle("POST /api/v1/policies/{namespace}/{name}/rollback/{revision}", s.auth(http.HandlerFunc(s.rollbackPolicy)))
-	mux.Handle("DELETE /api/v1/policies/{namespace}/{name}", s.auth(http.HandlerFunc(s.deletePolicy)))
+	mux.Handle("POST /api/v1/policies/{namespace}/{name}/rollback/{revision}", s.auth(s.cilium(http.HandlerFunc(s.rollbackPolicy))))
+	mux.Handle("DELETE /api/v1/policies/{namespace}/{name}", s.auth(s.cilium(http.HandlerFunc(s.deletePolicy))))
 	mux.Handle("GET /api/v1/pods", s.auth(http.HandlerFunc(s.listPods)))
 	mux.Handle("GET /api/v1/vms", s.auth(http.HandlerFunc(s.listVMs)))
 	mux.Handle("GET /api/v1/workloads/{kind}/{namespace}/{name}", s.auth(http.HandlerFunc(s.workloadDetail)))
@@ -86,11 +89,35 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/ebpf/mode", s.auth(http.HandlerFunc(s.ebpfMode)))
 	mux.Handle("POST /api/v1/ebpf/deny", s.auth(http.HandlerFunc(s.ebpfDenyAdd)))
 	mux.Handle("DELETE /api/v1/ebpf/deny/{ip}", s.auth(http.HandlerFunc(s.ebpfDenyDelete)))
+	mux.Handle("POST /api/v1/ebpf/cidr", s.auth(http.HandlerFunc(s.ebpfCIDRAdd)))
+	mux.Handle("POST /api/v1/ebpf/cidr/delete", s.auth(http.HandlerFunc(s.ebpfCIDRDelete)))
+	mux.Handle("POST /api/v1/ebpf/port", s.auth(http.HandlerFunc(s.ebpfPortAdd)))
+	mux.Handle("POST /api/v1/ebpf/port/delete", s.auth(http.HandlerFunc(s.ebpfPortDelete)))
+	mux.Handle("POST /api/v1/ebpf/uid", s.auth(http.HandlerFunc(s.ebpfUIDAdd)))
+	mux.Handle("DELETE /api/v1/ebpf/uid/{uid}", s.auth(http.HandlerFunc(s.ebpfUIDDelete)))
+	mux.Handle("POST /api/v1/ebpf/dns", s.auth(http.HandlerFunc(s.ebpfDNSAdd)))
+	mux.Handle("POST /api/v1/ebpf/dns/delete", s.auth(http.HandlerFunc(s.ebpfDNSDelete)))
+	mux.Handle("POST /api/v1/ebpf/process", s.auth(http.HandlerFunc(s.ebpfProcessAdd)))
+	mux.Handle("POST /api/v1/ebpf/process/delete", s.auth(http.HandlerFunc(s.ebpfProcessDelete)))
+	mux.Handle("PUT /api/v1/ebpf/rate", s.auth(http.HandlerFunc(s.ebpfRateSet)))
+	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
+	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
+	mux.Handle("GET /api/v1/ebpf/capabilities", s.auth(http.HandlerFunc(s.ebpfCapabilities)))
 	mux.Handle("GET /api/v1/agents", s.auth(http.HandlerFunc(s.agents)))
 	mux.Handle("GET /api/v1/audit", s.auth(http.HandlerFunc(s.audit)))
 	mux.Handle("POST /api/v1/agents/report", s.agentAuth(http.HandlerFunc(s.agentReport)))
 	mux.HandleFunc("/", s.serveWeb)
 	return requestLog(s.log, s.metricsData, securityHeaders(mux))
+}
+
+func (s *Server) cilium(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.ciliumEnabled {
+			errorJSON(w, http.StatusConflict, "Cilium integration is disabled; enable NETRA_CILIUM_ENABLED or Helm cilium.enabled")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -152,7 +179,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			stale++
 		}
 	}
-	out := map[string]any{"version": "0.6.0", "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
+	out := map[string]any{"version": "0.7.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
 	if err != nil {
 		out["hubbleError"] = err.Error()
 	} else {
@@ -663,12 +690,17 @@ func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, err.Error())
 		return
 	}
-	a, err := netip.ParseAddr(x.IP)
-	if err != nil || !a.Is4() {
-		errorJSON(w, 400, "a valid IPv4 address is required")
+	a, err := netip.ParseAddr(strings.TrimSpace(x.IP))
+	if err != nil {
+		errorJSON(w, 400, "a valid IPv4 or IPv6 address is required")
 		return
 	}
-	cfg, err := s.store.AddBlocked(a.String(), actor(r))
+	var cfg models.EBPFFastPathConfig
+	if a.Is4() {
+		cfg, err = s.store.AddBlocked(a.String(), actor(r))
+	} else {
+		cfg, err = s.store.AddBlockedIPv6(a.String(), actor(r))
+	}
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
 		errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
@@ -678,11 +710,16 @@ func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) ebpfDenyDelete(w http.ResponseWriter, r *http.Request) {
 	a, err := netip.ParseAddr(r.PathValue("ip"))
-	if err != nil || !a.Is4() {
-		errorJSON(w, 400, "valid IPv4 required")
+	if err != nil {
+		errorJSON(w, 400, "valid IPv4 or IPv6 required")
 		return
 	}
-	cfg, err := s.store.DelBlocked(a.String(), actor(r))
+	var cfg models.EBPFFastPathConfig
+	if a.Is4() {
+		cfg, err = s.store.DelBlocked(a.String(), actor(r))
+	} else {
+		cfg, err = s.store.DelBlockedIPv6(a.String(), actor(r))
+	}
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
 		errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
@@ -690,6 +727,253 @@ func (s *Server) ebpfDenyDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, cfg)
 }
+func normalizeDirection(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		v = "egress"
+	}
+	return v, v == "egress" || v == "ingress" || v == "both"
+}
+func (s *Server) ebpfCIDRAdd(w http.ResponseWriter, r *http.Request)    { s.ebpfCIDRMutate(w, r, false) }
+func (s *Server) ebpfCIDRDelete(w http.ResponseWriter, r *http.Request) { s.ebpfCIDRMutate(w, r, true) }
+func (s *Server) ebpfCIDRMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x models.EBPFCIDRRule
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	p, err := netip.ParsePrefix(strings.TrimSpace(x.CIDR))
+	if err != nil {
+		errorJSON(w, 400, "valid IPv4 or IPv6 CIDR required")
+		return
+	}
+	x.CIDR = p.Masked().String()
+	var ok bool
+	x.Direction, ok = normalizeDirection(x.Direction)
+	if !ok {
+		errorJSON(w, 400, "direction must be ingress, egress, or both")
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelCIDR(x, actor(r))
+	} else {
+		cfg, err = s.store.AddCIDR(x, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist CIDR rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func normalizeProtocol(v string) (string, bool) {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	if v == "" {
+		v = "ANY"
+	}
+	return v, v == "TCP" || v == "UDP" || v == "ANY"
+}
+func (s *Server) ebpfPortAdd(w http.ResponseWriter, r *http.Request)    { s.ebpfPortMutate(w, r, false) }
+func (s *Server) ebpfPortDelete(w http.ResponseWriter, r *http.Request) { s.ebpfPortMutate(w, r, true) }
+func (s *Server) ebpfPortMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x models.EBPFPortRule
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if x.Port == 0 {
+		errorJSON(w, 400, "port must be 1-65535")
+		return
+	}
+	var ok bool
+	x.Protocol, ok = normalizeProtocol(x.Protocol)
+	if !ok {
+		errorJSON(w, 400, "protocol must be TCP, UDP, or ANY")
+		return
+	}
+	x.Direction, ok = normalizeDirection(x.Direction)
+	if !ok {
+		errorJSON(w, 400, "direction must be ingress, egress, or both")
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	var err error
+	if del {
+		cfg, err = s.store.DelPortRule(x, actor(r))
+	} else {
+		cfg, err = s.store.AddPortRule(x, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist port rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfUIDAdd(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		UID uint32 `json:"uid"`
+	}
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	cfg, err := s.store.AddUID(x.UID, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist UID rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfUIDDelete(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.ParseUint(r.PathValue("uid"), 10, 32)
+	if err != nil {
+		errorJSON(w, 400, "valid UID required")
+		return
+	}
+	cfg, err := s.store.DelUID(uint32(n), actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist UID rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func normalizeDNSName(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "."))
+	if v == "" || len(v) > 95 {
+		return "", fmt.Errorf("DNS name must be 1-95 bytes")
+	}
+	for _, label := range strings.Split(v, ".") {
+		if label == "" || len(label) > 63 {
+			return "", fmt.Errorf("invalid DNS name")
+		}
+		for i, r := range label {
+			if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_') || (r == '-' && (i == 0 || i == len(label)-1)) {
+				return "", fmt.Errorf("invalid DNS name")
+			}
+		}
+	}
+	return v, nil
+}
+func (s *Server) ebpfDNSAdd(w http.ResponseWriter, r *http.Request)    { s.ebpfDNSMutate(w, r, false) }
+func (s *Server) ebpfDNSDelete(w http.ResponseWriter, r *http.Request) { s.ebpfDNSMutate(w, r, true) }
+func (s *Server) ebpfDNSMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	name, err := normalizeDNSName(x.Name)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelDNS(name, actor(r))
+	} else {
+		cfg, err = s.store.AddDNS(name, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist DNS rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func normalizeProcessName(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" || len([]byte(v)) > 15 {
+		return "", fmt.Errorf("process name must be 1-15 bytes (Linux comm)")
+	}
+	if strings.IndexByte(v, 0) >= 0 {
+		return "", fmt.Errorf("invalid process name")
+	}
+	return v, nil
+}
+func (s *Server) ebpfProcessAdd(w http.ResponseWriter, r *http.Request) {
+	s.ebpfProcessMutate(w, r, false)
+}
+func (s *Server) ebpfProcessDelete(w http.ResponseWriter, r *http.Request) {
+	s.ebpfProcessMutate(w, r, true)
+}
+func (s *Server) ebpfProcessMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	name, err := normalizeProcessName(x.Name)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelProcess(name, actor(r))
+	} else {
+		cfg, err = s.store.AddProcess(name, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist process rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRateSet(w http.ResponseWriter, r *http.Request) {
+	var x models.EBPFRateLimit
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	a, err := netip.ParseAddr(strings.TrimSpace(x.Destination))
+	if err != nil || !a.Is4() {
+		errorJSON(w, 400, "rate limiting currently requires an exact IPv4 destination")
+		return
+	}
+	if x.PPS < 1 || x.PPS > 10000000 {
+		errorJSON(w, 400, "pps must be between 1 and 10000000")
+		return
+	}
+	x.Destination = a.String()
+	cfg, err := s.store.SetRateLimit(x, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist rate limit: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfRateDelete(w http.ResponseWriter, r *http.Request) {
+	a, err := netip.ParseAddr(r.PathValue("ip"))
+	if err != nil || !a.Is4() {
+		errorJSON(w, 400, "valid IPv4 required")
+		return
+	}
+	cfg, err := s.store.SetRateLimit(models.EBPFRateLimit{Destination: a.String()}, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist rate limit: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfSummary(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, observability.Summarize(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), 10))
+}
+func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "TCP flags", "per-hook attribution"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "IPv4 destination PPS limit", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop"}})
+}
+
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": s.store.AgentStatuses(time.Now(), s.agentStaleAfter), "staleAfterSeconds": int64(s.agentStaleAfter.Seconds())})
 }

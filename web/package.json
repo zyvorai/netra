@@ -1,7 +1,7 @@
 {
   "name": "netra-web",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {"dev":"vite","build":"tsc -b && vite build","typecheck":"tsc -b","test":"vitest run"},
   "dependencies": {"lucide-react":"0.542.0","react":"19.1.1","react-dom":"19.1.1"},

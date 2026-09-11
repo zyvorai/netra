@@ -1,6 +1,6 @@
 # Netra controller high availability
 
-Netra v0.6 uses active/passive controller HA. Kubernetes `coordination.k8s.io/v1` Lease election chooses a single active replica. A candidate is not promoted until it also acquires the shared state file lock.
+Netra v0.7 retains the active/passive controller HA introduced in v0.6. Kubernetes `coordination.k8s.io/v1` Lease election chooses a single active replica. A candidate is not promoted until it also acquires the shared state file lock.
 
 ## Storage requirements
 

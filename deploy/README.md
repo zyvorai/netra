@@ -1,6 +1,8 @@
 # Plain Kubernetes install
 
-The plain manifests are secure by default. Create the authentication Secret before applying the controller:
+The base plain manifests are standalone and do **not** grant Cilium permissions.
+
+Create controller/agent credentials first:
 
 ```bash
 kubectl create namespace netra-system --dry-run=client -o yaml | kubectl apply -f -
@@ -10,12 +12,21 @@ kubectl -n netra-system create secret generic netra-auth \
 kubectl apply -k deploy/
 ```
 
-`deploy/kustomization.yaml` intentionally does not include `agent.yaml`. Enable the privileged node agent only after validating Linux/TCX support and the target interface, then apply `deploy/agent.yaml` separately.
+`deploy/kustomization.yaml` intentionally leaves the privileged `agent.yaml` disabled. Validate cgroup v2, bpffs and kernel BPF support, then enable standalone eBPF coverage:
 
-For a local-only unauthenticated development deployment, set `NETRA_ALLOW_UNAUTHENTICATED=true` explicitly and provide empty key values yourself. Do not use that mode on a shared cluster.
+```bash
+kubectl apply -f deploy/agent.yaml
+```
 
-Policy apply is guarded by server-issued preflight receipts by default (`NETRA_REQUIRE_PREFLIGHT=true`). Keep this enabled in shared/production clusters; the Helm equivalent is `policy.requirePreflight=true`.
+The default agent uses root-cgroup hooks and requires no CNI-specific interface. TCX/XDP can be enabled by editing `NETRA_INTERFACES` / `NETRA_XDP_INTERFACES` in `agent.yaml`.
 
-Workload inventory (Pods / KubeVirt VMs) and lockdown need the ClusterRole verbs in `deploy/rbac.yaml` / Helm `templates/rbac.yaml` (`pods`, `apps/*` get/list, optional `kubevirt.io`). After applying RBAC changes, restart the controller Deployment.
+Cilium policy integration is optional. When needed, grant its RBAC separately:
 
-The plain kustomization includes `pvc.yaml` and configures `NETRA_STATE_FILE=/var/lib/netra/state.json`. A default StorageClass (or an edited PVC) is therefore required. The plain manifest remains a simple **single-controller** installation. For v0.6 active/passive HA, use the Helm chart so Lease election, leader-only readiness, PodDisruptionBudget, anti-affinity and RWX validation are rendered together. HA requires a shared ReadWriteMany volume with reliable POSIX advisory locking.
+```bash
+kubectl apply -f deploy/rbac-cilium.yaml
+kubectl -n netra-system set env deployment/netra NETRA_CILIUM_ENABLED=true
+```
+
+Hubble is disabled in the base controller manifest. Set `NETRA_HUBBLE_ENABLED=true` and configure `NETRA_HUBBLE_ADDR` only when Hubble Relay is available.
+
+The plain deployment includes a PVC and remains a simple single-controller install. Use the Helm chart for the v0.7 active/passive HA topology, which validates the shared RWX state assumptions and renders Lease election, anti-affinity and the PDB together.

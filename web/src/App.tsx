@@ -26,9 +26,11 @@ export default function App() {
       <main>
         <header className="hero">
           <div>
-            <p className="eyebrow">CILIUM OPERATIONS</p>
-            <h1>See egress. Shape policy. Contain fast.</h1>
-            <p>One operator surface for CiliumNetworkPolicy, Hubble Relay and an isolated Zyvor eBPF emergency path.</p>
+            <p className="eyebrow">STANDALONE eBPF · OPTIONAL CILIUM</p>
+            <h1>See the network. Shape policy. Contain fast.</h1>
+            <p>
+              Netra runs its own eBPF observability and emergency datapath on Linux/Kubernetes. Cilium CNP and Hubble are optional enrichment—Pods and VMs get live flows and one-click lockdown when Cilium is enabled.
+            </p>
           </div>
           <label className="tokenbox">
             API token

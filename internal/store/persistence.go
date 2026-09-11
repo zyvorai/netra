@@ -100,8 +100,9 @@ func (s *Store) load() error {
 	d.Config.Mode = "observe"
 	d.Config.EnforceUntil = nil
 	d.Config.LeaseSeconds = 0
-	d.Config.BlockedIPv4 = append([]string(nil), d.Config.BlockedIPv4...)
+	d.Config = cloneConfig(d.Config)
 	sort.Strings(d.Config.BlockedIPv4)
+	sort.Strings(d.Config.BlockedIPv6)
 	s.config = d.Config
 	s.audit = append([]models.AuditEvent(nil), tailAudit(d.Audit, 1000)...)
 	s.policyRevisions = cloneRevisions(tailRevisions(d.PolicyRevisions, 1000))

@@ -39,7 +39,20 @@ jobs:
         fi
     - run: helm lint helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key >/tmp/netra.yaml
+    - name: Default render must not grant Cilium RBAC
+      run: |
+        if grep -q 'cilium.io' /tmp/netra.yaml; then
+          echo "standalone chart unexpectedly rendered Cilium RBAC" >&2
+          exit 1
+        fi
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
+    - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true --set cilium.enabled=true --set hubble.enabled=true >/tmp/netra-cilium.yaml
+    - name: Optional Cilium render must include policy RBAC
+      run: grep -q 'cilium.io' /tmp/netra-cilium.yaml
+    - name: Standalone agent render must mount cgroup v2
+      run: |
+        grep -q '/sys/fs/cgroup' /tmp/netra-agent.yaml
+        grep -q 'NETRA_CGROUP_ENABLED' /tmp/netra-agent.yaml
     - name: HA must reject a chart-managed RWO volume
       run: |
         if helm template bad-ha helm/netra \

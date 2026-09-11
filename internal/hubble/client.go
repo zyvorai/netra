@@ -23,8 +23,9 @@ import (
 )
 
 type Client struct {
-	addr string
-	dial []grpc.DialOption
+	addr    string
+	dial    []grpc.DialOption
+	enabled bool
 }
 
 // Filter maps Netra's stable API query fields to native Hubble FlowFilter fields.
@@ -41,6 +42,10 @@ type Filter struct {
 }
 
 func NewFromEnvironment() (*Client, error) {
+	enabled := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HUBBLE_ENABLED")), "false")
+	if !enabled {
+		return &Client{enabled: false}, nil
+	}
 	addr := os.Getenv("NETRA_HUBBLE_ADDR")
 	if addr == "" {
 		addr = "hubble-relay.kube-system.svc:80"
@@ -77,10 +82,13 @@ func NewFromEnvironment() (*Client, error) {
 	} else {
 		creds = insecure.NewCredentials()
 	}
-	return &Client{addr: addr, dial: []grpc.DialOption{grpc.WithTransportCredentials(creds)}}, nil
+	return &Client{addr: addr, dial: []grpc.DialOption{grpc.WithTransportCredentials(creds)}, enabled: true}, nil
 }
 
 func (c *Client) connect(ctx context.Context) (*grpc.ClientConn, observerpb.ObserverClient, error) {
+	if !c.enabled {
+		return nil, nil, fmt.Errorf("Hubble integration is disabled; Netra standalone eBPF remains available")
+	}
 	conn, err := grpc.NewClient(c.addr, c.dial...)
 	if err != nil {
 		return nil, nil, err
@@ -89,6 +97,9 @@ func (c *Client) connect(ctx context.Context) (*grpc.ClientConn, observerpb.Obse
 }
 
 func (c *Client) Status(ctx context.Context) (any, error) {
+	if !c.enabled {
+		return map[string]any{"enabled": false, "optional": true}, nil
+	}
 	conn, cli, err := c.connect(ctx)
 	if err != nil {
 		return nil, err

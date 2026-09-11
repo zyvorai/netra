@@ -82,6 +82,10 @@ spec:
         env:
         - name: NETRA_LISTEN
           value: ":30870"
+        - name: NETRA_CILIUM_ENABLED
+          value: {{ .Values.cilium.enabled | quote }}
+        - name: NETRA_HUBBLE_ENABLED
+          value: {{ .Values.hubble.enabled | quote }}
         - name: NETRA_HUBBLE_ADDR
           value: {{ .Values.hubble.address | quote }}
         - name: NETRA_AGENT_STALE_AFTER

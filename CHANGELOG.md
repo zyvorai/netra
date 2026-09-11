@@ -1,13 +1,22 @@
 # Changelog
 
-## v0.6.0 — 2026-09-11
+## v0.7.0 — 2026-09-11
 
-- Published as open-source **Netra** (`github.com/zyvorai/netra`); default API **HTTPS :30870** (Zorvia-style in-pod TLS).
-- Added **Pods** and **VMs** (KubeVirt) inventory pages with per-workload Hubble live flows, drop explain, and top-destination pulse.
-- Added per-entity **create rule / delete rule** (selector pinned to the workload) and one-click **lock down / unlock** quarantine CNPs (`netra-lockdown-*`, deny-all ingress + DNS-only egress) through the existing plan → receipt → apply path.
-- Added APIs: `GET /api/v1/pods`, `GET /api/v1/vms`, `GET /api/v1/workloads/{kind}/{ns}/{name}`, `POST /api/v1/policies/lockdown`, `DELETE /api/v1/policies/lockdown/{ns}/{name}`.
-- Extended Helm RBAC for pods, apps owners, and kubevirt.io VM/VMI list/get.
-- Apple.com-style pill buttons in the React UI (primary `#0071e3`, secondary outline, quiet nav, danger).
+- Published as open-source **Netra** (`github.com/zyvorai/netra`); default API **HTTPS :30870**.
+- Retained **Pods / VMs** inventory, per-workload Hubble flows, create/delete CNP rules, and lock down / unlock when `cilium.enabled=true`.
+- Apple.com-style pill buttons in the React UI.
+
+- Made Cilium and Hubble optional: Netra now has a standalone eBPF datapath that can run with any Kubernetes CNI or on ordinary cgroup-v2 Linux nodes.
+- Added default cgroup skb ingress/egress hooks plus connect4/connect6 and UDP sendmsg4/sendmsg6 process-aware socket hooks.
+- Added optional TCX ingress/egress and optional XDP early-ingress attachment.
+- Added IPv4/IPv6 flow counters, direction/hook attribution, TCP flags, DNS qname events, PID/UID/cgroup/process context, top-destination/DNS/process summaries, and richer block reasons.
+- Added exact IPv6 deny, directional IPv4/IPv6 CIDR LPM deny, directional TCP/UDP/ANY port deny, UID deny, process-comm deny, exact cleartext UDP/53 DNS-name deny, and exact IPv4 destination PPS control.
+- Kept all custom enforcement lease-bound and fail-open; standalone rules can be staged while observe-only.
+- Added standalone eBPF API/CLI/dashboard controls and capability reporting.
+- Helm now defaults `cilium.enabled=false` and `hubble.enabled=false`; Cilium RBAC is rendered only when explicitly enabled. Plain manifests split Cilium RBAC into `deploy/rbac-cilium.yaml`.
+- Added standalone eBPF architecture/runbook documentation and CI render gates for Cilium-free and optional-Cilium modes.
+
+## v0.6.0 — 2026-09-11
 
 - Added Kubernetes `coordination.k8s.io/v1` Lease election for active/passive controller HA.
 - Added leader-only readiness: standby replicas remain live but return `503` for API traffic and are excluded from the Service.

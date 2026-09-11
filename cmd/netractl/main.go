@@ -67,7 +67,15 @@ func usage() {
   policy delete <namespace> <name>
   flows watch [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | mode observe | mode enforce [lease] | deny add IP | deny del IP`)
+  ebpf stats | summary | capabilities
+  ebpf mode observe | mode enforce [lease]
+  ebpf deny add IP | deny del IP
+  ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
+  ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
+  ebpf uid add UID | uid del UID
+  ebpf dns add NAME | dns del NAME
+  ebpf process add COMM | process del COMM
+  ebpf rate set IPv4 PPS | rate del IPv4`)
 }
 func policy() error {
 	if len(os.Args) < 3 {
@@ -310,6 +318,10 @@ func ebpf() error {
 	switch os.Args[2] {
 	case "stats":
 		return request("GET", "/api/v1/agents", nil)
+	case "summary":
+		return request("GET", "/api/v1/ebpf/summary", nil)
+	case "capabilities":
+		return request("GET", "/api/v1/ebpf/capabilities", nil)
 	case "mode":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("mode required")
@@ -334,6 +346,95 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/deny/"+url.PathEscape(os.Args[4]), nil)
+		}
+	case "cidr":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("cidr add|del CIDR [direction]")
+		}
+		dir := "egress"
+		if len(os.Args) > 5 {
+			dir = os.Args[5]
+		}
+		b, _ := json.Marshal(map[string]any{"cidr": os.Args[4], "direction": dir})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/cidr", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/cidr/delete", b)
+		}
+	case "port":
+		if len(os.Args) < 6 {
+			return fmt.Errorf("port add|del TCP|UDP|ANY PORT [direction]")
+		}
+		port, err := strconv.ParseUint(os.Args[5], 10, 16)
+		if err != nil || port == 0 {
+			return fmt.Errorf("valid port required")
+		}
+		dir := "egress"
+		if len(os.Args) > 6 {
+			dir = os.Args[6]
+		}
+		b, _ := json.Marshal(map[string]any{"protocol": os.Args[4], "port": uint16(port), "direction": dir})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/port", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/port/delete", b)
+		}
+	case "uid":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("uid add|del UID")
+		}
+		uid, err := strconv.ParseUint(os.Args[4], 10, 32)
+		if err != nil {
+			return fmt.Errorf("valid UID required")
+		}
+		if os.Args[3] == "add" {
+			b, _ := json.Marshal(map[string]any{"uid": uint32(uid)})
+			return request("POST", "/api/v1/ebpf/uid", b)
+		}
+		if os.Args[3] == "del" {
+			return request("DELETE", "/api/v1/ebpf/uid/"+strconv.FormatUint(uid, 10), nil)
+		}
+	case "dns":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("dns add|del NAME")
+		}
+		b, _ := json.Marshal(map[string]string{"name": os.Args[4]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/dns", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/dns/delete", b)
+		}
+	case "process":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("process add|del COMM")
+		}
+		b, _ := json.Marshal(map[string]string{"name": os.Args[4]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/process", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/process/delete", b)
+		}
+	case "rate":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("rate set IPv4 PPS | rate del IPv4")
+		}
+		if os.Args[3] == "del" {
+			return request("DELETE", "/api/v1/ebpf/rate/"+url.PathEscape(os.Args[4]), nil)
+		}
+		if os.Args[3] == "set" {
+			if len(os.Args) < 6 {
+				return fmt.Errorf("rate set IPv4 PPS")
+			}
+			pps, err := strconv.ParseUint(os.Args[5], 10, 32)
+			if err != nil || pps == 0 {
+				return fmt.Errorf("valid PPS required")
+			}
+			b, _ := json.Marshal(map[string]any{"destination": os.Args[4], "pps": uint32(pps)})
+			return request("PUT", "/api/v1/ebpf/rate", b)
 		}
 	}
 	return fmt.Errorf("unknown ebpf command")

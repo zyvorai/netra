@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.6.0"
+  tag: "0.7.0"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.6.0"
+  tag: "0.7.0"
 replicaCount: 1
 ha:
   enabled: false
@@ -15,7 +15,10 @@ ha:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+cilium:
+  enabled: false
 hubble:
+  enabled: false
   address: hubble-relay.kube-system.svc:80
 auth:
   allowUnauthenticated: false
@@ -42,7 +45,10 @@ resources:
   limits: {cpu: 500m, memory: 256Mi}
 agent:
   enabled: false
-  interfaces: cilium_host
+  cgroupEnabled: true
+  cgroupPath: /sys/fs/cgroup
+  interfaces: ""
+  xdpInterfaces: ""
   pinPath: /sys/fs/bpf/netra
   failsafeAfter: 60s
   staleAfter: 45s

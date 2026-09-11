@@ -11,37 +11,6 @@ metadata:
   namespace: netra-system
 automountServiceAccountToken: false
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: netra
-rules:
-- apiGroups: ["cilium.io"]
-  resources: ["ciliumnetworkpolicies"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get","list","watch"]
-- apiGroups: ["apps"]
-  resources: ["deployments","statefulsets","daemonsets","replicasets"]
-  verbs: ["get","list"]
-- apiGroups: ["kubevirt.io"]
-  resources: ["virtualmachines","virtualmachineinstances"]
-  verbs: ["get","list","watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: netra
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: netra
-subjects:
-- kind: ServiceAccount
-  name: netra
-  namespace: netra-system
----
 # Required only when NETRA_HA_ENABLED=true. Keeping it in the plain manifest
 # makes switching to the documented HA Helm installation predictable.
 apiVersion: rbac.authorization.k8s.io/v1

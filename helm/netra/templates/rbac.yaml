@@ -3,9 +3,6 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Name }}-netra
 rules:
-- apiGroups: ["cilium.io"]
-  resources: ["ciliumnetworkpolicies"]
-  verbs: ["get","list","watch","create","update","patch","delete"]
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get","list","watch"]
@@ -15,6 +12,11 @@ rules:
 - apiGroups: ["kubevirt.io"]
   resources: ["virtualmachines","virtualmachineinstances"]
   verbs: ["get","list","watch"]
+{{- if .Values.cilium.enabled }}
+- apiGroups: ["cilium.io"]
+  resources: ["ciliumnetworkpolicies"]
+  verbs: ["get","list","watch","create","update","patch","delete"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

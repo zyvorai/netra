@@ -25,11 +25,15 @@ spec:
           privileged: true
         env:
         - name: NETRA_SERVER
-          value: "{{ if .Values.tls.enabled }}https{{ else }}http{{ end }}://netra.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}"
-        - name: NETRA_TLS_INSECURE
-          value: "{{ .Values.tls.enabled }}"
+          value: {{ printf "http://netra.%s.svc:%v" .Release.Namespace .Values.service.port | quote }}
+        - name: NETRA_CGROUP_ENABLED
+          value: {{ .Values.agent.cgroupEnabled | quote }}
+        - name: NETRA_CGROUP_PATH
+          value: {{ .Values.agent.cgroupPath | quote }}
         - name: NETRA_INTERFACES
           value: {{ .Values.agent.interfaces | quote }}
+        - name: NETRA_XDP_INTERFACES
+          value: {{ .Values.agent.xdpInterfaces | quote }}
         - name: NETRA_BPF_PIN
           value: {{ .Values.agent.pinPath | quote }}
         - name: NETRA_FAILSAFE_AFTER
@@ -47,9 +51,16 @@ spec:
         - name: bpffs
           mountPath: /sys/fs/bpf
           mountPropagation: Bidirectional
+        - name: cgroupfs
+          mountPath: {{ .Values.agent.cgroupPath | quote }}
+          readOnly: true
       volumes:
       - name: bpffs
         hostPath:
           path: /sys/fs/bpf
+          type: Directory
+      - name: cgroupfs
+        hostPath:
+          path: /sys/fs/cgroup
           type: Directory
 {{- end }}

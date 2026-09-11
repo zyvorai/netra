@@ -64,9 +64,7 @@ func (s *Store) Config() models.EBPFFastPathConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.normalizeLocked(time.Now())
-	out := s.config
-	out.BlockedIPv4 = append([]string(nil), out.BlockedIPv4...)
-	return out
+	return cloneConfig(s.config)
 }
 
 func (s *Store) SetMode(mode string, lease time.Duration, actor string) (models.EBPFFastPathConfig, error) {
@@ -135,6 +133,316 @@ func (s *Store) DelBlocked(ip, actor string) (models.EBPFFastPathConfig, error) 
 			s.audit = s.audit[:auditLen]
 			return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 		}
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) AddBlockedIPv6(ip, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedIPv6 {
+		if x == ip {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedIPv6 = append(s.config.BlockedIPv6, ip)
+	sort.Strings(s.config.BlockedIPv6)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny6.add", Target: ip})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelBlockedIPv6(ip, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]string, 0, len(s.config.BlockedIPv6))
+	for _, x := range s.config.BlockedIPv6 {
+		if x != ip {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedIPv6) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedIPv6 = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny6.delete", Target: ip})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) AddCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedCIDRs {
+		if x == rule {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedCIDRs = append(s.config.BlockedCIDRs, rule)
+	sort.Slice(s.config.BlockedCIDRs, func(i, j int) bool {
+		if s.config.BlockedCIDRs[i].Direction == s.config.BlockedCIDRs[j].Direction {
+			return s.config.BlockedCIDRs[i].CIDR < s.config.BlockedCIDRs[j].CIDR
+		}
+		return s.config.BlockedCIDRs[i].Direction < s.config.BlockedCIDRs[j].Direction
+	})
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.cidr.add", Target: rule.CIDR, Details: map[string]any{"direction": rule.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFCIDRRule, 0, len(s.config.BlockedCIDRs))
+	for _, x := range s.config.BlockedCIDRs {
+		if x != rule {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedCIDRs) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedCIDRs = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.cidr.delete", Target: rule.CIDR, Details: map[string]any{"direction": rule.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) AddPortRule(rule models.EBPFPortRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedPorts {
+		if x == rule {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedPorts = append(s.config.BlockedPorts, rule)
+	sort.Slice(s.config.BlockedPorts, func(i, j int) bool {
+		a, b := s.config.BlockedPorts[i], s.config.BlockedPorts[j]
+		if a.Direction != b.Direction {
+			return a.Direction < b.Direction
+		}
+		if a.Protocol != b.Protocol {
+			return a.Protocol < b.Protocol
+		}
+		return a.Port < b.Port
+	})
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.port.add", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelPortRule(rule models.EBPFPortRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFPortRule, 0, len(s.config.BlockedPorts))
+	for _, x := range s.config.BlockedPorts {
+		if x != rule {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedPorts) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedPorts = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.port.delete", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) AddUID(uid uint32, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedUIDs {
+		if x == uid {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedUIDs = append(s.config.BlockedUIDs, uid)
+	sort.Slice(s.config.BlockedUIDs, func(i, j int) bool { return s.config.BlockedUIDs[i] < s.config.BlockedUIDs[j] })
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.uid.add", Target: fmt.Sprint(uid)})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelUID(uid uint32, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]uint32, 0, len(s.config.BlockedUIDs))
+	for _, x := range s.config.BlockedUIDs {
+		if x != uid {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedUIDs) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedUIDs = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.uid.delete", Target: fmt.Sprint(uid)})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) AddDNS(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedDNS {
+		if x == name {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedDNS = append(s.config.BlockedDNS, name)
+	sort.Strings(s.config.BlockedDNS)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.dns.add", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+func (s *Store) DelDNS(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]string, 0, len(s.config.BlockedDNS))
+	for _, x := range s.config.BlockedDNS {
+		if x != name {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedDNS) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedDNS = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.dns.delete", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+func (s *Store) AddProcess(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.BlockedProcesses {
+		if x == name {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.BlockedProcesses = append(s.config.BlockedProcesses, name)
+	sort.Strings(s.config.BlockedProcesses)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.process.add", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+func (s *Store) DelProcess(name, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]string, 0, len(s.config.BlockedProcesses))
+	for _, x := range s.config.BlockedProcesses {
+		if x != name {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.BlockedProcesses) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.BlockedProcesses = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.process.delete", Target: name})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) SetRateLimit(rule models.EBPFRateLimit, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFRateLimit, 0, len(s.config.RateLimits)+1)
+	for _, x := range s.config.RateLimits {
+		if x.Destination != rule.Destination {
+			out = append(out, x)
+		}
+	}
+	if rule.PPS > 0 {
+		out = append(out, rule)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Destination < out[j].Destination })
+	s.config.RateLimits = out
+	s.config.Revision++
+	action := "ebpf.rate.set"
+	if rule.PPS == 0 {
+		action = "ebpf.rate.delete"
+	}
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: rule.Destination, Details: map[string]any{"pps": rule.PPS}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
 }
@@ -379,6 +687,13 @@ func (s *Store) PolicyRevision(namespace, name string, id uint64) (models.Policy
 
 func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedIPv4 = append([]string(nil), c.BlockedIPv4...)
+	c.BlockedIPv6 = append([]string(nil), c.BlockedIPv6...)
+	c.BlockedCIDRs = append([]models.EBPFCIDRRule(nil), c.BlockedCIDRs...)
+	c.BlockedPorts = append([]models.EBPFPortRule(nil), c.BlockedPorts...)
+	c.BlockedUIDs = append([]uint32(nil), c.BlockedUIDs...)
+	c.BlockedDNS = append([]string(nil), c.BlockedDNS...)
+	c.BlockedProcesses = append([]string(nil), c.BlockedProcesses...)
+	c.RateLimits = append([]models.EBPFRateLimit(nil), c.RateLimits...)
 	return c
 }
 

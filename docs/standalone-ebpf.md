@@ -1,0 +1,48 @@
+# Standalone eBPF datapath — v0.7
+
+Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge of the installed CNI. The default attachment point is the root cgroup v2 hierarchy, so descendant workload traffic is covered independently of virtual-interface naming.
+
+## Attachment strategy
+
+1. **cgroup skb ingress/egress** — primary packet path. Supplies IPv4/IPv6 counters, direction, L4 tuple metadata, TCP flags, DNS qname visibility and packet-path enforcement.
+2. **cgroup socket address hooks** — process identity path. Supplies PID, UID, cgroup ID and `comm` for new TCP connects and UDP sendmsg operations and can reject by UID/process/IP/CIDR/port.
+3. **TCX** — optional interface layer. Configure `NETRA_INTERFACES=eth0,cni0` or `auto`; it is not needed for baseline standalone coverage.
+4. **XDP** — optional early ingress layer. Configure `NETRA_XDP_INTERFACES` explicitly. XDP is restricted to controls that can be decided at that hook and should be validated per NIC/driver.
+
+## Enforcement rules
+
+Rules are staged in controller state and synchronized to every agent. Observe mode keeps maps populated but returns allow verdicts. Enforce mode is always leased.
+
+| Control | IPv4 | IPv6 | ingress | egress | process-aware |
+|---|---:|---:|---:|---:|---:|
+| exact IP | ✅ | ✅ | — | ✅ | socket hook can apply |
+| CIDR LPM | ✅ | ✅ | ✅ | ✅ | socket hook can apply egress |
+| TCP/UDP/ANY port | ✅ | ✅ | ✅ | ✅ | ✅ egress |
+| UID | n/a | n/a | — | new sockets | ✅ |
+| process `comm` | n/a | n/a | — | new sockets | ✅ |
+| exact DNS qname | protocol-level | protocol-level | — | UDP/53 | packet hook |
+| destination PPS | ✅ exact IPv4 | — | — | ✅ | — |
+
+## DNS visibility
+
+The BPF parser reads only enough of a normal UDP/53 DNS question to reconstruct a bounded qname. It rejects compression pointers in the question-name parser and lowercases ASCII before lookup. It intentionally does not claim visibility into encrypted DNS, TCP DNS, arbitrary payloads, HTTP, TLS SNI or application content.
+
+## Process identity
+
+Linux `bpf_get_current_pid_tgid`, `bpf_get_current_uid_gid`, `bpf_get_current_cgroup_id` and `bpf_get_current_comm` are used in socket-address hooks. `comm` is a short kernel task name, not a cryptographic workload identity. Use UID/process blocking as emergency containment rather than as a durable authorization model.
+
+## Fail-open behavior
+
+Netra's custom enforcement is designed to fail open:
+
+- agent startup writes observe mode before fetching controller state;
+- a lease has an explicit expiry;
+- each node independently stops enforcing when its lease expires;
+- inability to refresh desired state for `NETRA_FAILSAFE_AFTER` forces observe;
+- controller restart and HA leadership transition reopen durable state in observe mode.
+
+The configured deny/rate rule set can remain persisted while enforcement is disabled, allowing deliberate reactivation after review.
+
+## Kernel/runtime notes
+
+Use modern kernels and test the actual BPF verifier on every supported kernel family. Ring buffers imply a practical Linux 5.8+ baseline. TCX is treated as a Linux 6.6+ feature baseline by this repository. XDP behavior depends on driver/generic support. bpffs must be mounted at `/sys/fs/bpf`, and the agent is privileged because it loads programs and accesses host cgroup/bpffs state.

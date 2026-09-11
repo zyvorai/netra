@@ -1,7 +1,5 @@
 /web/node_modules/
 /web/dist/
-/web/tsconfig.tsbuildinfo
 /bin/
 *.o
 .DS_Store
-.cursor/

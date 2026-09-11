@@ -164,6 +164,12 @@ func TestPersistentStoreSurvivesRestartAndFailsOpen(t *testing.T) {
 	if _, err := s.AddBlocked("203.0.113.20", "test"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.AddDNS("blocked.example", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddProcess("curl", "test"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetMode("enforce", time.Hour, "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +186,7 @@ func TestPersistentStoreSurvivesRestartAndFailsOpen(t *testing.T) {
 	}
 	defer s.Close()
 	cfg := s.Config()
-	if cfg.Mode != "observe" || len(cfg.BlockedIPv4) != 1 || cfg.BlockedIPv4[0] != "203.0.113.20" {
+	if cfg.Mode != "observe" || len(cfg.BlockedIPv4) != 1 || cfg.BlockedIPv4[0] != "203.0.113.20" || len(cfg.BlockedDNS) != 1 || cfg.BlockedDNS[0] != "blocked.example" || len(cfg.BlockedProcesses) != 1 || cfg.BlockedProcesses[0] != "curl" {
 		t.Fatalf("restart state=%#v", cfg)
 	}
 	if got := s.PolicyHistory("payments", "egress", 10); len(got) != 1 {
@@ -249,5 +255,43 @@ func TestPersistenceFailureRollsBackFastPathMutation(t *testing.T) {
 	}
 	if got.Revision != before.Revision || len(got.BlockedIPv4) != 0 || len(s.Config().BlockedIPv4) != 0 {
 		t.Fatalf("mutation was not rolled back: before=%#v got=%#v now=%#v", before, got, s.Config())
+	}
+}
+
+func TestStandaloneEBPFRules(t *testing.T) {
+	s := New()
+	if _, err := s.AddBlockedIPv6("2001:db8::10", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddCIDR(models.EBPFCIDRRule{CIDR: "10.0.0.0/8", Direction: "egress"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddPortRule(models.EBPFPortRule{Protocol: "TCP", Port: 22, Direction: "both"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddUID(1000, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDNS("telemetry.example.com", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddProcess("curl", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRateLimit(models.EBPFRateLimit{Destination: "203.0.113.8", PPS: 100}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	c := s.Config()
+	if len(c.BlockedIPv6) != 1 || len(c.BlockedCIDRs) != 1 || len(c.BlockedPorts) != 1 || len(c.BlockedUIDs) != 1 || len(c.BlockedDNS) != 1 || len(c.BlockedProcesses) != 1 || len(c.RateLimits) != 1 {
+		t.Fatalf("rules missing: %#v", c)
+	}
+	// Config must be a deep copy.
+	c.BlockedIPv6[0] = "mutated"
+	c.BlockedUIDs[0] = 1
+	c.BlockedDNS[0] = "mutated.example"
+	c.BlockedProcesses[0] = "mutated"
+	c2 := s.Config()
+	if c2.BlockedIPv6[0] == "mutated" || c2.BlockedUIDs[0] == 1 || c2.BlockedDNS[0] == "mutated.example" || c2.BlockedProcesses[0] == "mutated" {
+		t.Fatal("Config leaked mutable slices")
 	}
 }

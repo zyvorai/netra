@@ -7,7 +7,7 @@ spec:
   selector: {app.kubernetes.io/name: netra}
   ports:
   - name: http
-    port: 30870
+    port: 8080
     targetPort: http
 ---
 apiVersion: apps/v1
@@ -33,10 +33,12 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
       - name: netra
-        image: ghcr.io/zyvorai/netra:0.6.0
+        image: ghcr.io/zyvorai/netra:0.7.0
         imagePullPolicy: IfNotPresent
-        ports: [{name: http, containerPort: 30870}]
+        ports: [{name: http, containerPort: 8080}]
         env:
+        - {name: NETRA_CILIUM_ENABLED, value: "false"}
+        - {name: NETRA_HUBBLE_ENABLED, value: "false"}
         - {name: NETRA_HUBBLE_ADDR, value: hubble-relay.kube-system.svc:80}
         - {name: NETRA_AGENT_STALE_AFTER, value: 45s}
         - {name: NETRA_ALLOW_UNAUTHENTICATED, value: "false"}

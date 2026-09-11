@@ -7,9 +7,9 @@ export default function Nav({ page, setPage }: { page: Page; setPage: (p: Page) 
     ['overview', <Activity size={17} />, 'Overview'],
     ['pods', <Box size={17} />, 'Pods'],
     ['vms', <Server size={17} />, 'VMs'],
-    ['policies', <Shield size={17} />, 'Policies'],
-    ['flows', <Network size={17} />, 'Live flows'],
     ['ebpf', <TerminalSquare size={17} />, 'eBPF'],
+    ['flows', <Network size={17} />, 'Hubble'],
+    ['policies', <Shield size={17} />, 'Policies'],
     ['audit', <History size={17} />, 'Audit'],
   ];
   return (
