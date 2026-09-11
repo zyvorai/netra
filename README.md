@@ -1,32 +1,10 @@
 # Netra
 
-[![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-informational.svg)](CHANGELOG.md)
-
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
-Netra v0.7 no longer requires Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
+Netra v0.8 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
-
-![Netra dashboard — Overview](docs/ux/00-overview.png)
-
-## Contents
-
-- [Standalone eBPF capabilities](#standalone-ebpf-capabilities)
-- [Hook model](#hook-model)
-- [Important visibility boundaries](#important-visibility-boundaries)
-- [Optional Cilium / Hubble integration](#optional-cilium--hubble-integration)
-- [HTTPS default](#https-default)
-- [Architecture](#architecture)
-- [Repository](#repository)
-- [Prerequisites](#prerequisites)
-- [Build](#build)
-- [Standalone Helm install](#standalone-helm-install)
-- [eBPF CLI examples](#ebpf-cli-examples)
-- [Safety and persistence](#safety-and-persistence)
-- [License](#license)
 
 ## Standalone eBPF capabilities
 
@@ -38,6 +16,8 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - Sampled flow-header events without application payload collection.
 - Cleartext UDP/53 DNS query-name events.
 - Socket context for new TCP connect / UDP sendmsg operations: PID, UID, cgroup ID and Linux process `comm`.
+- Kubernetes attribution on cgroup traffic: namespace, pod, immediate owner, container ID and cgroup ID.
+- Exact workload network topology derived from cgroup-attributed tuple counters.
 - Top destinations, top DNS names, top processes, block reasons and hook/protocol/direction summaries.
 - Stale-agent detection and per-node hook coverage in the dashboard.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
@@ -52,6 +32,8 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - Exact cleartext DNS-name deny for UDP/53 queries.
 - Exact IPv4 destination PPS ceiling using a simple fixed one-second window.
 - Optional XDP early-ingress CIDR/port drop on explicitly selected interfaces.
+- Workload-scoped enforcement by namespace, pod, immediate owner, exact labels, or cgroup ID.
+- Scope preview plus per-node selected-cgroup coverage before enforcement.
 - Observe/enforce lease, controller failsafe and local node failsafe.
 
 These controls are intentionally an emergency/containment layer, not a replacement for a full CNI policy engine, QoS system, L7 proxy or IDS/IPS.
@@ -69,11 +51,11 @@ These controls are intentionally an emergency/containment layer, not a replaceme
 
 The default agent can therefore run **cgroup-only**: no `cilium_host`, no Cilium maps, and no assumption about the Kubernetes CNI.
 
-> **Scope warning:** attaching to the root cgroup makes standalone controls node-wide for traffic associated with descendant cgroups. That can include Kubernetes workloads and host/system services. Stage and inspect rules in observe mode first; prefer narrow IP/CIDR/port/process scopes before enabling an enforcement lease.
+> **Scope warning:** `scopeMode=all` attaches enforcement broadly to descendant root-cgroup traffic and can affect Kubernetes workloads plus host/system services. v0.8 adds `scopeMode=selected`; use it to enforce only resolved workload cgroups after previewing the matching Pods. Traffic whose workload identity cannot be resolved fails open in selected mode, and optional TCX/XDP remain observe-only there.
 
 ## Important visibility boundaries
 
-Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.7. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
+Netra does **not** copy arbitrary packet payloads to userspace. DNS parsing is deliberately limited to ordinary UDP/53 queries. It does not inspect DoH, DoT or TCP DNS. IPv6 extension-header walking is not implemented in v0.8. Process-name rules use Linux `comm` (maximum 15 visible bytes) and affect new connect/sendmsg operations; they do not terminate already-established sockets. The PPS guard is an emergency fixed-window limiter, not traffic shaping.
 
 ## Optional Cilium / Hubble integration
 
@@ -87,14 +69,6 @@ When enabled, the existing integrations remain available:
 - native Hubble Relay gRPC flow streaming and drop explanation.
 
 Cilium RBAC is not rendered by Helm unless `cilium.enabled=true`. Hubble is disabled by default with `hubble.enabled=false`.
-
-When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVirt) pages: inventory, per-entity Hubble live flows, create/delete CNP rules pinned to the workload selector, and one-click **lock down / unlock** quarantine (`netra-lockdown-*`: deny-all ingress, DNS-only egress) through the same plan → receipt → apply path.
-
-![Pods inventory with one-click lock down / unlock](docs/ux/06-lockdown.png)
-
-## HTTPS default
-
-Controller listens on **`:30870`** by default. Helm `tls.enabled=true` mounts an in-pod self-signed certificate (`NETRA_TLS_CERT` / `NETRA_TLS_KEY`). Lab installs use NodePort `30870` and `https://`.
 
 ## Architecture
 
@@ -132,7 +106,9 @@ cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 internal/agent/          BPF loading, hook attachment and reporting
-internal/observability/  standalone eBPF summaries
+internal/observability/  standalone eBPF summaries and workload topology
+internal/cgroupmeta/     cgroup-v2 Kubernetes path/inode discovery
+internal/workload/       workload selector matching and cgroup joins
 internal/api/            REST/SSE API
 internal/store/          durable state, audit and preflight receipts
 internal/ha/             active/passive controller leader election
@@ -144,6 +120,7 @@ web/                     React/Vite dashboard
 helm/netra/             Helm chart
 deploy/                  plain manifests
 docs/standalone-ebpf.md  eBPF hook/map/limitation reference
+docs/workload-scoping.md workload attribution/scoping runbook
 docs/high-availability.md HA runbook
 ```
 
@@ -167,8 +144,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.7.0 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.7.0 .
+docker build -t ghcr.io/zyvorai/netra:0.8.0 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.8.0 .
 ```
 
 ## Standalone Helm install
@@ -220,6 +197,11 @@ export NETRA_API_KEY='...'
 
 netractl ebpf summary
 netractl ebpf capabilities
+netractl ebpf workloads
+netractl ebpf scope show
+
+# preview/select workload scope before enforcement
+netractl ebpf scope selected --namespace payments --label app=checkout
 
 # rules can be staged while observe-only
 netractl ebpf deny add 203.0.113.10
@@ -236,15 +218,15 @@ netractl ebpf mode enforce 15m
 netractl ebpf mode observe
 ```
 
-The same controls are available in the **eBPF Network** dashboard.
+The same controls are available in the **eBPF Network** dashboard, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
 
 ## Safety and persistence
 
-Netra is secure-by-default: the controller requires independent API and agent credentials unless `NETRA_ALLOW_UNAUTHENTICATED=true` is explicitly set for local development. The privileged agent uses a tokenless ServiceAccount.
+Netra is secure-by-default: the controller requires independent API and agent credentials unless `NETRA_ALLOW_UNAUTHENTICATED=true` is explicitly set for local development. The privileged agent uses a tokenless ServiceAccount. The controller alone receives read-only `get/list pods` RBAC to provide metadata for workload attribution; Cilium RBAC remains opt-in.
 
 Controller state is restart-durable when `NETRA_STATE_FILE` is configured. Active/passive HA uses Kubernetes Lease election plus a shared state-file lock. A leader transition or controller restart never resurrects an old eBPF enforcement lease: the datapath returns to observe first.
 
-See `SECURITY.md`, `VALIDATION.md`, `docs/standalone-ebpf.md`, and `docs/high-availability.md` before production deployment.
+See `SECURITY.md`, `VALIDATION.md`, `docs/standalone-ebpf.md`, `docs/workload-scoping.md`, and `docs/high-availability.md` before production deployment.
 
 ## License
 

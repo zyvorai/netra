@@ -7,7 +7,7 @@ import (
 )
 
 func TestGateReadinessAndFollowerRejection(t *testing.T) {
-	g := NewGate("pod-a", "0.7.0")
+	g := NewGate("pod-a", "0.8.0")
 	for _, tc := range []struct {
 		path string
 		want int

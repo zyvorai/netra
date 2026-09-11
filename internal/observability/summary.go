@@ -14,6 +14,7 @@ func Summarize(agents []models.AgentStatus, topN int) models.EBPFObservabilitySu
 	}
 	s := models.EBPFObservabilitySummary{Protocols: map[string]uint64{}, Directions: map[string]uint64{}, Hooks: map[string]uint64{}}
 	reasons, dns, procs, dests := map[string]uint64{}, map[string]uint64{}, map[string]uint64{}, map[string]uint64{}
+	workloads, blockedWorkloads := map[string]uint64{}, map[string]uint64{}
 	for _, a := range agents {
 		for _, st := range a.Stats {
 			s.Packets += st.Packets
@@ -34,6 +35,11 @@ func Summarize(agents []models.AgentStatus, topN int) models.EBPFObservabilitySu
 			}
 			if key != "" {
 				dests[key] += st.Packets
+			}
+			wk := workloadKey(st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName)
+			if wk != "" {
+				workloads[wk] += st.Packets
+				blockedWorkloads[wk] += st.Blocked
 			}
 		}
 		for _, e := range a.Events {
@@ -59,6 +65,8 @@ func Summarize(agents []models.AgentStatus, topN int) models.EBPFObservabilitySu
 	s.TopDNS = top(dns, topN)
 	s.TopProcesses = top(procs, topN)
 	s.TopDestinations = top(dests, topN)
+	s.TopWorkloads = top(workloads, topN)
+	s.TopBlockedWorkloads = topNonZero(blockedWorkloads, topN)
 	return s
 }
 
@@ -90,4 +98,25 @@ func utoa(v uint64) string {
 		v /= 10
 	}
 	return string(b[i:])
+}
+
+func workloadKey(namespace, pod, kind, name string) string {
+	if namespace == "" && pod == "" {
+		return ""
+	}
+	key := namespace + "/" + pod
+	if kind != "" || name != "" {
+		key += " (" + kind + "/" + name + ")"
+	}
+	return key
+}
+
+func topNonZero(m map[string]uint64, n int) []models.NamedCount {
+	clean := map[string]uint64{}
+	for k, v := range m {
+		if v > 0 {
+			clean[k] = v
+		}
+	}
+	return top(clean, n)
 }

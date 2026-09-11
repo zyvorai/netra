@@ -1,74 +1,77 @@
-# Validation record — Netra v0.7.0
+# Validation record — Netra v0.8.0
 
 This record separates checks actually executed in the packaging workspace from dependency-complete CI and real-kernel/cluster integration gates.
 
 ## Passed in the packaging workspace
 
-- `gofmt` parsed/formatted the full Go source tree touched by v0.7.
-- The module is pinned to `go 1.27.0` (`toolchain go1.27.1`).
-- `go test` and `go vet` passed for `internal/policy`, `internal/store`, `internal/kube`, `internal/flowstats`, `internal/observability`, `internal/ha`, `internal/api` (route registration), and `cmd/netractl`.
-- Store regressions cover standalone IPv6/CIDR/port/UID/DNS/process/rate configuration, defensive config copies, restart persistence of DNS/process rules, fail-open restart behavior, durable one-shot preflight receipts, policy history/archive handling, corruption rejection and exclusive-writer locking.
-- CLI regressions include durable Cilium preflight receipt propagation, high-risk confirmation, history archive import/export, and standalone DNS/process eBPF commands.
-- Standalone observability aggregation tests verify exact packet/byte/blocked totals, exact protocol/direction/hook packet dimensions, DNS summaries, process summaries and top destinations.
+- `gofmt` parsed/formatted the Go source tree touched by v0.8.
+- The module remains pinned to `go 1.26.0`. For dependency-free checks only, the `go` directive was temporarily lowered to the available Go 1.23 toolchain and restored immediately afterward.
+- `go test` and `go vet` passed for `internal/cgroupmeta`, `internal/workload`, `internal/store`, `internal/kube`, `internal/observability`, `internal/policy`, `internal/flowstats`, and `cmd/netractl`.
+- cgroup metadata regressions cover common systemd-style Pod UID and container-ID parsing.
+- Workload selector regressions cover namespace/Pod/immediate-owner/label/cgroup-ID matching and cgroup-to-Pod joining.
+- Kubernetes client regressions cover node-scoped Pod inventory parsing without adding Kubernetes credentials to the node agent.
+- Store regressions cover persistence of `scopeMode` and workload selectors while intentionally excluding ephemeral node workload inventory from durable state.
+- Topology regressions verify aggregation of exact cgroup-attributed flow counters into workload network edges.
+- Existing persistence, HA, Cilium preflight/history and standalone rule regressions remain in the suite.
 - `bpf/netra_tc.c` passes `clang -Wall -Wextra -Werror -fsyntax-only` using the available Linux UAPI headers.
-- All plain Kubernetes YAML and GitHub workflow YAML parse locally with PyYAML. JSON assets parse with the standard JSON parser. `hack/smoke.sh` passes `bash -n`.
-- The TypeScript compiler reports **zero parser-class diagnostics** for the web sources. The remaining offline diagnostics are missing React/Lucide/Vitest modules/types because `node_modules` cannot be installed in this workspace.
+- Plain Kubernetes YAML and GitHub workflow YAML parse locally with PyYAML. JSON assets parse with the standard JSON parser. `hack/smoke.sh` passes `bash -n`.
+- The TypeScript compiler reports zero parser-class diagnostics for the web source. Remaining local diagnostics are missing React/Lucide/Vitest modules/types because `node_modules` cannot be installed in this workspace.
 
-## v0.7 standalone properties represented in source/tests
+## v0.8 workload-aware properties represented in source/tests
 
-- Cilium/Hubble are optional. Helm defaults `cilium.enabled=false` and `hubble.enabled=false`; Cilium RBAC is conditional. Plain manifests split Cilium RBAC into `deploy/rbac-cilium.yaml`.
-- The controller exposes `datapath=standalone-ebpf`, `ciliumRequired=false`, and rejects live Cilium policy operations while `NETRA_CILIUM_ENABLED` is false.
-- Default node coverage uses root-cgroup v2 `cgroup_skb/ingress`, `cgroup_skb/egress`, `connect4`, `connect6`, `sendmsg4`, and `sendmsg6` hooks. TCX and XDP are optional.
-- Netra-owned maps support exact IPv4/IPv6 deny, directional IPv4/IPv6 LPM CIDR deny, directional TCP/UDP/ANY port deny, UID deny, Linux `comm` deny, exact cleartext UDP/53 DNS-name deny, and exact IPv4 destination PPS control.
-- `flow_stats` preserves source IP/port → destination IP/port, family, protocol, direction and hook with exact packet/byte/blocked counters.
-- Ring-buffer events include family, direction, hook, action/reason, source/destination tuple, TCP flags, DNS qname and socket PID/UID/cgroup/process context where the hook can provide it.
-- No arbitrary packet payload is copied to userspace. DNS extraction is bounded to qname metadata from ordinary UDP/53 queries.
-- Every custom enforcement path is gated by `config_map`; the controller lease, local lease expiry and stale-controller failsafe all return the datapath to observe mode.
-- Prometheus exposes only aggregate/low-cardinality standalone gauges; it does not add destination IP, DNS name or process name labels.
+- Cilium/Hubble remain optional. The default Helm render grants no Cilium permissions.
+- The controller has read-only `get/list pods` RBAC for workload metadata. `netra-agent` remains a dedicated privileged, tokenless ServiceAccount with `automountServiceAccountToken: false`.
+- Agents scan cgroup v2 on `NETRA_CGROUP_SCAN_INTERVAL` (default `10s`), derive cgroup IDs from cgroup filesystem inode identity, recognize Kubernetes Pod/container path components and join them to controller-delivered node workload inventory.
+- `workload_flow_stats` stores exact cgroup-attributed tuple counters separately from the legacy global `flow_stats` map, preserving pinned-map compatibility.
+- Events and counters can be enriched with namespace, Pod, immediate owner, container ID and cgroup ID when the cgroup path can be resolved.
+- `scopeMode=all` preserves node-wide enforcement. `scopeMode=selected` gates cgroup packet/socket enforcement through `enforced_cgroups`.
+- Selected scopes support namespace, Pod, immediate owner kind/name, exact labels and direct cgroup ID. Fields within a scope are ANDed; multiple scopes are ORed.
+- Unresolved traffic fails open in selected mode. TCX/XDP remain observation-only in selected mode because v0.8 does not use those hooks as workload identity enforcement points.
+- Scope preview is Pod-metadata based; actual node coverage is exposed as `selectedCgroups` and should be checked before leasing enforcement.
+- Workload topology is derived from exact cgroup-attributed counters, not sampled ring-buffer events.
+- Prometheus exposes only low-cardinality scope/coverage gauges; it does not label metrics by Pod, process, DNS name or destination IP.
 
 ## CI gates included in the repository
 
-1. **Go 1.27** — dependency resolution, `go test ./...` (including API route registration and lockdown helpers), `go vet ./...`, and controller/CLI/agent builds.
+1. **Go 1.26** — dependency resolution, `go test ./...`, `go vet ./...`, and controller/CLI/agent builds.
 2. **Node 22** — package install, TypeScript typecheck, Vitest, and Vite production build.
-3. **Helm** — secure-default auth rejection, lint/render, TLS :30870 + inventory RBAC (pods/kubevirt) on the default chart, proof that default standalone render contains no Cilium RBAC and leaves Cilium/Hubble disabled, optional Cilium/Hubble enable-env render, standalone agent cgroup mount, and HA/RWX render validation.
+3. **Helm** — secure-default auth rejection, lint/render, standalone workload-attribution render, tokenless agent assertion, proof that default standalone render contains no Cilium RBAC, optional Cilium/Hubble render, and HA/RWX validation.
 4. **eBPF** — Ubuntu LLVM/Clang emits a real `bpfel` object with `-Wall -Wextra -Werror`.
 
 ## Packaging-environment limitations
 
 Outbound Go/npm dependency resolution is unavailable. The local environment therefore cannot compile packages requiring Cilium/Hubble/cilium-ebpf dependencies or install the React dependency graph. Helm is not installed locally.
 
-A real BPF-target compile was attempted locally and failed because the installed Swift-distributed Clang has no `bpfel` backend (`No available targets are compatible with triple "bpfel"`). Strict C syntax passes; real BPF ELF generation and verifier acceptance remain CI/kernel gates.
+The installed Swift-distributed Clang has no `bpfel` backend. Strict C syntax passes; real BPF ELF generation, verifier acceptance and hook attachment remain CI/target-kernel gates.
 
 ## Required real-kernel / cluster integration before production sign-off
 
-### Standalone, no Cilium
+### Workload attribution and scoped enforcement
 
-- Install on a modern cgroup-v2 Linux/Kubernetes cluster using a non-Cilium CNI and verify the agent starts with empty `NETRA_INTERFACES` / `NETRA_XDP_INTERFACES`.
-- Verify root-cgroup ingress/egress flow counters show source:port → destination:port for IPv4 and IPv6 workloads and host traffic in scope.
-- Generate TCP, UDP, ICMP/ICMPv6 and cleartext UDP/53 traffic; verify protocol/direction/hook counters and DNS qname events.
-- Generate TCP connect and UDP sendmsg operations and verify PID, UID, cgroup ID and process `comm` socket events.
-- In observe mode, stage exact IP, CIDR, port, UID, process, DNS and PPS rules and verify traffic is never denied.
-- Enable a short enforcement lease and independently verify each supported rule class. Confirm unrelated traffic remains unaffected.
-- Verify exact DNS-name rules block only the intended ordinary UDP/53 qname and do not claim DoH/DoT/TCP-DNS visibility.
-- Verify process/UID rules affect new socket operations and do not terminate existing connections.
-- Verify lease expiry and controller-unreachable timeout both force observe on every node.
-- Test broad rule impact on host/system traffic before any production use because root-cgroup scope is node-wide.
+- Deploy on a modern cgroup-v2 Kubernetes node and verify Pod UID/container IDs are recognized across the runtime/cgroup path forms used by the target fleet.
+- Compare `/api/v1/ebpf/workloads`, agent workload inventory and live cgroup IDs against `kubectl get pods -o wide` for each node.
+- Verify namespace/Pod/owner/label selectors produce the intended preview and that every expected node reports a nonzero/matching `selectedCgroups` count.
+- With `scopeMode=selected` and observe mode, stage IP/CIDR/port/DNS/UID/process/rate rules and verify no traffic is denied.
+- Enable a short enforcement lease and prove the same global rule set affects selected workload cgroups but not unselected workloads or unresolved traffic.
+- Verify TCX/XDP continue observing but do not enforce in selected mode.
+- Create/delete/reschedule Pods while the agent is running and verify attribution converges after the configured cgroup scan interval without restarting the DaemonSet.
+- Verify a metadata/API outage causes unresolved selected traffic to fail open rather than widening enforcement.
+- Validate immediate-owner semantics for Deployments (commonly a ReplicaSet owner) and other controller types before relying on owner selectors.
 
-### Optional hooks
+### Standalone datapath
 
-- On supported Linux 6.6+ kernels, enable explicit TCX interfaces and compare cgroup vs TCX flow visibility without double-counting assumptions in downstream dashboards.
-- Enable XDP on a test NIC/interface and verify ingress CIDR/port drops, driver/generic-mode behavior, detach behavior and recovery after agent restart.
-- Exercise IPv6 and confirm documented v0.7 behavior when extension headers are present.
+- Re-run IPv4/IPv6 tuple counter, TCP/UDP/ICMP, DNS qname, PID/UID/process, exact IP/CIDR/port/DNS/process/rate control and lease-expiry tests from v0.7.
+- Exercise optional TCX on Linux 6.6+ and XDP on representative NICs/drivers.
+- Validate documented IPv6 extension-header limitations and cleartext-DNS-only behavior.
 
-### Optional Cilium/Hubble
+### Optional Cilium/Hubble and HA
 
-- Enable `cilium.enabled=true` and verify the CiliumNetworkPolicy list/build/plan/apply/history/rollback path, durable preflight receipts and risk confirmation.
-- Enable `hubble.enabled=true` against Cilium/Hubble Relay and verify native filtered flow streaming, summary and drop explanation.
-- Verify standalone eBPF still operates when Hubble is intentionally unavailable.
+- Re-run CiliumNetworkPolicy preflight/apply/history/rollback when `cilium.enabled=true`.
+- Re-run Hubble streaming/drop explanation when `hubble.enabled=true` and verify standalone eBPF remains functional if Hubble is unavailable.
+- Re-run active/passive Lease + shared-lock failover with selected scopes persisted. Confirm every promoted leader starts custom enforcement in observe mode and agents rebuild selected cgroup IDs from current node state.
 
-### HA / persistence
+Netra v0.8 materially narrows the risk of node-wide emergency controls, but workload identity is operational metadata rather than a cryptographic authorization primitive. Real cgroup layout/runtime behavior must be validated on the target fleet before enabling enforcement.
 
-- Re-run the v0.6 active/passive Lease + shared-lock failover suite with v0.7 state, including unused preflight receipt survival and one-shot consumption.
-- Enter eBPF enforce mode and force controller failover; verify the new leader returns to observe before readiness while the configured standalone rule set remains persisted.
+## Lab smoke — 2026-09-11 (`https://212.8.248.187:30870`)
 
-Netra v0.7 is intentionally standalone-first, but real kernel verifier behavior, CNI/cgroup topology, NIC XDP support and production traffic scope must be validated on the target fleet before enabling enforcement.
+Deployed Netra **0.8.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus `kubectl rollout restart deploy/netra`. Feature checks: health/version, HTTPS UI, status/flows/policies/topology/metrics, pods/VMs/workload detail, lockdown create+delete, `ebpf/{summary,capabilities,config,workloads,topology}`, scope preview (`POST` with `scopes`), `scopeMode` on config, Apple-style CSS. **22/22 passed.** Full selected-mode enforcement lease soak remains an open cluster gate above.

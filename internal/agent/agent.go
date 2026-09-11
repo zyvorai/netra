@@ -13,17 +13,21 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/zyvorai/netra/internal/cgroupmeta"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/workload"
 )
 
 var native = binary.LittleEndian // Netra ships a bpfel object.
@@ -43,6 +47,13 @@ type Agent struct {
 	failsafeAfter                      time.Duration
 	enforceUntil                       time.Time
 	cgroupEnabled                      bool
+	workloadMu                         sync.RWMutex
+	workloadByCgroup                   map[uint64]models.WorkloadIdentity
+	cgroupCache                        map[uint64]cgroupmeta.Identity
+	lastCgroupScan                     time.Time
+	cgroupScanEvery                    time.Duration
+	scopeMode                          string
+	selectedCgroups                    int
 }
 
 func New(log *slog.Logger) *Agent {
@@ -57,7 +68,7 @@ func New(log *slog.Logger) *Agent {
 		cgroupPath: env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096),
-		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second),
+		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
 	}
 }
 
@@ -102,8 +113,8 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6",
-	"blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms", "rate_v4", "rate_state_v4", "config_map", "events",
+	"dest_stats", "flow_stats", "workload_flow_stats", "blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6",
+	"blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms", "rate_v4", "rate_state_v4", "config_map", "scope_config", "enforced_cgroups", "events",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -256,17 +267,20 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		}
 		a.lastRevision = cfg.Revision
 	}
+	if err := a.applyWorkloadScopes(cfg); err != nil {
+		return err
+	}
 	a.lastSync = time.Now()
 	stats, err := a.readStats()
 	if err != nil {
 		return err
 	}
 	events := a.drainEvents(300)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, Events: events, ObservedAt: time.Now().UTC()})
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
-	req, _ := http.NewRequestWithContext(ctx, "GET", a.server+"/api/v1/ebpf/config", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", a.server+"/api/v1/ebpf/config?node="+url.QueryEscape(a.node), nil)
 	if a.key != "" {
 		req.Header.Set("X-Netra-Agent-Key", a.key)
 	}
@@ -591,32 +605,154 @@ func (a *Agent) replaceRates(values []models.EBPFRateLimit) error {
 	return nil
 }
 
+func (a *Agent) applyWorkloadScopes(cfg models.EBPFFastPathConfig) error {
+	mode := strings.ToLower(strings.TrimSpace(cfg.ScopeMode))
+	if mode == "" {
+		mode = "all"
+	}
+	scopeMap := a.collection.Maps["scope_config"]
+	enforced := a.collection.Maps["enforced_cgroups"]
+	if scopeMap == nil || enforced == nil {
+		return fmt.Errorf("workload scope maps unavailable")
+	}
+	selectedMode := uint32(0)
+	if mode == "selected" {
+		selectedMode = 1
+	}
+	if err := scopeMap.Put(uint32(0), selectedMode); err != nil {
+		return err
+	}
+
+	var key uint64
+	var value uint8
+	var old []uint64
+	it := enforced.Iterate()
+	for it.Next(&key, &value) {
+		old = append(old, key)
+	}
+	if err := it.Err(); err != nil {
+		return err
+	}
+	for _, k := range old {
+		_ = enforced.Delete(k)
+	}
+
+	cgroups, err := a.scanCgroups()
+	if err != nil {
+		return fmt.Errorf("scan cgroup metadata: %w", err)
+	}
+	resolved, selected := workload.Resolve(cgroups, cfg.Workloads, cfg.WorkloadScopes)
+	if mode == "selected" {
+		for id := range selected {
+			if err := enforced.Put(id, uint8(1)); err != nil {
+				return err
+			}
+		}
+	}
+	a.scopeMode, a.selectedCgroups = mode, len(selected)
+	a.workloadMu.Lock()
+	a.workloadByCgroup = resolved
+	a.workloadMu.Unlock()
+	return nil
+}
+
+func (a *Agent) scanCgroups() (map[uint64]cgroupmeta.Identity, error) {
+	if a.cgroupCache != nil && a.cgroupScanEvery > 0 && time.Since(a.lastCgroupScan) < a.cgroupScanEvery {
+		return a.cgroupCache, nil
+	}
+	items, err := cgroupmeta.Scan(a.cgroupPath)
+	if err != nil {
+		return nil, err
+	}
+	a.cgroupCache, a.lastCgroupScan = items, time.Now()
+	return items, nil
+}
+
+func (a *Agent) workloadSnapshot() []models.WorkloadIdentity {
+	a.workloadMu.RLock()
+	defer a.workloadMu.RUnlock()
+	return workload.Sorted(a.workloadByCgroup)
+}
+func (a *Agent) workloadIdentity(id uint64) (models.WorkloadIdentity, bool) {
+	a.workloadMu.RLock()
+	defer a.workloadMu.RUnlock()
+	w, ok := a.workloadByCgroup[id]
+	return w, ok
+}
+func (a *Agent) enrichEvent(e *models.FastPathEvent) {
+	if e.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(e.CgroupID); ok {
+		e.Namespace, e.Pod, e.WorkloadKind, e.WorkloadName, e.ContainerID = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName, w.ContainerID
+	}
+}
+func (a *Agent) enrichStat(st *models.DestinationStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName, st.ContainerID = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName, w.ContainerID
+	}
+}
+
 func (a *Agent) readStats() ([]models.DestinationStat, error) {
-	m := a.collection.Maps["flow_stats"]
+	m := a.collection.Maps["workload_flow_stats"]
 	if m == nil {
-		return nil, fmt.Errorf("flow_stats unavailable")
+		return nil, fmt.Errorf("workload_flow_stats unavailable")
 	}
 	it := m.Iterate()
-	var k [40]byte
+	var k [48]byte
 	var v [32]byte
 	out := make([]models.DestinationStat, 0, 256)
 	for it.Next(&k, &v) {
-		family := k[0]
+		cgroupID := native.Uint64(k[0:8])
+		family := k[8]
 		src, dst := "", ""
 		if family == 4 {
-			src = net.IP(k[8:12]).String()
-			dst = net.IP(k[24:28]).String()
+			src = net.IP(k[16:20]).String()
+			dst = net.IP(k[32:36]).String()
 		} else if family == 6 {
-			src = net.IP(k[8:24]).String()
-			dst = net.IP(k[24:40]).String()
+			src = net.IP(k[16:32]).String()
+			dst = net.IP(k[32:48]).String()
 		}
-		out = append(out, models.DestinationStat{SourceIP: src, SourcePort: binary.BigEndian.Uint16(k[4:6]), DestinationIP: dst, Port: binary.BigEndian.Uint16(k[6:8]), Protocol: protoName(k[3]), Direction: dirName(k[1]), Hook: hookName(k[2]), Packets: native.Uint64(v[0:8]), Bytes: native.Uint64(v[8:16]), Blocked: native.Uint64(v[16:24]), LastSeenNS: native.Uint64(v[24:32])})
+		st := models.DestinationStat{CgroupID: cgroupID, SourceIP: src, SourcePort: binary.BigEndian.Uint16(k[12:14]), DestinationIP: dst, Port: binary.BigEndian.Uint16(k[14:16]), Protocol: protoName(k[11]), Direction: dirName(k[9]), Hook: hookName(k[10]), Packets: native.Uint64(v[0:8]), Bytes: native.Uint64(v[8:16]), Blocked: native.Uint64(v[16:24]), LastSeenNS: native.Uint64(v[24:32])}
+		a.enrichStat(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	// Preserve interface-level TCX/XDP counters as unattributed rows. Cgroup rows
+	// come from workload_flow_stats so we do not double count them.
+	if global := a.collection.Maps["flow_stats"]; global != nil {
+		git := global.Iterate()
+		var gk [40]byte
+		var gv [32]byte
+		for git.Next(&gk, &gv) {
+			if gk[2] == 2 {
+				continue
+			}
+			family := gk[0]
+			src, dst := "", ""
+			if family == 4 {
+				src = net.IP(gk[8:12]).String()
+				dst = net.IP(gk[24:28]).String()
+			} else if family == 6 {
+				src = net.IP(gk[8:24]).String()
+				dst = net.IP(gk[24:40]).String()
+			}
+			out = append(out, models.DestinationStat{SourceIP: src, SourcePort: binary.BigEndian.Uint16(gk[4:6]), DestinationIP: dst, Port: binary.BigEndian.Uint16(gk[6:8]), Protocol: protoName(gk[3]), Direction: dirName(gk[1]), Hook: hookName(gk[2]), Packets: native.Uint64(gv[0:8]), Bytes: native.Uint64(gv[8:16]), Blocked: native.Uint64(gv[16:24]), LastSeenNS: native.Uint64(gv[24:32])})
+		}
+		if err := git.Err(); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
 	if len(out) > 1000 {
 		out = out[:1000]
 	}
-	return out, it.Err()
+	return out, nil
 }
 
 func (a *Agent) readEvents(ctx context.Context) {
@@ -653,6 +789,7 @@ func (a *Agent) readEvents(ctx context.Context) {
 			dst = net.IP(b[48:64]).String()
 		}
 		e := models.FastPathEvent{TimestampNS: native.Uint64(b[0:8]), CgroupID: native.Uint64(b[8:16]), PID: native.Uint32(b[16:20]), UID: native.Uint32(b[20:24]), InterfaceIndex: native.Uint32(b[24:28]), Length: native.Uint32(b[28:32]), SourceIP: src, DestinationIP: dst, SourcePort: binary.BigEndian.Uint16(b[64:66]), DestinationPort: binary.BigEndian.Uint16(b[66:68]), Family: familyName(family), Protocol: protoName(b[69]), Direction: dirName(b[70]), Hook: hookName(b[71]), Action: actionName(b[72]), Type: eventName(b[73]), TCPFlags: b[74], Reason: reasonName(b[75]), Comm: cString(b[76:92]), DNSQuery: cString(b[92:188]), ObservedAt: time.Now().UTC()}
+		a.enrichEvent(&e)
 		select {
 		case a.events <- e:
 		default:

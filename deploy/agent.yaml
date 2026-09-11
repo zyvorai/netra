@@ -17,12 +17,13 @@ spec:
       tolerations: [{operator: Exists}]
       containers:
       - name: agent
-        image: ghcr.io/zyvorai/netra-agent:0.7.0
+        image: ghcr.io/zyvorai/netra-agent:0.8.0
         securityContext: {privileged: true}
         env:
-        - {name: NETRA_SERVER, value: http://netra.netra-system.svc:8080}
+        - {name: NETRA_SERVER, value: https://netra.netra-system.svc:30870}
         - {name: NETRA_CGROUP_ENABLED, value: "true"}
         - {name: NETRA_CGROUP_PATH, value: /sys/fs/cgroup}
+        - {name: NETRA_CGROUP_SCAN_INTERVAL, value: 10s}
         - {name: NETRA_INTERFACES, value: ""}
         - {name: NETRA_XDP_INTERFACES, value: ""}
         - {name: NETRA_BPF_PIN, value: /sys/fs/bpf/netra}

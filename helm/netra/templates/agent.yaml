@@ -30,6 +30,8 @@ spec:
           value: {{ .Values.agent.cgroupEnabled | quote }}
         - name: NETRA_CGROUP_PATH
           value: {{ .Values.agent.cgroupPath | quote }}
+        - name: NETRA_CGROUP_SCAN_INTERVAL
+          value: {{ .Values.agent.cgroupScanInterval | quote }}
         - name: NETRA_INTERFACES
           value: {{ .Values.agent.interfaces | quote }}
         - name: NETRA_XDP_INTERFACES

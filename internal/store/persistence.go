@@ -94,6 +94,9 @@ func (s *Store) load() error {
 	if d.Config.Revision == 0 {
 		d.Config.Revision = 1
 	}
+	if d.Config.ScopeMode == "" {
+		d.Config.ScopeMode = "all"
+	}
 	wasEnforcing := d.Config.Mode == "enforce"
 	// A controller restart is a security boundary. Never resurrect an
 	// emergency enforcement lease solely because it was present on disk.
@@ -161,10 +164,13 @@ func (s *Store) persistLocked() error {
 	if s.backend == nil {
 		return nil
 	}
+	cfg := cloneConfig(s.config)
+	// Pod inventory is node-local, short-lived metadata supplied to agents. Never persist it.
+	cfg.Workloads = nil
 	d := diskState{
 		SchemaVersion:   stateSchemaVersion,
 		SavedAt:         time.Now().UTC(),
-		Config:          cloneConfig(s.config),
+		Config:          cfg,
 		Audit:           append([]models.AuditEvent(nil), s.audit...),
 		PolicyRevisions: cloneRevisions(s.policyRevisions),
 		NextRevisionID:  s.nextRevisionID,

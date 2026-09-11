@@ -34,19 +34,44 @@ type EBPFRateLimit struct {
 	PPS         uint32 `json:"pps"`
 }
 
+type WorkloadIdentity struct {
+	UID          string            `json:"uid"`
+	Namespace    string            `json:"namespace"`
+	Pod          string            `json:"pod"`
+	Node         string            `json:"node,omitempty"`
+	WorkloadKind string            `json:"workloadKind,omitempty"`
+	WorkloadName string            `json:"workloadName,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CgroupID     uint64            `json:"cgroupId,omitempty"`
+	ContainerID  string            `json:"containerId,omitempty"`
+	CgroupPath   string            `json:"cgroupPath,omitempty"`
+}
+
+type EBPFWorkloadScope struct {
+	Namespace    string            `json:"namespace,omitempty"`
+	Pod          string            `json:"pod,omitempty"`
+	WorkloadKind string            `json:"workloadKind,omitempty"`
+	WorkloadName string            `json:"workloadName,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CgroupID     uint64            `json:"cgroupId,omitempty"`
+}
+
 type EBPFFastPathConfig struct {
-	Mode             string          `json:"mode"`
-	BlockedIPv4      []string        `json:"blockedIPv4"`
-	BlockedIPv6      []string        `json:"blockedIPv6,omitempty"`
-	BlockedCIDRs     []EBPFCIDRRule  `json:"blockedCidrs,omitempty"`
-	BlockedPorts     []EBPFPortRule  `json:"blockedPorts,omitempty"`
-	BlockedUIDs      []uint32        `json:"blockedUids,omitempty"`
-	BlockedDNS       []string        `json:"blockedDns,omitempty"`
-	BlockedProcesses []string        `json:"blockedProcesses,omitempty"`
-	RateLimits       []EBPFRateLimit `json:"rateLimits,omitempty"`
-	Revision         uint64          `json:"revision"`
-	EnforceUntil     *time.Time      `json:"enforceUntil,omitempty"`
-	LeaseSeconds     int64           `json:"leaseSeconds,omitempty"`
+	Mode             string              `json:"mode"`
+	BlockedIPv4      []string            `json:"blockedIPv4"`
+	BlockedIPv6      []string            `json:"blockedIPv6,omitempty"`
+	BlockedCIDRs     []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`
+	BlockedPorts     []EBPFPortRule      `json:"blockedPorts,omitempty"`
+	BlockedUIDs      []uint32            `json:"blockedUids,omitempty"`
+	BlockedDNS       []string            `json:"blockedDns,omitempty"`
+	BlockedProcesses []string            `json:"blockedProcesses,omitempty"`
+	RateLimits       []EBPFRateLimit     `json:"rateLimits,omitempty"`
+	ScopeMode        string              `json:"scopeMode,omitempty"` // all or selected
+	WorkloadScopes   []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
+	Workloads        []WorkloadIdentity  `json:"workloads,omitempty"` // ephemeral node inventory, never persisted intentionally
+	Revision         uint64              `json:"revision"`
+	EnforceUntil     *time.Time          `json:"enforceUntil,omitempty"`
+	LeaseSeconds     int64               `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
@@ -61,6 +86,12 @@ type DestinationStat struct {
 	Bytes         uint64 `json:"bytes"`
 	Blocked       uint64 `json:"blocked"`
 	LastSeenNS    uint64 `json:"lastSeenNs"`
+	CgroupID      uint64 `json:"cgroupId,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	Pod           string `json:"pod,omitempty"`
+	WorkloadKind  string `json:"workloadKind,omitempty"`
+	WorkloadName  string `json:"workloadName,omitempty"`
+	ContainerID   string `json:"containerId,omitempty"`
 }
 
 type FastPathEvent struct {
@@ -85,19 +116,27 @@ type FastPathEvent struct {
 	CgroupID        uint64    `json:"cgroupId,omitempty"`
 	Comm            string    `json:"comm,omitempty"`
 	DNSQuery        string    `json:"dnsQuery,omitempty"`
+	Namespace       string    `json:"namespace,omitempty"`
+	Pod             string    `json:"pod,omitempty"`
+	WorkloadKind    string    `json:"workloadKind,omitempty"`
+	WorkloadName    string    `json:"workloadName,omitempty"`
+	ContainerID     string    `json:"containerId,omitempty"`
 }
 
 type AgentReport struct {
-	Node          string            `json:"node"`
-	Mode          string            `json:"mode"`
-	Interfaces    []string          `json:"interfaces"`
-	XDPInterfaces []string          `json:"xdpInterfaces,omitempty"`
-	Hooks         []string          `json:"hooks,omitempty"`
-	CgroupPath    string            `json:"cgroupPath,omitempty"`
-	Standalone    bool              `json:"standalone"`
-	Stats         []DestinationStat `json:"stats"`
-	Events        []FastPathEvent   `json:"events"`
-	ObservedAt    time.Time         `json:"observedAt"`
+	Node            string             `json:"node"`
+	Mode            string             `json:"mode"`
+	Interfaces      []string           `json:"interfaces"`
+	XDPInterfaces   []string           `json:"xdpInterfaces,omitempty"`
+	Hooks           []string           `json:"hooks,omitempty"`
+	CgroupPath      string             `json:"cgroupPath,omitempty"`
+	Standalone      bool               `json:"standalone"`
+	Stats           []DestinationStat  `json:"stats"`
+	Events          []FastPathEvent    `json:"events"`
+	ObservedAt      time.Time          `json:"observedAt"`
+	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
+	ScopeMode       string             `json:"scopeMode,omitempty"`
+	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
 }
 
 type AgentStatus struct {
@@ -107,19 +146,34 @@ type AgentStatus struct {
 }
 
 type EBPFObservabilitySummary struct {
-	Events          uint64            `json:"events"`
-	Blocked         uint64            `json:"blocked"`
-	DNSQueries      uint64            `json:"dnsQueries"`
-	SocketEvents    uint64            `json:"socketEvents"`
-	Packets         uint64            `json:"packets"`
-	Bytes           uint64            `json:"bytes"`
-	Protocols       map[string]uint64 `json:"protocols"`
-	Directions      map[string]uint64 `json:"directions"`
-	Hooks           map[string]uint64 `json:"hooks"`
-	BlockReasons    []NamedCount      `json:"blockReasons"`
-	TopDNS          []NamedCount      `json:"topDns"`
-	TopProcesses    []NamedCount      `json:"topProcesses"`
-	TopDestinations []NamedCount      `json:"topDestinations"`
+	Events              uint64            `json:"events"`
+	Blocked             uint64            `json:"blocked"`
+	DNSQueries          uint64            `json:"dnsQueries"`
+	SocketEvents        uint64            `json:"socketEvents"`
+	Packets             uint64            `json:"packets"`
+	Bytes               uint64            `json:"bytes"`
+	Protocols           map[string]uint64 `json:"protocols"`
+	Directions          map[string]uint64 `json:"directions"`
+	Hooks               map[string]uint64 `json:"hooks"`
+	BlockReasons        []NamedCount      `json:"blockReasons"`
+	TopDNS              []NamedCount      `json:"topDns"`
+	TopProcesses        []NamedCount      `json:"topProcesses"`
+	TopDestinations     []NamedCount      `json:"topDestinations"`
+	TopWorkloads        []NamedCount      `json:"topWorkloads,omitempty"`
+	TopBlockedWorkloads []NamedCount      `json:"topBlockedWorkloads,omitempty"`
+}
+
+type NetworkEdge struct {
+	Node         string `json:"node"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+	Destination  string `json:"destination"`
+	Protocol     string `json:"protocol"`
+	Packets      uint64 `json:"packets"`
+	Bytes        uint64 `json:"bytes"`
+	Blocked      uint64 `json:"blocked"`
 }
 
 type AuditEvent struct {
@@ -157,11 +211,13 @@ type NamedCount struct {
 }
 
 type FlowSummary struct {
-	Total           uint64            `json:"total"`
-	Verdicts        map[string]uint64 `json:"verdicts"`
-	Protocols       map[string]uint64 `json:"protocols"`
-	DropReasons     []NamedCount      `json:"dropReasons"`
-	TopDestinations []NamedCount      `json:"topDestinations"`
+	Total               uint64            `json:"total"`
+	Verdicts            map[string]uint64 `json:"verdicts"`
+	Protocols           map[string]uint64 `json:"protocols"`
+	DropReasons         []NamedCount      `json:"dropReasons"`
+	TopDestinations     []NamedCount      `json:"topDestinations"`
+	TopWorkloads        []NamedCount      `json:"topWorkloads,omitempty"`
+	TopBlockedWorkloads []NamedCount      `json:"topBlockedWorkloads,omitempty"`
 }
 
 type PodInfo struct {

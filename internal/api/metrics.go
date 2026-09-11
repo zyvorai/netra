@@ -28,8 +28,10 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.store.Config()
 	agents := s.store.AgentStatuses(time.Now(), s.agentStaleAfter)
 	stale := 0
+	resolvedWorkloads := 0
 	var packets, bytes, blocked uint64
 	for _, a := range agents {
+		resolvedWorkloads += len(a.Workloads)
 		if a.Stale {
 			stale++
 		}
@@ -61,6 +63,13 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_fastpath_blocked_dns_names", "Exact cleartext DNS-name rules in the Netra datapath.", float64(len(cfg.BlockedDNS)))
 	metricGauge(w, "netra_fastpath_blocked_processes", "Linux comm socket-deny rules in the Netra datapath.", float64(len(cfg.BlockedProcesses)))
 	metricGauge(w, "netra_fastpath_rate_limits", "Exact IPv4 destination PPS rules in the Netra datapath.", float64(len(cfg.RateLimits)))
+	scopeSelected := 0
+	if cfg.ScopeMode == "selected" {
+		scopeSelected = 1
+	}
+	metricGauge(w, "netra_fastpath_scope_selected", "Whether enforcement is restricted to selected workload cgroups.", float64(scopeSelected))
+	metricGauge(w, "netra_fastpath_workload_scopes", "Configured Kubernetes/cgroup enforcement scopes.", float64(len(cfg.WorkloadScopes)))
+	metricGauge(w, "netra_workload_cgroups_resolved", "Kubernetes-looking cgroups resolved by node agents.", float64(resolvedWorkloads))
 	metricGauge(w, "netra_agents_total", "Node agents known to the controller.", float64(len(agents)))
 	metricGauge(w, "netra_agents_stale", "Node agents whose last report exceeded the stale threshold.", float64(stale))
 	metricGauge(w, "netra_ebpf_packets", "Aggregate packet counter from the latest node reports.", float64(packets))

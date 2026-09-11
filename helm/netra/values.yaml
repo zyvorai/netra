@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.7.0"
+  tag: "0.8.0"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.7.0"
+  tag: "0.8.0"
 replicaCount: 1
 ha:
   enabled: false
@@ -47,6 +47,7 @@ agent:
   enabled: false
   cgroupEnabled: true
   cgroupPath: /sys/fs/cgroup
+  cgroupScanInterval: 10s
   interfaces: ""
   xdpInterfaces: ""
   pinPath: /sys/fs/bpf/netra

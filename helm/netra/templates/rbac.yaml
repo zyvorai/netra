@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Release.Name }}-netra
+  name: {{ .Release.Name }}-netra-workload-metadata
 rules:
 - apiGroups: [""]
   resources: ["pods"]
@@ -12,11 +12,24 @@ rules:
 - apiGroups: ["kubevirt.io"]
   resources: ["virtualmachines","virtualmachineinstances"]
   verbs: ["get","list","watch"]
-{{- if .Values.cilium.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-netra-workload-metadata
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Name }}-netra-workload-metadata}
+subjects:
+- {kind: ServiceAccount, name: netra, namespace: {{ .Release.Namespace }} }
+---
+{{ if .Values.cilium.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-netra
+rules:
 - apiGroups: ["cilium.io"]
   resources: ["ciliumnetworkpolicies"]
   verbs: ["get","list","watch","create","update","patch","delete"]
-{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -25,6 +38,7 @@ metadata:
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Name }}-netra}
 subjects:
 - {kind: ServiceAccount, name: netra, namespace: {{ .Release.Namespace }} }
+{{- end }}
 {{- if .Values.ha.enabled }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

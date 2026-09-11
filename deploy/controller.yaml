@@ -7,7 +7,7 @@ spec:
   selector: {app.kubernetes.io/name: netra}
   ports:
   - name: http
-    port: 8080
+    port: 30870
     targetPort: http
 ---
 apiVersion: apps/v1
@@ -33,9 +33,9 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
       - name: netra
-        image: ghcr.io/zyvorai/netra:0.7.0
+        image: ghcr.io/zyvorai/netra:0.8.0
         imagePullPolicy: IfNotPresent
-        ports: [{name: http, containerPort: 8080}]
+        ports: [{name: http, containerPort: 30870}]
         env:
         - {name: NETRA_CILIUM_ENABLED, value: "false"}
         - {name: NETRA_HUBBLE_ENABLED, value: "false"}

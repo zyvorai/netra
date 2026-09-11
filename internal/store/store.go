@@ -39,7 +39,7 @@ type Store struct {
 
 func New() *Store {
 	return &Store{
-		config:     models.EBPFFastPathConfig{Mode: "observe", Revision: 1},
+		config:     models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
 		agents:     map[string]models.AgentReport{},
 		preflights: map[string]preflight{},
 	}
@@ -418,6 +418,26 @@ func (s *Store) DelProcess(name, actor string) (models.EBPFFastPathConfig, error
 	return cloneConfig(s.config), nil
 }
 
+func (s *Store) SetWorkloadScopes(mode string, scopes []models.EBPFWorkloadScope, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before := cloneConfig(s.config)
+	auditLen := len(s.audit)
+	if mode == "" {
+		mode = "all"
+	}
+	s.config.ScopeMode = mode
+	s.config.WorkloadScopes = cloneScopes(scopes)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.scope.set", Target: mode, Details: map[string]any{"scopes": len(scopes)}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) SetRateLimit(rule models.EBPFRateLimit, actor string) (models.EBPFFastPathConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -452,6 +472,7 @@ func (s *Store) Report(r models.AgentReport) {
 	defer s.mu.Unlock()
 	r.Stats = append([]models.DestinationStat(nil), r.Stats...)
 	r.Events = append([]models.FastPathEvent(nil), r.Events...)
+	r.Workloads = cloneWorkloads(r.Workloads)
 	if prev, ok := s.agents[r.Node]; ok && len(prev.Events) > 0 {
 		r.Events = append(prev.Events, r.Events...)
 		if len(r.Events) > 500 {
@@ -468,6 +489,7 @@ func (s *Store) Agents() []models.AgentReport {
 	for _, r := range s.agents {
 		r.Stats = append([]models.DestinationStat(nil), r.Stats...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
+		r.Workloads = cloneWorkloads(r.Workloads)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node < out[j].Node })
@@ -481,6 +503,7 @@ func (s *Store) AgentStatuses(now time.Time, staleAfter time.Duration) []models.
 	for _, r := range s.agents {
 		r.Stats = append([]models.DestinationStat(nil), r.Stats...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
+		r.Workloads = cloneWorkloads(r.Workloads)
 		age := now.Sub(r.ObservedAt)
 		if r.ObservedAt.IsZero() || age < 0 {
 			age = 0
@@ -685,6 +708,34 @@ func (s *Store) PolicyRevision(namespace, name string, id uint64) (models.Policy
 	return models.PolicyRevision{}, false
 }
 
+func cloneScopes(in []models.EBPFWorkloadScope) []models.EBPFWorkloadScope {
+	out := make([]models.EBPFWorkloadScope, len(in))
+	for i := range in {
+		out[i] = in[i]
+		if in[i].Labels != nil {
+			out[i].Labels = make(map[string]string, len(in[i].Labels))
+			for k, v := range in[i].Labels {
+				out[i].Labels[k] = v
+			}
+		}
+	}
+	return out
+}
+
+func cloneWorkloads(in []models.WorkloadIdentity) []models.WorkloadIdentity {
+	out := make([]models.WorkloadIdentity, len(in))
+	for i := range in {
+		out[i] = in[i]
+		if in[i].Labels != nil {
+			out[i].Labels = make(map[string]string, len(in[i].Labels))
+			for k, v := range in[i].Labels {
+				out[i].Labels[k] = v
+			}
+		}
+	}
+	return out
+}
+
 func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedIPv4 = append([]string(nil), c.BlockedIPv4...)
 	c.BlockedIPv6 = append([]string(nil), c.BlockedIPv6...)
@@ -694,6 +745,8 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedDNS = append([]string(nil), c.BlockedDNS...)
 	c.BlockedProcesses = append([]string(nil), c.BlockedProcesses...)
 	c.RateLimits = append([]models.EBPFRateLimit(nil), c.RateLimits...)
+	c.WorkloadScopes = cloneScopes(c.WorkloadScopes)
+	c.Workloads = cloneWorkloads(c.Workloads)
 	return c
 }
 

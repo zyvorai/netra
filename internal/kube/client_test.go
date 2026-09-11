@@ -1,7 +1,11 @@
 package kube
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -31,5 +35,27 @@ func TestPreparePolicyForApplyRemovesServerFields(t *testing.T) {
 	}
 	if meta["labels"].(map[string]any)["team"] != "net" {
 		t.Fatal("labels should be preserved")
+	}
+}
+
+func TestListWorkloads(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/pods") {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("fieldSelector"); got != "spec.nodeName=node-a" {
+			t.Fatalf("selector=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[{"metadata":{"uid":"u1","name":"api-1","namespace":"payments","labels":{"app":"api"},"ownerReferences":[{"kind":"ReplicaSet","name":"api-7d9","controller":true}]},"spec":{"nodeName":"node-a"}}]}`))
+	}))
+	defer srv.Close()
+	c := &Client{base: srv.URL, http: srv.Client()}
+	items, err := c.ListWorkloads(context.Background(), "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Namespace != "payments" || items[0].WorkloadKind != "ReplicaSet" || items[0].Labels["app"] != "api" {
+		t.Fatalf("items=%#v", items)
 	}
 }

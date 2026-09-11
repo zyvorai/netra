@@ -27,6 +27,7 @@ import (
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/policy"
 	"github.com/zyvorai/netra/internal/store"
+	"github.com/zyvorai/netra/internal/workload"
 )
 
 type Server struct {
@@ -58,13 +59,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.7.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.8.0"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.7.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.8.0"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.7.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.8.0"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -86,6 +87,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
 	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.explainDrops)))
 	mux.Handle("GET /api/v1/ebpf/config", s.authOrAgent(http.HandlerFunc(s.ebpfConfig)))
+	mux.Handle("GET /api/v1/ebpf/workloads", s.auth(http.HandlerFunc(s.ebpfWorkloads)))
+	mux.Handle("PUT /api/v1/ebpf/scope", s.auth(http.HandlerFunc(s.ebpfScope)))
+	mux.Handle("POST /api/v1/ebpf/scope/preview", s.auth(http.HandlerFunc(s.ebpfScopePreview)))
+	mux.Handle("GET /api/v1/ebpf/topology", s.auth(http.HandlerFunc(s.ebpfTopology)))
 	mux.Handle("PUT /api/v1/ebpf/mode", s.auth(http.HandlerFunc(s.ebpfMode)))
 	mux.Handle("POST /api/v1/ebpf/deny", s.auth(http.HandlerFunc(s.ebpfDenyAdd)))
 	mux.Handle("DELETE /api/v1/ebpf/deny/{ip}", s.auth(http.HandlerFunc(s.ebpfDenyDelete)))
@@ -179,7 +184,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			stale++
 		}
 	}
-	out := map[string]any{"version": "0.7.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
+	out := map[string]any{"version": "0.8.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
 	if err != nil {
 		out["hubbleError"] = err.Error()
 	} else {
@@ -646,9 +651,126 @@ func enrichExplanation(x map[string]any) {
 	x["summary"] = summary
 	x["suggestions"] = suggestions
 }
-func (s *Server) ebpfConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, s.store.Config())
+func (s *Server) ebpfConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := s.store.Config()
+	node := strings.TrimSpace(r.URL.Query().Get("node"))
+	if node != "" && s.kube != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer cancel()
+		items, err := s.kube.ListWorkloads(ctx, node)
+		if err != nil {
+			s.log.Warn("load node workload inventory", "node", node, "error", err)
+		} else {
+			cfg.Workloads = items
+		}
+	}
+	writeJSON(w, 200, cfg)
 }
+
+func (s *Server) ebpfWorkloads(w http.ResponseWriter, r *http.Request) {
+	if s.kube == nil {
+		errorJSON(w, http.StatusServiceUnavailable, "Kubernetes client unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	items, err := s.kube.ListWorkloads(ctx, strings.TrimSpace(r.URL.Query().Get("node")))
+	if err != nil {
+		errorJSON(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (s *Server) ebpfScope(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Mode   string                     `json:"mode"`
+		Scopes []models.EBPFWorkloadScope `json:"scopes"`
+	}
+	if err := decodeJSON(r, &x, 1<<20); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	x.Mode = strings.ToLower(strings.TrimSpace(x.Mode))
+	if x.Mode == "" {
+		x.Mode = "all"
+	}
+	if x.Mode != "all" && x.Mode != "selected" {
+		errorJSON(w, 400, "scope mode must be all or selected")
+		return
+	}
+	for i := range x.Scopes {
+		sc := &x.Scopes[i]
+		sc.Namespace, sc.Pod = strings.TrimSpace(sc.Namespace), strings.TrimSpace(sc.Pod)
+		sc.WorkloadKind, sc.WorkloadName = strings.TrimSpace(sc.WorkloadKind), strings.TrimSpace(sc.WorkloadName)
+		clean := map[string]string{}
+		for k, v := range sc.Labels {
+			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+			if k == "" {
+				errorJSON(w, 400, "scope label key cannot be empty")
+				return
+			}
+			clean[k] = v
+		}
+		sc.Labels = clean
+		if sc.CgroupID == 0 && sc.Namespace == "" && sc.Pod == "" && sc.WorkloadKind == "" && sc.WorkloadName == "" && len(sc.Labels) == 0 {
+			errorJSON(w, 400, "empty workload scope is not allowed")
+			return
+		}
+	}
+	if x.Mode == "selected" && len(x.Scopes) == 0 {
+		errorJSON(w, 400, "selected scope mode requires at least one workload scope")
+		return
+	}
+	cfg, err := s.store.SetWorkloadScopes(x.Mode, x.Scopes, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist workload scope: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfScopePreview(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Scopes []models.EBPFWorkloadScope `json:"scopes"`
+	}
+	if err := decodeJSON(r, &x, 1<<20); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if len(x.Scopes) == 0 {
+		errorJSON(w, 400, "at least one workload scope is required")
+		return
+	}
+	if s.kube == nil {
+		errorJSON(w, http.StatusServiceUnavailable, "Kubernetes client unavailable")
+		return
+	}
+	items, err := s.kube.ListWorkloads(r.Context(), "")
+	if err != nil {
+		errorJSON(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	matched := make([]models.WorkloadIdentity, 0)
+	for _, pod := range items {
+		for _, scope := range x.Scopes {
+			if workload.Match(scope, pod) {
+				matched = append(matched, pod)
+				break
+			}
+		}
+	}
+	writeJSON(w, 200, map[string]any{"matched": matched, "count": len(matched), "totalPods": len(items)})
+}
+
+func (s *Server) ebpfTopology(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 1000 {
+		limit = n
+	}
+	writeJSON(w, 200, map[string]any{"items": observability.Topology(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit)})
+}
+
 func (s *Server) ebpfMode(w http.ResponseWriter, r *http.Request) {
 	var x struct {
 		Mode string `json:"mode"`
@@ -971,7 +1093,7 @@ func (s *Server) ebpfSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, observability.Summarize(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), 10))
 }
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "TCP flags", "per-hook attribution"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "IPv4 destination PPS limit", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

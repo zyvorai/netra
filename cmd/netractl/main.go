@@ -26,6 +26,7 @@ func httpClient() *http.Client {
 	}
 	return c
 }
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -75,7 +76,11 @@ func usage() {
   ebpf uid add UID | uid del UID
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
-  ebpf rate set IPv4 PPS | rate del IPv4`)
+  ebpf rate set IPv4 PPS | rate del IPv4
+  ebpf workloads [node]
+  ebpf scope show | scope all
+  ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
+  ebpf scope set FILE`)
 }
 func policy() error {
 	if len(os.Args) < 3 {
@@ -417,6 +422,76 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/process/delete", b)
+		}
+	case "workloads":
+		p := "/api/v1/ebpf/workloads"
+		if len(os.Args) > 3 {
+			p += "?node=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "scope":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("scope show|all|selected|set")
+		}
+		switch os.Args[3] {
+		case "show":
+			return request("GET", "/api/v1/ebpf/config", nil)
+		case "all":
+			b, _ := json.Marshal(map[string]any{"mode": "all", "scopes": []any{}})
+			return request("PUT", "/api/v1/ebpf/scope", b)
+		case "set":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("scope set FILE")
+			}
+			b, err := os.ReadFile(os.Args[4])
+			if err != nil {
+				return err
+			}
+			return request("PUT", "/api/v1/ebpf/scope", b)
+		case "selected":
+			scope := map[string]any{}
+			labels := map[string]string{}
+			for i := 4; i < len(os.Args); i++ {
+				if i+1 >= len(os.Args) {
+					return fmt.Errorf("%s requires a value", os.Args[i])
+				}
+				flag, value := os.Args[i], os.Args[i+1]
+				i++
+				switch flag {
+				case "--namespace":
+					scope["namespace"] = value
+				case "--pod":
+					scope["pod"] = value
+				case "--kind":
+					scope["workloadKind"] = value
+				case "--workload":
+					scope["workloadName"] = value
+				case "--label":
+					parts := strings.SplitN(value, "=", 2)
+					if len(parts) != 2 || parts[0] == "" {
+						return fmt.Errorf("label must be key=value")
+					}
+					labels[parts[0]] = parts[1]
+				case "--cgroup":
+					id, err := strconv.ParseUint(value, 10, 64)
+					if err != nil || id == 0 {
+						return fmt.Errorf("valid cgroup ID required")
+					}
+					scope["cgroupId"] = id
+				default:
+					return fmt.Errorf("unknown scope flag %s", flag)
+				}
+			}
+			if len(labels) > 0 {
+				scope["labels"] = labels
+			}
+			if len(scope) == 0 {
+				return fmt.Errorf("selected scope requires at least one selector")
+			}
+			b, _ := json.Marshal(map[string]any{"mode": "selected", "scopes": []any{scope}})
+			return request("PUT", "/api/v1/ebpf/scope", b)
+		default:
+			return fmt.Errorf("scope show|all|selected|set")
 		}
 	case "rate":
 		if len(os.Args) < 5 {

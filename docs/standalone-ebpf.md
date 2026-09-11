@@ -1,4 +1,4 @@
-# Standalone eBPF datapath — v0.7
+# Standalone eBPF datapath — v0.8
 
 Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge of the installed CNI. The default attachment point is the root cgroup v2 hierarchy, so descendant workload traffic is covered independently of virtual-interface naming.
 
@@ -8,6 +8,12 @@ Netra can operate on Linux/Kubernetes nodes without Cilium, Hubble, or knowledge
 2. **cgroup socket address hooks** — process identity path. Supplies PID, UID, cgroup ID and `comm` for new TCP connects and UDP sendmsg operations and can reject by UID/process/IP/CIDR/port.
 3. **TCX** — optional interface layer. Configure `NETRA_INTERFACES=eth0,cni0` or `auto`; it is not needed for baseline standalone coverage.
 4. **XDP** — optional early ingress layer. Configure `NETRA_XDP_INTERFACES` explicitly. XDP is restricted to controls that can be decided at that hook and should be validated per NIC/driver.
+
+## Workload attribution and selected enforcement
+
+Netra v0.8 adds cgroup-to-Pod attribution without giving the privileged agent Kubernetes credentials. The controller reads Pod metadata; the agent scans host cgroup v2, derives cgroup IDs from inode identity, joins pod/container path components to that inventory, and enriches cgroup events/counters locally.
+
+`scopeMode=all` preserves node-wide enforcement. `scopeMode=selected` populates an `enforced_cgroups` BPF map from namespace/pod/immediate-owner/label/cgroup-ID selectors. In selected mode, un-attributed cgroups fail open, and optional TCX/XDP remain observe-only because those hooks cannot provide the workload cgroup identity used by this policy gate. See `docs/workload-scoping.md`.
 
 ## Enforcement rules
 

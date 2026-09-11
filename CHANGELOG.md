@@ -1,11 +1,20 @@
 # Changelog
 
-## v0.7.0 — 2026-09-11
+## v0.8.0 — 2026-09-11
 
 - Published as open-source **Netra** (`github.com/zyvorai/netra`); default API **HTTPS :30870**.
-- Retained **Pods / VMs** inventory, per-workload Hubble flows, create/delete CNP rules, and lock down / unlock when `cilium.enabled=true`.
-- Apple.com-style pill buttons in the React UI.
-- CI: Go 1.27; Helm gates for TLS :30870, inventory RBAC (pods/kubevirt), and Cilium/Hubble enable flags; API route registration + lockdown helper unit tests.
+- Retained **Pods / VMs** inventory, per-workload Hubble flows, CNP create/delete, and lock down / unlock when `cilium.enabled=true`.
+- Added Kubernetes-aware cgroup attribution for namespace, Pod, immediate owner, container ID and cgroup ID without giving the privileged agent Kubernetes API credentials.
+- Added controller read-only Pod metadata RBAC and node-scoped workload inventory delivery over the authenticated Netra agent channel.
+- Added cgroup-v2 inode/path discovery with configurable `NETRA_CGROUP_SCAN_INTERVAL`.
+- Added `workload_flow_stats` for exact cgroup-attributed source:port → destination:port counters and workload network topology.
+- Added enforcement scope modes: `all` preserves node-wide behavior; `selected` gates packet/socket enforcement to resolved workload cgroups.
+- Added scope selectors for namespace, Pod, immediate owner kind/name, exact labels and direct cgroup ID. Multiple scopes are ORed; fields within a scope are ANDed.
+- Added workload scope preview, discovered-workload inventory, per-agent selected-cgroup coverage, API/CLI/dashboard controls and Prometheus scope gauges.
+- In selected mode, unresolved traffic intentionally fails open and optional TCX/XDP remain observe-only because those hooks are not used as workload-identity enforcement points.
+- Preserved the legacy global `flow_stats` map for pinned-map compatibility while adding workload-specific counters separately.
+
+## v0.7.0 — 2026-09-11
 
 - Made Cilium and Hubble optional: Netra now has a standalone eBPF datapath that can run with any Kubernetes CNI or on ordinary cgroup-v2 Linux nodes.
 - Added default cgroup skb ingress/egress hooks plus connect4/connect6 and UDP sendmsg4/sendmsg6 process-aware socket hooks.

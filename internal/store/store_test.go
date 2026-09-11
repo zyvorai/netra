@@ -295,3 +295,33 @@ func TestStandaloneEBPFRules(t *testing.T) {
 		t.Fatal("Config leaked mutable slices")
 	}
 }
+
+func TestWorkloadScopePersists(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.SetWorkloadScopes("selected", []models.EBPFWorkloadScope{{Namespace: "payments", Labels: map[string]string{"app": "api"}}}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ScopeMode != "selected" || len(cfg.WorkloadScopes) != 1 {
+		t.Fatalf("cfg=%#v", cfg)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	cfg = s.Config()
+	if cfg.ScopeMode != "selected" || cfg.WorkloadScopes[0].Labels["app"] != "api" {
+		t.Fatalf("restart cfg=%#v", cfg)
+	}
+	if len(cfg.Workloads) != 0 {
+		t.Fatal("ephemeral workload inventory must not persist")
+	}
+}

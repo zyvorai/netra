@@ -92,6 +92,17 @@ struct {
     __type(value, struct flow_value);
 } flow_stats SEC(".maps");
 
+struct workload_flow_key {
+    __u64 cgroup_id;
+    struct flow_key flow;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct workload_flow_key);
+    __type(value, struct flow_value);
+} workload_flow_stats SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
@@ -177,6 +188,21 @@ struct {
     __type(value, __u32);
 } config_map SEC(".maps");
 
+// scope_config key 0: 0=all cgroups, 1=selected cgroups only.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32);
+} scope_config SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, __u64);
+    __type(value, __u8);
+} enforced_cgroups SEC(".maps");
+
 struct obs_event {
     __u64 ts_ns;
     __u64 cgroup_id;
@@ -209,6 +235,15 @@ static __always_inline int enforcing(void)
     __u32 key = 0;
     __u32 *mode = bpf_map_lookup_elem(&config_map, &key);
     return mode && *mode == 1;
+}
+
+static __always_inline int scope_allows(__u64 cgroup_id)
+{
+    __u32 key = 0;
+    __u32 *mode = bpf_map_lookup_elem(&scope_config, &key);
+    if (!mode || *mode == 0) return 1;
+    if (!cgroup_id) return 0;
+    return bpf_map_lookup_elem(&enforced_cgroups, &cgroup_id) != 0;
 }
 
 static __always_inline void copy4(__u8 out[16], __u32 addr)
@@ -271,7 +306,7 @@ static __always_inline int rate_limited4(__u32 dst)
 
 static __always_inline void update_flow(__u8 family, __u8 direction, __u8 hook, __u8 proto,
                                         __u16 sport, __u16 dport, const __u8 src[16], const __u8 dst[16],
-                                        __u32 len, int blocked)
+                                        __u32 len, int blocked, __u64 cgroup_id)
 {
     struct flow_key k = {.family=family,.direction=direction,.hook=hook,.protocol=proto,.src_port=sport,.dst_port=dport};
     __builtin_memcpy(k.src_addr, src, 16);
@@ -282,11 +317,27 @@ static __always_inline void update_flow(__u8 family, __u8 direction, __u8 hook, 
         bpf_map_update_elem(&flow_stats, &k, &zero, BPF_NOEXIST);
         v = bpf_map_lookup_elem(&flow_stats, &k);
     }
-    if (!v) return;
-    __sync_fetch_and_add(&v->packets, 1);
-    __sync_fetch_and_add(&v->bytes, len);
-    if (blocked) __sync_fetch_and_add(&v->blocked, 1);
-    v->last_ns = bpf_ktime_get_ns();
+    if (v) {
+        __sync_fetch_and_add(&v->packets, 1);
+        __sync_fetch_and_add(&v->bytes, len);
+        if (blocked) __sync_fetch_and_add(&v->blocked, 1);
+        v->last_ns = bpf_ktime_get_ns();
+    }
+    if (cgroup_id) {
+        struct workload_flow_key wk = {.cgroup_id = cgroup_id};
+        __builtin_memcpy(&wk.flow, &k, sizeof(k));
+        struct flow_value *wv = bpf_map_lookup_elem(&workload_flow_stats, &wk);
+        if (!wv) {
+            bpf_map_update_elem(&workload_flow_stats, &wk, &zero, BPF_NOEXIST);
+            wv = bpf_map_lookup_elem(&workload_flow_stats, &wk);
+        }
+        if (wv) {
+            __sync_fetch_and_add(&wv->packets, 1);
+            __sync_fetch_and_add(&wv->bytes, len);
+            if (blocked) __sync_fetch_and_add(&wv->blocked, 1);
+            wv->last_ns = bpf_ktime_get_ns();
+        }
+    }
 }
 
 static __always_inline struct obs_event *new_event(__u8 family, __u8 direction, __u8 hook, __u8 proto,
@@ -310,11 +361,11 @@ static __always_inline void submit_packet_event(__u8 family, __u8 direction, __u
                                                  __u8 action, __u8 type, __u8 reason, __u32 ifindex,
                                                  __u32 len, const __u8 src[16], const __u8 dst[16],
                                                  __u16 sport, __u16 dport, __u8 tcp_flags,
-                                                 const char *dns, int dns_len)
+                                                 const char *dns, int dns_len, __u64 cgroup_id)
 {
     struct obs_event *e = new_event(family,direction,hook,proto,action,type,reason);
     if (!e) return;
-    e->ifindex=ifindex; e->length=len; e->src_port=sport; e->dst_port=dport; e->tcp_flags=tcp_flags;
+    e->ifindex=ifindex; e->length=len; e->src_port=sport; e->dst_port=dport; e->tcp_flags=tcp_flags; e->cgroup_id=cgroup_id;
     __builtin_memcpy(e->src_addr,src,16); __builtin_memcpy(e->dst_addr,dst,16);
     if (dns && dns_len > 0) {
         #pragma unroll
@@ -336,18 +387,18 @@ static __always_inline void submit_socket_event(struct bpf_sock_addr *ctx, __u8 
     bpf_ringbuf_submit(e,0);
 }
 
-static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16 dport, __u8 *reason, int apply_rate)
+static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16 dport, __u8 *reason, int apply_rate, __u64 cgroup_id)
 {
-    if (!enforcing()) return 0;
+    if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr4(direction,addr)) { *reason=REASON_CIDR; return 1; }
     if (dport && blocked_port(direction,proto,dport)) { *reason=REASON_PORT; return 1; }
     if (apply_rate && direction==DIR_EGRESS && rate_limited4(addr)) { *reason=REASON_RATE; return 1; }
     return 0;
 }
-static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 proto, __u16 dport, __u8 *reason)
+static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 proto, __u16 dport, __u8 *reason, __u64 cgroup_id)
 {
-    if (!enforcing()) return 0;
+    if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     struct ip6_key k={}; __builtin_memcpy(k.addr,addr,16);
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr6(direction,addr)) { *reason=REASON_CIDR; return 1; }
@@ -402,24 +453,25 @@ static __always_inline int handle_v4(void *data, void *data_end, __u32 ifindex, 
     }
     __u32 peer = direction==DIR_EGRESS ? ip->daddr : ip->saddr;
     __u16 policy_port = dport;
-    __u8 reason=0; int blocked=decide4(direction,peer,ip->protocol,policy_port,&reason,1);
+    __u64 cgroup_id = hook==HOOK_CGROUP ? bpf_get_current_cgroup_id() : 0;
+    __u8 reason=0; int blocked=decide4(direction,peer,ip->protocol,policy_port,&reason,1,cgroup_id);
     char dns_name[96]={}; int dns_len=0;
     if (direction==DIR_EGRESS && ip->protocol==IPPROTO_UDP && dport==__builtin_bswap16(53) && payload) {
         dns_len=dns_qname(payload,data_end,dns_name);
-        if (!blocked && enforcing() && dns_len>0) { struct dns_key dk={}; __builtin_memcpy(dk.name,dns_name,96); if (bpf_map_lookup_elem(&blocked_dns,&dk)) { blocked=1; reason=REASON_DNS; } }
+        if (!blocked && enforcing() && scope_allows(cgroup_id) && dns_len>0) { struct dns_key dk={}; __builtin_memcpy(dk.name,dns_name,96); if (bpf_map_lookup_elem(&blocked_dns,&dk)) { blocked=1; reason=REASON_DNS; } }
     }
     __u8 src[16],dst[16]; copy4(src,ip->saddr); copy4(dst,ip->daddr);
-    update_flow(FAMILY_V4,direction,hook,ip->protocol,sport,dport,src,dst,len,blocked);
+    update_flow(FAMILY_V4,direction,hook,ip->protocol,sport,dport,src,dst,len,blocked,cgroup_id);
     if (direction==DIR_EGRESS) {
         struct dest_key lk={.dst_ip=ip->daddr,.dst_port=dport,.protocol=ip->protocol,.pad=0};
         struct dest_value zero={}; struct dest_value *lv=bpf_map_lookup_elem(&dest_stats,&lk);
         if(!lv){bpf_map_update_elem(&dest_stats,&lk,&zero,BPF_NOEXIST);lv=bpf_map_lookup_elem(&dest_stats,&lk);} if(lv){__sync_fetch_and_add(&lv->packets,1);__sync_fetch_and_add(&lv->bytes,len);if(blocked)__sync_fetch_and_add(&lv->blocked,1);lv->last_ns=bpf_ktime_get_ns();}
     }
-    if (blocked) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len);
+    if (blocked) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
     else {
         // Exact counters are retained; ring buffer is sampled 1/64 by timestamp bits.
-        if ((bpf_ktime_get_ns() & 63)==1) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0);
-        if(dns_len>0) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len);
+        if ((bpf_ktime_get_ns() & 63)==1) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id);
+        if(dns_len>0) submit_packet_event(FAMILY_V4,direction,hook,ip->protocol,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id);
     }
     return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
 }
@@ -438,11 +490,11 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
     if (proto==IPPROTO_TCP) { struct tcphdr *tcp=l4;if((void *)(tcp+1)>data_end)return allow_value;sport=tcp->source;dport=tcp->dest;flags=*(((unsigned char*)tcp)+13); }
     else if(proto==IPPROTO_UDP){struct udphdr *udp=l4;if((void *)(udp+1)>data_end)return allow_value;sport=udp->source;dport=udp->dest;payload=(void *)(udp+1);}
     const __u8 *peer=direction==DIR_EGRESS?(const __u8 *)&ip6->daddr:(const __u8 *)&ip6->saddr;
-    __u16 policy_port=dport;__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason);
-    char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
-    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked);
-    if(blocked) submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len);
-    else { if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0); if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len); }
+    __u16 policy_port=dport;__u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
+    __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
+    if(blocked) submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,src,dst,sport,dport,flags,dns_name,dns_len,cgroup_id);
+    else { if((bpf_ktime_get_ns()&63)==1)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_FLOW,0,ifindex,len,src,dst,sport,dport,flags,0,0,cgroup_id); if(dns_len>0)submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_ALLOW,EVT_DNS,0,ifindex,len,src,dst,sport,dport,0,dns_name,dns_len,cgroup_id); }
     return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
 }
 
@@ -471,14 +523,14 @@ SEC("cgroup_skb/ingress") int netra_cgroup_ingress(struct __sk_buff *skb){ retur
 static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u32 dst=ctx->user_ip4;__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u8 addr[16];copy4(addr,dst);
-    __u32 uid=(__u32)bpf_get_current_uid_gid();
-    int blocked=0;if(enforcing()&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0);
+    __u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
+    int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id);
     submit_socket_event(ctx,FAMILY_V4,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
 {
-    __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();
-    int blocked=0;if(enforcing()&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason);
+    __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
+    int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,cgroup_id);
     submit_socket_event(ctx,FAMILY_V6,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
 SEC("cgroup/connect4") int netra_connect4(struct bpf_sock_addr *ctx){return socket4(ctx,IPPROTO_TCP);}
@@ -491,9 +543,9 @@ SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
     void *data=(void *)(long)ctx->data,*end=(void *)(long)ctx->data_end;struct ethhdr *eth=data;if((void *)(eth+1)>end)return XDP_PASS;
     if(!enforcing())return XDP_PASS;
     if(eth->h_proto==__builtin_bswap16(ETH_P_IP)){
-        struct iphdr *ip=(void *)(eth+1);if((void *)(ip+1)>end)return XDP_PASS;void *l4=(void *)ip+ip->ihl*4;__u16 sport=0,dport=0;if(ip->protocol==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip->protocol==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide4(DIR_INGRESS,ip->saddr,ip->protocol,dport,&reason,0)){__u8 src[16],dst[16];copy4(src,ip->saddr);copy4(dst,ip->daddr);update_flow(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,sport,dport,src,dst,(__u32)((long)end-(long)data),1);submit_packet_event(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0);return XDP_DROP;}
+        struct iphdr *ip=(void *)(eth+1);if((void *)(ip+1)>end)return XDP_PASS;void *l4=(void *)ip+ip->ihl*4;__u16 sport=0,dport=0;if(ip->protocol==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip->protocol==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide4(DIR_INGRESS,ip->saddr,ip->protocol,dport,&reason,0,0)){__u8 src[16],dst[16];copy4(src,ip->saddr);copy4(dst,ip->daddr);update_flow(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);submit_packet_event(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);return XDP_DROP;}
     } else if(eth->h_proto==__builtin_bswap16(ETH_P_IPV6)){
-        struct ipv6hdr *ip6=(void *)(eth+1);if((void *)(ip6+1)>end)return XDP_PASS;void*l4=(void *)(ip6+1);__u16 sport=0,dport=0;if(ip6->nexthdr==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip6->nexthdr==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,ip6->nexthdr,dport,&reason)){__u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,sport,dport,src,dst,(__u32)((long)end-(long)data),1);submit_packet_event(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0);return XDP_DROP;}
+        struct ipv6hdr *ip6=(void *)(eth+1);if((void *)(ip6+1)>end)return XDP_PASS;void*l4=(void *)(ip6+1);__u16 sport=0,dport=0;if(ip6->nexthdr==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip6->nexthdr==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,ip6->nexthdr,dport,&reason,0)){__u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);submit_packet_event(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);return XDP_DROP;}
     }
     return XDP_PASS;
 }

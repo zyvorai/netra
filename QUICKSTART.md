@@ -23,7 +23,7 @@ Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Ov
 
 ## Path B — Remote full stack (K3s + Cilium + Netra)
 
-SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.7.0`); after deploy, restart the Deployment so the new layers are picked up:
+SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.8.0`); after deploy, restart the Deployment so the new layers are picked up:
 
 ```bash
 NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh HOST USER --k8s
