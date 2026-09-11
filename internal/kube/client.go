@@ -1,127 +1,63 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
 // SPDX-License-Identifier: Apache-2.0
-
 package kube
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 )
 
-// Client talks to the Kubernetes API using the in-cluster or kubeconfig token.
 type Client struct {
-	base   string
-	token  string
-	http   *http.Client
-	caPath string
+	base, token string
+	http        *http.Client
 }
 
 func NewFromEnvironment() (*Client, error) {
 	host := os.Getenv("KUBERNETES_SERVICE_HOST")
-	port := os.Getenv("KUBERNETES_SERVICE_PORT")
-	if host != "" && port != "" {
-		token, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
-		if err != nil {
-			return nil, err
-		}
-		return &Client{
-			base:   "https://" + host + ":" + port,
-			token:  strings.TrimSpace(string(token)),
-			caPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-			http:   &http.Client{Timeout: 30 * time.Second},
-		}, nil
+	port := os.Getenv("KUBERNETES_SERVICE_PORT_HTTPS")
+	if host == "" {
+		host = "kubernetes.default.svc"
 	}
-	// Local/dev fallback: honor NETRA_KUBE_API + NETRA_KUBE_TOKEN (or empty for tests).
-	base := strings.TrimRight(os.Getenv("NETRA_KUBE_API"), "/")
-	if base == "" {
-		base = "https://127.0.0.1:6443"
+	if port == "" {
+		port = "443"
 	}
-	return &Client{
-		base:  base,
-		token: os.Getenv("NETRA_KUBE_TOKEN"),
-		http:  &http.Client{Timeout: 30 * time.Second},
-	}, nil
+	base := "https://" + host + ":" + port
+	tokenBytes, _ := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	ca, _ := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+	pool, _ := x509.SystemCertPool()
+	if pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if len(ca) > 0 {
+		pool.AppendCertsFromPEM(ca)
+	}
+	tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
+	return &Client{base: base, token: strings.TrimSpace(string(tokenBytes)), http: &http.Client{Timeout: 15 * time.Second, Transport: tr}}, nil
 }
 
-func (c *Client) ListPolicies(ctx context.Context, namespace string) ([]byte, error) {
-	path := fmt.Sprintf("/apis/cilium.io/v2/namespaces/%s/ciliumnetworkpolicies", url.PathEscape(namespace))
-	return c.do(ctx, http.MethodGet, path, nil, "")
-}
-
-func (c *Client) ApplyPolicy(ctx context.Context, namespace, name string, body []byte, dryRun bool) ([]byte, error) {
-	path := fmt.Sprintf("/apis/cilium.io/v2/namespaces/%s/ciliumnetworkpolicies/%s", url.PathEscape(namespace), url.PathEscape(name))
-	q := "?fieldManager=netra"
-	if dryRun {
-		q += "&dryRun=All"
-	}
-	// Try patch/apply first; fall back to create on 404.
-	out, err := c.do(ctx, http.MethodPatch, path+q, body, "application/apply-patch+yaml")
-	if err == nil {
-		return out, nil
-	}
-	if !strings.Contains(err.Error(), "404") {
-		return nil, err
-	}
-	createPath := fmt.Sprintf("/apis/cilium.io/v2/namespaces/%s/ciliumnetworkpolicies", url.PathEscape(namespace))
-	if dryRun {
-		createPath += "?dryRun=All&fieldManager=netra"
-	} else {
-		createPath += "?fieldManager=netra"
-	}
-	return c.do(ctx, http.MethodPost, createPath, body, "application/json")
-}
-
-func (c *Client) DeletePolicy(ctx context.Context, namespace, name string) error {
-	path := fmt.Sprintf("/apis/cilium.io/v2/namespaces/%s/ciliumnetworkpolicies/%s", url.PathEscape(namespace), url.PathEscape(name))
-	_, err := c.do(ctx, http.MethodDelete, path, nil, "")
-	return err
-}
-
-func ExtractIdentity(raw []byte) (namespace, name string, err error) {
-	var m struct {
-		Metadata struct {
-			Name      string `json:"name"`
-			Namespace string `json:"namespace"`
-		} `json:"metadata"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return "", "", fmt.Errorf("parse CiliumNetworkPolicy: %w", err)
-	}
-	if m.Metadata.Name == "" {
-		return "", "", fmt.Errorf("metadata.name is required")
-	}
-	ns := m.Metadata.Namespace
-	if ns == "" {
-		ns = "default"
-	}
-	return ns, m.Metadata.Name, nil
-}
-
-func (c *Client) do(ctx context.Context, method, path string, body []byte, contentType string) ([]byte, error) {
-	var rdr io.Reader
-	if body != nil {
-		rdr = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rdr)
+func (c *Client) do(ctx context.Context, method, p string, body []byte, contentType string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.base+p, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -129,23 +65,89 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, conte
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("kubernetes %s %s: %s %s", method, path, resp.Status, truncate(string(b), 512))
+		return nil, fmt.Errorf("kubernetes API %s: %s", resp.Status, string(b))
 	}
 	return b, nil
 }
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+func esc(s string) string { return url.PathEscape(s) }
+func (c *Client) ListPolicies(ctx context.Context, ns string) ([]byte, error) {
+	return c.do(ctx, "GET", "/apis/cilium.io/v2/namespaces/"+esc(ns)+"/ciliumnetworkpolicies", nil, "")
 }
 
-// HomeKubeconfigPath is used by local tooling; kept for future kubeconfig loading.
-func HomeKubeconfigPath() string {
-	if v := os.Getenv("KUBECONFIG"); v != "" {
-		return v
+func (c *Client) GetPolicy(ctx context.Context, ns, name string) ([]byte, bool, error) {
+	p := "/apis/cilium.io/v2/namespaces/" + esc(ns) + "/ciliumnetworkpolicies/" + esc(name)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.base+p, nil)
+	if err != nil {
+		return nil, false, err
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".kube", "config")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if resp.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("kubernetes API %s: %s", resp.Status, string(b))
+	}
+	return b, true, nil
+}
+
+func (c *Client) ApplyPolicy(ctx context.Context, ns, name string, body []byte, dry bool) ([]byte, error) {
+	q := "?fieldManager=netra&force=true"
+	if dry {
+		q += "&dryRun=All"
+	}
+	return c.do(ctx, "PATCH", "/apis/cilium.io/v2/namespaces/"+esc(ns)+"/ciliumnetworkpolicies/"+esc(name)+q, body, "application/apply-patch+yaml")
+}
+func (c *Client) DeletePolicy(ctx context.Context, ns, name string) error {
+	_, err := c.do(ctx, "DELETE", "/apis/cilium.io/v2/namespaces/"+esc(ns)+"/ciliumnetworkpolicies/"+esc(name), []byte(`{"propagationPolicy":"Background"}`), "application/json")
+	return err
+}
+
+func ExtractIdentity(b []byte) (string, string, error) {
+	var x struct {
+		Kind     string                           `json:"kind"`
+		Metadata struct{ Name, Namespace string } `json:"metadata"`
+	}
+	if err := json.Unmarshal(b, &x); err != nil {
+		return "", "", fmt.Errorf("policy must be JSON: %w", err)
+	}
+	if x.Kind != "CiliumNetworkPolicy" {
+		return "", "", fmt.Errorf("kind must be CiliumNetworkPolicy")
+	}
+	if strings.TrimSpace(x.Metadata.Name) == "" {
+		return "", "", fmt.Errorf("metadata.name is required")
+	}
+	ns := strings.TrimSpace(x.Metadata.Namespace)
+	if ns == "" {
+		ns = "default"
+	}
+	if path.Clean(ns) != ns || strings.Contains(ns, "/") {
+		return "", "", fmt.Errorf("invalid namespace")
+	}
+	return ns, x.Metadata.Name, nil
+}
+
+// PreparePolicyForApply removes API-server-owned fields from a live CNP so the
+// result can safely be stored as a rollback snapshot and later server-side applied.
+// Policy fields, labels, annotations and unknown Cilium rule fields are preserved.
+func PreparePolicyForApply(b []byte) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, fmt.Errorf("policy must be JSON: %w", err)
+	}
+	delete(doc, "status")
+	if meta, ok := doc["metadata"].(map[string]any); ok {
+		for _, key := range []string{"creationTimestamp", "deletionGracePeriodSeconds", "deletionTimestamp", "generation", "managedFields", "resourceVersion", "selfLink", "uid"} {
+			delete(meta, key)
+		}
+	}
+	return json.Marshal(doc)
 }

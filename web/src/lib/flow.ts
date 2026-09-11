@@ -1,0 +1,2 @@
+export function endpointName(x:any){if(!x)return 'world';const pod=x.podName||x.workloads?.[0]?.name;return [x.namespace,pod].filter(Boolean).join('/')||x.identity?.toString()||'world'}
+export function tuple(f:any){const ip=f?.IP||f?.ip||{};const l4=f?.l4||{};const tcp=l4.TCP||l4.tcp;const udp=l4.UDP||l4.udp;const p=tcp||udp||{};return `${ip.source||'?'}:${p.sourcePort||''} → ${ip.destination||'?'}:${p.destinationPort||''}`}

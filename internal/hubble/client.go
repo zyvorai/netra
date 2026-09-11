@@ -212,8 +212,11 @@ func directionValue(v string) (flowpb.TrafficDirection, bool) {
 func podScope(namespace, pod string) string {
 	ns := strings.TrimSpace(namespace)
 	p := strings.TrimSpace(pod)
-	if ns == "" && p == "" {
-		return ""
+	if ns == "" {
+		return p
+	}
+	if p == "" {
+		return ns + "/"
 	}
 	return ns + "/" + p
 }

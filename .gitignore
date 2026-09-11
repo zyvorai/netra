@@ -1,11 +1,7 @@
-bin/
-web/node_modules/
-web/dist/
-bpf/*.o
+/web/node_modules/
+/web/dist/
+/web/tsconfig.tsbuildinfo
+/bin/
+*.o
 .DS_Store
-*.log
-.env
-.idea/
-.vscode/
-
 .cursor/

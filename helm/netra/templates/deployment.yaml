@@ -1,76 +1,171 @@
+{{- if and .Values.ha.enabled (lt (int .Values.replicaCount) 2) }}
+{{- fail "ha.enabled=true requires replicaCount >= 2" }}
+{{- end }}
+{{- if and .Values.ha.enabled (not .Values.persistence.enabled) }}
+{{- fail "ha.enabled=true requires persistence.enabled=true" }}
+{{- end }}
+{{- if and .Values.ha.enabled (not .Values.persistence.existingClaim) (not (has "ReadWriteMany" .Values.persistence.accessModes)) }}
+{{- fail "HA with a chart-managed PVC requires persistence.accessModes to include ReadWriteMany. For an existingClaim, ensure the claim is RWX and supports POSIX file locking." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
-  labels:
-    app.kubernetes.io/name: netra
-    app.kubernetes.io/component: controller
+  name: netra
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if .Values.ha.enabled }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  {{- else if .Values.persistence.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: netra
-      app.kubernetes.io/component: controller
   template:
     metadata:
       labels:
         app.kubernetes.io/name: netra
-        app.kubernetes.io/component: controller
+      {{- if and .Values.metrics.enabled .Values.metrics.prometheusAnnotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "30870"
+        prometheus.io/scheme: {{ if .Values.tls.enabled }}"https"{{ else }}"http"{{ end }}
+      {{- end }}
     spec:
-      serviceAccountName: {{ .Values.serviceAccount.name }}
+      serviceAccountName: netra
+      terminationGracePeriodSeconds: 20
+      {{- if .Values.ha.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {app.kubernetes.io/name: netra}
+      {{- end }}
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      {{- if .Values.tls.enabled }}
+      initContainers:
+      - name: gen-cert
+        image: {{ .Values.tls.opensslImage | quote }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            openssl req -x509 -nodes -days 3650 \
+              -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+              -keyout /certs/tls.key -out /certs/tls.crt \
+              -subj "/CN=netra/O=ZyvorAI Labs Private Limited" \
+              -addext "subjectAltName=DNS:netra,DNS:netra.{{ .Release.Namespace }}.svc,DNS:netra.{{ .Release.Namespace }}.svc.cluster.local,DNS:localhost,IP:127.0.0.1"
+            chown 65532:65532 /certs/tls.key /certs/tls.crt
+            chmod 600 /certs/tls.key && chmod 644 /certs/tls.crt
+        securityContext: {runAsUser: 0, runAsNonRoot: false}
+        volumeMounts:
+        - {name: tls-certs, mountPath: /certs}
+      {{- end }}
       containers:
-        - name: netrad
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: 8080
-          env:
-            - name: NETRA_LISTEN
-              value: ":8080"
-            - name: NETRA_HUBBLE_ADDR
-              value: {{ .Values.hubble.address | quote }}
-            - name: NETRA_WEB_DIR
-              value: /usr/share/netra/web
-            - name: NETRA_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-auth
-                  key: api-key
-                  optional: true
-            - name: NETRA_AGENT_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-auth
-                  key: agent-key
-                  optional: true
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 3
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 20
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: netra
-  labels:
-    app.kubernetes.io/name: netra
-spec:
-  type: {{ .Values.service.type }}
-  selector:
-    app.kubernetes.io/name: netra
-    app.kubernetes.io/component: controller
-  ports:
-    - name: http
-      port: {{ .Values.service.port }}
-      targetPort: http
+      - name: netra
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
+          containerPort: 30870
+        env:
+        - name: NETRA_LISTEN
+          value: ":30870"
+        - name: NETRA_HUBBLE_ADDR
+          value: {{ .Values.hubble.address | quote }}
+        - name: NETRA_AGENT_STALE_AFTER
+          value: {{ .Values.agent.staleAfter | quote }}
+        - name: NETRA_ALLOW_UNAUTHENTICATED
+          value: {{ .Values.auth.allowUnauthenticated | quote }}
+        - name: NETRA_REQUIRE_PREFLIGHT
+          value: {{ .Values.policy.requirePreflight | quote }}
+        - name: NETRA_HA_ENABLED
+          value: {{ .Values.ha.enabled | quote }}
+        {{- if .Values.tls.enabled }}
+        - {name: NETRA_TLS_CERT, value: /certs/tls.crt}
+        - {name: NETRA_TLS_KEY, value: /certs/tls.key}
+        {{- end }}
+        {{- if .Values.ha.enabled }}
+        - name: NETRA_HA_LEASE_NAME
+          value: {{ .Values.ha.leaseName | quote }}
+        - name: NETRA_HA_LEASE_DURATION
+          value: {{ .Values.ha.leaseDuration | quote }}
+        - name: NETRA_HA_RENEW_DEADLINE
+          value: {{ .Values.ha.renewDeadline | quote }}
+        - name: NETRA_HA_RETRY_PERIOD
+          value: {{ .Values.ha.retryPeriod | quote }}
+        - name: NETRA_NAMESPACE
+          valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+        - name: NETRA_POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        {{- end }}
+        {{- if .Values.persistence.enabled }}
+        - name: NETRA_STATE_FILE
+          value: {{ .Values.persistence.stateFile | quote }}
+        {{- end }}
+        - name: NETRA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "netra.authSecretName" . }}
+              key: api-key
+        - name: NETRA_AGENT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "netra.authSecretName" . }}
+              key: agent-key
+        resources: {{- toYaml .Values.resources | nindent 10 }}
+        {{- if or .Values.tls.enabled .Values.persistence.enabled }}
+        volumeMounts:
+        {{- if .Values.tls.enabled }}
+        - {name: tls-certs, mountPath: /certs, readOnly: true}
+        {{- end }}
+        {{- if .Values.persistence.enabled }}
+        - {name: state, mountPath: /var/lib/netra}
+        {{- end }}
+        {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities: {drop: ["ALL"]}
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
+            {{- if .Values.tls.enabled }}
+            scheme: HTTPS
+            {{- end }}
+          initialDelaySeconds: 2
+          periodSeconds: 3
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: {{ if .Values.tls.enabled }}https{{ else }}http{{ end }}
+            {{- if .Values.tls.enabled }}
+            scheme: HTTPS
+            {{- end }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      {{- if or .Values.tls.enabled .Values.persistence.enabled }}
+      volumes:
+      {{- if .Values.tls.enabled }}
+      - {name: tls-certs, emptyDir: {}}
+      {{- end }}
+      {{- if .Values.persistence.enabled }}
+      - name: state
+        persistentVolumeClaim:
+          claimName: {{ default "netra-state" .Values.persistence.existingClaim }}
+      {{- end }}
+      {{- end }}

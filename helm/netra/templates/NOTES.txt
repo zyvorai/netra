@@ -1,4 +1,0 @@
-1. Netra controller: kubectl -n {{ .Release.Namespace }} port-forward svc/netra 8080:{{ .Values.service.port }}
-2. Health: curl -sf http://127.0.0.1:8080/healthz
-3. Hubble address: {{ .Values.hubble.address }}
-4. Optional eBPF agent: {{ .Values.agent.enabled }} (enable with --set agent.enabled=true)

@@ -1,10 +1,11 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,311 +17,406 @@ import (
 	"time"
 )
 
+var base = strings.TrimRight(env("NETRA_URL", "https://127.0.0.1:30870"), "/")
+
+func httpClient() *http.Client {
+	c := &http.Client{Timeout: 20 * time.Second}
+	if !strings.EqualFold(env("NETRA_TLS_INSECURE", "true"), "false") {
+		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}
+	}
+	return c
+}
 func main() {
 	if len(os.Args) < 2 {
 		usage()
-		os.Exit(2)
-	}
-	switch os.Args[1] {
-	case "status":
-		mustPrint(get("/api/v1/status", nil))
-	case "policy":
-		policyCmd(os.Args[2:])
-	case "flows":
-		flowsCmd(os.Args[2:])
-	case "drops":
-		dropsCmd(os.Args[2:])
-	case "ebpf":
-		ebpfCmd(os.Args[2:])
-	case "help", "-h", "--help":
-		usage()
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
-		usage()
-		os.Exit(2)
-	}
-}
-
-func policyCmd(args []string) {
-	if len(args) == 0 {
-		fatal("policy requires subcommand")
-	}
-	switch args[0] {
-	case "list":
-		ns := flagValue(args[1:], "--namespace", "default")
-		mustPrint(get("/api/v1/policies", map[string]string{"namespace": ns}))
-	case "build":
-		body := map[string]any{
-			"name":       requireFlag(args[1:], "--name"),
-			"namespace":  flagValue(args[1:], "--namespace", "default"),
-			"kind":       flagValue(args[1:], "--kind", "cidr"),
-			"to":         requireFlag(args[1:], "--to"),
-			"port":       atoi(flagValue(args[1:], "--port", "443")),
-			"includeDNS": hasFlag(args[1:], "--include-dns"),
-			"selector":   parseSelector(requireFlag(args[1:], "--selector")),
-		}
-		mustPrint(postJSON("/api/v1/policies/build", body))
-	case "apply":
-		file := requireFlag(args[1:], "--file")
-		b, err := os.ReadFile(file)
-		if err != nil {
-			fatal(err.Error())
-		}
-		q := map[string]string{}
-		if hasFlag(args[1:], "--dry-run") {
-			q["dryRun"] = "true"
-		}
-		mustPrint(postRaw("/api/v1/policies/apply", b, q))
-	case "delete":
-		ns := flagValue(args[1:], "--namespace", "default")
-		name := requireFlag(args[1:], "--name")
-		mustPrint(del(fmt.Sprintf("/api/v1/policies/%s/%s", ns, name)))
-	default:
-		fatal("unknown policy subcommand")
-	}
-}
-
-func flowsCmd(args []string) {
-	if len(args) == 0 || args[0] != "watch" {
-		fatal("usage: netractl flows watch [--direction EGRESS] [--namespace ns] [--protocol tcp] [--to CIDR] [--verdict DROPPED]")
-	}
-	q := map[string]string{}
-	if v := flagValue(args[1:], "--direction", ""); v != "" {
-		q["direction"] = v
-	}
-	if v := flagValue(args[1:], "--namespace", ""); v != "" {
-		q["namespace"] = v
-	}
-	if v := flagValue(args[1:], "--protocol", ""); v != "" {
-		q["protocol"] = v
-	}
-	if v := flagValue(args[1:], "--to", ""); v != "" {
-		q["destination"] = v
-	}
-	if v := flagValue(args[1:], "--verdict", ""); v != "" {
-		q["verdict"] = v
-	}
-	streamSSE("/api/v1/flows/stream", q)
-}
-
-func dropsCmd(args []string) {
-	if len(args) == 0 || args[0] != "explain" {
-		fatal("usage: netractl drops explain [--namespace ns] [--pod name]")
-	}
-	q := map[string]string{}
-	if v := flagValue(args[1:], "--namespace", ""); v != "" {
-		q["namespace"] = v
-	}
-	if v := flagValue(args[1:], "--pod", ""); v != "" {
-		q["pod"] = v
-	}
-	mustPrint(get("/api/v1/drops/explain", q))
-}
-
-func ebpfCmd(args []string) {
-	if len(args) == 0 {
-		fatal("ebpf requires subcommand")
-	}
-	switch args[0] {
-	case "stats":
-		mustPrint(get("/api/v1/agents", nil))
-	case "mode":
-		if len(args) < 2 {
-			fatal("usage: netractl ebpf mode observe|enforce")
-		}
-		mustPrint(putJSON("/api/v1/ebpf/mode", map[string]any{"mode": args[1]}))
-	case "deny":
-		if len(args) < 3 {
-			fatal("usage: netractl ebpf deny add|del <ipv4>")
-		}
-		switch args[1] {
-		case "add":
-			mustPrint(postJSON("/api/v1/ebpf/deny", map[string]any{"ip": args[2]}))
-		case "del":
-			mustPrint(del("/api/v1/ebpf/deny/" + args[2]))
-		default:
-			fatal("usage: netractl ebpf deny add|del <ipv4>")
-		}
-	default:
-		fatal("unknown ebpf subcommand")
-	}
-}
-
-func baseURL() string {
-	u := strings.TrimRight(os.Getenv("NETRA_URL"), "/")
-	if u == "" {
-		u = "http://127.0.0.1:8080"
-	}
-	return u
-}
-
-func apiKey() string { return os.Getenv("NETRA_API_KEY") }
-
-func do(method, path string, body []byte, query map[string]string, contentType string) ([]byte, error) {
-	u, _ := url.Parse(baseURL() + path)
-	q := u.Query()
-	for k, v := range query {
-		q.Set(k, v)
-	}
-	u.RawQuery = q.Encode()
-	var rdr io.Reader
-	if body != nil {
-		rdr = bytes.NewReader(body)
-	}
-	req, err := http.NewRequest(method, u.String(), rdr)
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	if k := apiKey(); k != "" {
-		req.Header.Set("Authorization", "Bearer "+k)
-	}
-	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s %s: %s", method, path, strings.TrimSpace(string(b)))
-	}
-	return b, nil
-}
-
-func get(path string, q map[string]string) []byte {
-	b, err := do(http.MethodGet, path, nil, q, "")
-	if err != nil {
-		fatal(err.Error())
-	}
-	return b
-}
-func del(path string) []byte {
-	b, err := do(http.MethodDelete, path, nil, nil, "")
-	if err != nil {
-		fatal(err.Error())
-	}
-	return b
-}
-func postJSON(path string, v any) []byte {
-	raw, _ := json.Marshal(v)
-	b, err := do(http.MethodPost, path, raw, nil, "application/json")
-	if err != nil {
-		fatal(err.Error())
-	}
-	return b
-}
-func putJSON(path string, v any) []byte {
-	raw, _ := json.Marshal(v)
-	b, err := do(http.MethodPut, path, raw, nil, "application/json")
-	if err != nil {
-		fatal(err.Error())
-	}
-	return b
-}
-func postRaw(path string, body []byte, q map[string]string) []byte {
-	b, err := do(http.MethodPost, path, body, q, "application/json")
-	if err != nil {
-		fatal(err.Error())
-	}
-	return b
-}
-
-func mustPrint(b []byte) {
-	var pretty bytes.Buffer
-	if json.Indent(&pretty, b, "", "  ") == nil {
-		fmt.Println(pretty.String())
 		return
 	}
-	fmt.Println(string(b))
-}
-
-func streamSSE(path string, query map[string]string) {
-	u, _ := url.Parse(baseURL() + path)
-	q := u.Query()
-	for k, v := range query {
-		q.Set(k, v)
+	var err error
+	switch os.Args[1] {
+	case "status":
+		err = request("GET", "/api/v1/status", nil)
+	case "audit":
+		err = request("GET", "/api/v1/audit?limit=100", nil)
+	case "policy":
+		err = policy()
+	case "flows":
+		err = flows()
+	case "drops":
+		err = request("GET", "/api/v1/drops/explain", nil)
+	case "ebpf":
+		err = ebpf()
+	default:
+		usage()
+		return
 	}
-	u.RawQuery = q.Encode()
-	req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
-	if k := apiKey(); k != "" {
-		req.Header.Set("Authorization", "Bearer "+k)
-	}
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fatal(err.Error())
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		fatal(string(b))
-	}
-	_, _ = io.Copy(os.Stdout, resp.Body)
 }
-
-func flagValue(args []string, name, def string) string {
+func usage() {
+	fmt.Println(`netractl status | audit
+  policy list [namespace] | policy list --namespace NAMESPACE
+  policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
+  policy plan <file> | policy plan --file FILE
+  policy apply <file> [--dry-run] [--confirm-risk high|critical] | policy apply --file FILE [--dry-run] [--confirm-risk high|critical]
+  policy history <namespace> <name>
+  policy archive export <file>
+  policy archive import <file> [--mode merge|replace]
+  policy rollback <namespace> <name> <revision> [--dry-run] [--confirm-risk high|critical]
+  policy delete <namespace> <name>
+  flows watch [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
+  drops [explain]
+  ebpf stats | mode observe | mode enforce [lease] | deny add IP | deny del IP`)
+}
+func policy() error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("policy subcommand required")
+	}
+	switch os.Args[2] {
+	case "list":
+		ns := "default"
+		if len(os.Args) > 4 && os.Args[3] == "--namespace" {
+			ns = os.Args[4]
+		} else if len(os.Args) > 3 {
+			ns = os.Args[3]
+		}
+		return request("GET", "/api/v1/policies?namespace="+url.QueryEscape(ns), nil)
+	case "build":
+		return buildPolicy(os.Args[3:])
+	case "plan":
+		file, err := policyFile(os.Args[3:])
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		return request("POST", "/api/v1/policies/plan", b)
+	case "apply":
+		file, err := policyFile(os.Args[3:])
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if hasArg(os.Args[3:], "--dry-run") {
+			return request("POST", "/api/v1/policies/apply?dryRun=true", b)
+		}
+		return planAndApply(b, flagValue(os.Args[3:], "--confirm-risk"))
+	case "history":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("namespace and name required")
+		}
+		q := url.Values{"namespace": {os.Args[3]}, "name": {os.Args[4]}, "limit": {"50"}}
+		return request("GET", "/api/v1/policies/history?"+q.Encode(), nil)
+	case "archive":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("use policy archive export|import <file>")
+		}
+		switch os.Args[3] {
+		case "export":
+			out, status, err := doRequest("GET", "/api/v1/policies/history/export", nil, nil)
+			if err != nil {
+				return err
+			}
+			if status >= 300 {
+				return fmt.Errorf("%s: %s", http.StatusText(status), string(out))
+			}
+			if err := os.WriteFile(os.Args[4], out, 0o600); err != nil {
+				return err
+			}
+			fmt.Printf("wrote %s\n", os.Args[4])
+			return nil
+		case "import":
+			b, err := os.ReadFile(os.Args[4])
+			if err != nil {
+				return err
+			}
+			mode := flagValue(os.Args[5:], "--mode")
+			q := ""
+			if mode != "" {
+				q = "?mode=" + url.QueryEscape(mode)
+			}
+			headers := map[string]string{}
+			if strings.EqualFold(mode, "replace") {
+				headers["X-Netra-Confirm-History-Replace"] = "replace"
+			}
+			return requestHeaders("POST", "/api/v1/policies/history/import"+q, b, headers)
+		default:
+			return fmt.Errorf("use policy archive export|import <file>")
+		}
+	case "rollback":
+		if len(os.Args) < 6 {
+			return fmt.Errorf("namespace, name and revision required")
+		}
+		q := url.Values{}
+		if hasArg(os.Args[6:], "--dry-run") {
+			q.Set("dryRun", "true")
+		}
+		if v := flagValue(os.Args[6:], "--confirm-risk"); v != "" {
+			q.Set("confirmRisk", v)
+		}
+		p := "/api/v1/policies/" + url.PathEscape(os.Args[3]) + "/" + url.PathEscape(os.Args[4]) + "/rollback/" + url.PathEscape(os.Args[5])
+		if enc := q.Encode(); enc != "" {
+			p += "?" + enc
+		}
+		return request("POST", p, nil)
+	case "delete":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("namespace and name required")
+		}
+		return request("DELETE", "/api/v1/policies/"+url.PathEscape(os.Args[3])+"/"+url.PathEscape(os.Args[4]), nil)
+	}
+	return fmt.Errorf("unknown policy subcommand")
+}
+func buildPolicy(args []string) error {
+	req := map[string]any{"namespace": "default", "selector": map[string]string{}, "protocol": "TCP"}
+	selector := req["selector"].(map[string]string)
+	var to []string
 	for i := 0; i < len(args); i++ {
-		if args[i] == name && i+1 < len(args) {
-			return args[i+1]
-		}
-		if strings.HasPrefix(args[i], name+"=") {
-			return strings.TrimPrefix(args[i], name+"=")
+		switch args[i] {
+		case "--include-dns":
+			req["includeDns"] = true
+		case "--name", "--namespace", "--selector", "--kind", "--to", "--port", "--protocol":
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", args[i])
+			}
+			key, value := args[i], args[i+1]
+			i++
+			switch key {
+			case "--name":
+				req["name"] = value
+			case "--namespace":
+				req["namespace"] = value
+			case "--kind":
+				req["kind"] = value
+			case "--protocol":
+				req["protocol"] = value
+			case "--to":
+				to = append(to, value)
+			case "--selector":
+				parts := strings.SplitN(value, "=", 2)
+				if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+					return fmt.Errorf("selector must be key=value")
+				}
+				selector[parts[0]] = parts[1]
+			case "--port":
+				n, err := strconv.ParseUint(value, 10, 16)
+				if err != nil || n == 0 {
+					return fmt.Errorf("port must be 1-65535")
+				}
+				req["port"] = uint16(n)
+			}
+		default:
+			return fmt.Errorf("unknown policy build flag %s", args[i])
 		}
 	}
-	return def
+	req["to"] = to
+	b, _ := json.Marshal(req)
+	return request("POST", "/api/v1/policies/build", b)
 }
-func requireFlag(args []string, name string) string {
-	v := flagValue(args, name, "")
-	if v == "" {
-		fatal("missing " + name)
+func policyFile(args []string) (string, error) {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--file" {
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--file requires a path")
+			}
+			return args[i+1], nil
+		}
+		if !strings.HasPrefix(args[i], "--") {
+			return args[i], nil
+		}
 	}
-	return v
+	return "", fmt.Errorf("file required")
 }
-func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
 			return true
 		}
 	}
 	return false
 }
-func parseSelector(s string) map[string]string {
-	out := map[string]string{}
-	for _, part := range strings.Split(s, ",") {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			fatal("selector must be key=value[,key=value]")
+func flagValue(args []string, name string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1]
 		}
-		out[kv[0]] = kv[1]
 	}
-	return out
+	return ""
 }
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
-}
-func fatal(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	os.Exit(1)
-}
-func usage() {
-	fmt.Fprintf(os.Stderr, `netractl — Netra operator CLI
 
-Usage:
-  netractl status
-  netractl policy list --namespace <ns>
-  netractl policy build --name <n> --namespace <ns> --selector app=x --kind fqdn|cidr|entity --to <dst> [--port 443] [--include-dns]
-  netractl policy apply --file <path> [--dry-run]
-  netractl policy delete --namespace <ns> --name <n>
-  netractl flows watch [--direction EGRESS] [--namespace ns] [--protocol tcp] [--to CIDR] [--verdict DROPPED]
-  netractl drops explain [--namespace ns] [--pod name]
-  netractl ebpf stats
-  netractl ebpf mode observe|enforce
-  netractl ebpf deny add|del <ipv4>
+func planAndApply(body []byte, confirmedRisk string) error {
+	out, status, err := doRequest("POST", "/api/v1/policies/plan", body, nil)
+	if err != nil {
+		return err
+	}
+	if status >= 300 {
+		return fmt.Errorf("preflight %s: %s", http.StatusText(status), string(out))
+	}
+	var planned struct {
+		Plan struct {
+			Risk string `json:"risk"`
+		} `json:"plan"`
+		DryRun struct {
+			Passed bool `json:"passed"`
+		} `json:"dryRun"`
+		Receipt *struct {
+			Token string `json:"token"`
+		} `json:"receipt"`
+	}
+	if err := json.Unmarshal(out, &planned); err != nil {
+		return fmt.Errorf("decode preflight: %w", err)
+	}
+	if !planned.DryRun.Passed || planned.Receipt == nil || planned.Receipt.Token == "" {
+		return fmt.Errorf("preflight did not produce an apply receipt: %s", string(out))
+	}
+	risk := strings.ToLower(strings.TrimSpace(planned.Plan.Risk))
+	if risk == "high" || risk == "critical" {
+		if !strings.EqualFold(strings.TrimSpace(confirmedRisk), risk) {
+			return fmt.Errorf("preflight risk is %s; re-run with --confirm-risk %s", risk, risk)
+		}
+	}
+	headers := map[string]string{"X-Netra-Plan-Token": planned.Receipt.Token}
+	if risk == "high" || risk == "critical" {
+		headers["X-Netra-Confirm-Risk"] = risk
+	}
+	return requestHeaders("POST", "/api/v1/policies/apply", body, headers)
+}
 
-Env:
-  NETRA_URL      default http://127.0.0.1:8080
-  NETRA_API_KEY  bearer token when auth is enabled
-`)
+func flows() error {
+	if len(os.Args) < 3 || os.Args[2] != "watch" {
+		return fmt.Errorf("use flows watch")
+	}
+	q := url.Values{"number": {"100"}}
+	for i := 3; i+1 < len(os.Args); i += 2 {
+		m := map[string]string{"--verdict": "verdict", "--direction": "direction", "--protocol": "protocol", "--namespace": "namespace", "--pod": "pod", "--to": "destination"}
+		k, ok := m[os.Args[i]]
+		if !ok {
+			return fmt.Errorf("unknown flag %s", os.Args[i])
+		}
+		q.Set(k, os.Args[i+1])
+	}
+	return stream("/api/v1/flows/stream?" + q.Encode())
+}
+func ebpf() error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("ebpf subcommand required")
+	}
+	switch os.Args[2] {
+	case "stats":
+		return request("GET", "/api/v1/agents", nil)
+	case "mode":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("mode required")
+		}
+		p := "/api/v1/ebpf/mode"
+		if os.Args[3] == "enforce" {
+			lease := "15m"
+			if len(os.Args) > 4 {
+				lease = os.Args[4]
+			}
+			p += "?lease=" + url.QueryEscape(lease)
+		}
+		b, _ := json.Marshal(map[string]string{"mode": os.Args[3]})
+		return request("PUT", p, b)
+	case "deny":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("deny add|del IP")
+		}
+		if os.Args[3] == "add" {
+			b, _ := json.Marshal(map[string]string{"ip": os.Args[4]})
+			return request("POST", "/api/v1/ebpf/deny", b)
+		}
+		if os.Args[3] == "del" {
+			return request("DELETE", "/api/v1/ebpf/deny/"+url.PathEscape(os.Args[4]), nil)
+		}
+	}
+	return fmt.Errorf("unknown ebpf command")
+}
+func request(method, p string, b []byte) error {
+	return requestHeaders(method, p, b, nil)
+}
+
+func requestHeaders(method, p string, b []byte, extra map[string]string) error {
+	out, status, err := doRequest(method, p, b, extra)
+	if err != nil {
+		return err
+	}
+	if status >= 300 {
+		return fmt.Errorf("%s: %s", http.StatusText(status), string(out))
+	}
+	var v any
+	if json.Unmarshal(out, &v) == nil {
+		x, _ := json.MarshalIndent(v, "", "  ")
+		fmt.Println(string(x))
+	} else {
+		fmt.Print(string(out))
+	}
+	return nil
+}
+
+func doRequest(method, p string, b []byte, extra map[string]string) ([]byte, int, error) {
+	req, err := http.NewRequest(method, base+p, bytes.NewReader(b))
+	if err != nil {
+		return nil, 0, err
+	}
+	auth(req)
+	if len(b) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range extra {
+		req.Header.Set(k, v)
+	}
+	c := httpClient()
+	r, err := c.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer r.Body.Close()
+	out, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		return nil, r.StatusCode, readErr
+	}
+	return out, r.StatusCode, nil
+}
+func stream(p string) error {
+	req, e := http.NewRequest("GET", base+p, nil)
+	if e != nil {
+		return e
+	}
+	auth(req)
+	r, e := httpClient().Do(req)
+	if e != nil {
+		return e
+	}
+	defer r.Body.Close()
+	if r.StatusCode >= 300 {
+		x, _ := io.ReadAll(r.Body)
+		return fmt.Errorf("%s: %s", r.Status, x)
+	}
+	s := bufio.NewScanner(r.Body)
+	for s.Scan() {
+		line := s.Text()
+		if strings.HasPrefix(line, "data: ") {
+			fmt.Println(strings.TrimPrefix(line, "data: "))
+		}
+	}
+	return s.Err()
+}
+func auth(r *http.Request) {
+	if k := os.Getenv("NETRA_API_KEY"); k != "" {
+		r.Header.Set("Authorization", "Bearer "+k)
+	}
+	r.Header.Set("X-Netra-Actor", "netractl")
+}
+func env(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
 }

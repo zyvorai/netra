@@ -1,17 +1,17 @@
-# syntax=docker/dockerfile:1
-FROM golang:1.24-bookworm AS build
-RUN apt-get update && apt-get install -y --no-install-recommends clang llvm make libbpf-dev linux-libc-dev \
- && rm -rf /var/lib/apt/lists/*
+FROM golang:1.27-bookworm AS go
 WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download || true
-COPY . .
-RUN make bpf \
- && CGO_ENABLED=0 go build -o /out/netra-agent ./cmd/netra-agent
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/netra-agent ./cmd/netra-agent
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-COPY --from=build /out/netra-agent /usr/local/bin/netra-agent
-COPY --from=build /src/bpf/netra_tc.o /opt/netra/bpf/netra_tc.o
-ENTRYPOINT ["/usr/local/bin/netra-agent"]
+FROM debian:bookworm AS bpf
+RUN apt-get update && apt-get install -y --no-install-recommends clang llvm linux-libc-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY bpf/netra_tc.c .
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(uname -m)-linux-gnu -c netra_tc.c -o /out.o
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=go /out/netra-agent /netra-agent
+COPY --from=bpf /out.o /opt/netra/bpf/netra_tc.o
+ENTRYPOINT ["/netra-agent"]

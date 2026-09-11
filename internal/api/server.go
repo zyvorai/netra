@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zyvorai/netra/internal/flowstats"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
@@ -27,44 +29,74 @@ import (
 )
 
 type Server struct {
-	log      *slog.Logger
-	kube     *kube.Client
-	hubble   *hubble.Client
-	store    *store.Store
-	apiKey   string
-	agentKey string
-	webDir   string
+	log              *slog.Logger
+	kube             *kube.Client
+	hubble           *hubble.Client
+	store            *store.Store
+	apiKey           string
+	agentKey         string
+	webDir           string
+	agentStaleAfter  time.Duration
+	requirePreflight bool
+	metricsData      *telemetry
 }
 
 func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *Server {
-	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR")}
+	staleAfter := 45 * time.Second
+	if raw := os.Getenv("NETRA_AGENT_STALE_AFTER"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d >= 5*time.Second {
+			staleAfter = d
+		}
+	}
+	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
+	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, metricsData: &telemetry{}}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.6.0"})
 	})
+	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.6.0"})
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.6.0"})
+	})
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
 	mux.Handle("GET /api/v1/policies", s.auth(http.HandlerFunc(s.listPolicies)))
 	mux.Handle("POST /api/v1/policies/build", s.auth(http.HandlerFunc(s.buildPolicy)))
+	mux.Handle("POST /api/v1/policies/plan", s.auth(http.HandlerFunc(s.planPolicy)))
 	mux.Handle("POST /api/v1/policies/apply", s.auth(http.HandlerFunc(s.applyPolicy)))
+	mux.Handle("POST /api/v1/policies/lockdown", s.auth(http.HandlerFunc(s.lockdownPolicy)))
+	mux.Handle("DELETE /api/v1/policies/lockdown/{namespace}/{name}", s.auth(http.HandlerFunc(s.unlockPolicy)))
+	mux.Handle("GET /api/v1/policies/history", s.auth(http.HandlerFunc(s.policyHistory)))
+	mux.Handle("GET /api/v1/policies/history/export", s.auth(http.HandlerFunc(s.exportPolicyHistory)))
+	mux.Handle("POST /api/v1/policies/history/import", s.auth(http.HandlerFunc(s.importPolicyHistory)))
+	mux.Handle("POST /api/v1/policies/{namespace}/{name}/rollback/{revision}", s.auth(http.HandlerFunc(s.rollbackPolicy)))
 	mux.Handle("DELETE /api/v1/policies/{namespace}/{name}", s.auth(http.HandlerFunc(s.deletePolicy)))
+	mux.Handle("GET /api/v1/pods", s.auth(http.HandlerFunc(s.listPods)))
+	mux.Handle("GET /api/v1/vms", s.auth(http.HandlerFunc(s.listVMs)))
+	mux.Handle("GET /api/v1/workloads/{kind}/{namespace}/{name}", s.auth(http.HandlerFunc(s.workloadDetail)))
 	mux.Handle("GET /api/v1/flows/stream", s.auth(http.HandlerFunc(s.streamFlows)))
+	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
 	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.explainDrops)))
 	mux.Handle("GET /api/v1/ebpf/config", s.authOrAgent(http.HandlerFunc(s.ebpfConfig)))
 	mux.Handle("PUT /api/v1/ebpf/mode", s.auth(http.HandlerFunc(s.ebpfMode)))
 	mux.Handle("POST /api/v1/ebpf/deny", s.auth(http.HandlerFunc(s.ebpfDenyAdd)))
 	mux.Handle("DELETE /api/v1/ebpf/deny/{ip}", s.auth(http.HandlerFunc(s.ebpfDenyDelete)))
 	mux.Handle("GET /api/v1/agents", s.auth(http.HandlerFunc(s.agents)))
+	mux.Handle("GET /api/v1/audit", s.auth(http.HandlerFunc(s.audit)))
 	mux.Handle("POST /api/v1/agents/report", s.agentAuth(http.HandlerFunc(s.agentReport)))
 	mux.HandleFunc("/", s.serveWeb)
-	return requestLog(s.log, securityHeaders(mux))
+	return requestLog(s.log, s.metricsData, securityHeaders(mux))
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.apiKey != "" && bearer(r) != s.apiKey {
+		if s.apiKey != "" && !secureEq(bearer(r), s.apiKey) {
+			s.metricsData.authFailures.Add(1)
 			errorJSON(w, 401, "invalid API token")
 			return
 		}
@@ -73,7 +105,8 @@ func (s *Server) auth(next http.Handler) http.Handler {
 }
 func (s *Server) agentAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.agentKey != "" && r.Header.Get("X-Netra-Agent-Key") != s.agentKey {
+		if s.agentKey != "" && !secureEq(r.Header.Get("X-Netra-Agent-Key"), s.agentKey) {
+			s.metricsData.authFailures.Add(1)
 			errorJSON(w, 401, "invalid agent key")
 			return
 		}
@@ -86,15 +119,20 @@ func (s *Server) authOrAgent(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		apiOK := s.apiKey != "" && bearer(r) == s.apiKey
-		agentOK := s.agentKey != "" && r.Header.Get("X-Netra-Agent-Key") == s.agentKey
+		apiOK := s.apiKey != "" && secureEq(bearer(r), s.apiKey)
+		agentOK := s.agentKey != "" && secureEq(r.Header.Get("X-Netra-Agent-Key"), s.agentKey)
 		if !apiOK && !agentOK {
+			s.metricsData.authFailures.Add(1)
 			errorJSON(w, 401, "authentication required")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
+func secureEq(got, want string) bool {
+	return len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
 func bearer(r *http.Request) string {
 	v := strings.TrimSpace(r.Header.Get("Authorization"))
 	if strings.HasPrefix(strings.ToLower(v), "bearer ") {
@@ -107,7 +145,14 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 	hs, err := s.hubble.Status(ctx)
-	out := map[string]any{"version": "0.1.0", "fastPath": s.store.Config(), "agents": len(s.store.Agents())}
+	statuses := s.store.AgentStatuses(time.Now(), s.agentStaleAfter)
+	stale := 0
+	for _, a := range statuses {
+		if a.Stale {
+			stale++
+		}
+	}
+	out := map[string]any{"version": "0.6.0", "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))}
 	if err != nil {
 		out["hubbleError"] = err.Error()
 	} else {
@@ -140,6 +185,54 @@ func (s *Server) buildPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeRawJSON(w, 200, b)
 }
+func (s *Server) planPolicy(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	ns, name, err := kube.ExtractIdentity(b)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	current, found, err := s.kube.GetPolicy(r.Context(), ns, name)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	plan, err := policy.AnalyzeChange(current, b)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	plan.Exists = found
+	_, err = s.kube.ApplyPolicy(r.Context(), ns, name, b, true)
+	dryRun := map[string]any{"passed": err == nil}
+	var receipt any
+	if err != nil {
+		dryRun["error"] = err.Error()
+		if plan.Risk == "low" || plan.Risk == "medium" {
+			plan.Risk = "high"
+		}
+		plan.Warnings = append(plan.Warnings, "Kubernetes server-side dry-run failed; do not apply until the error is resolved")
+	} else {
+		rcpt, issueErr := s.store.IssuePreflight(b, plan.Risk, actor(r), 5*time.Minute)
+		if issueErr != nil {
+			if errors.Is(issueErr, store.ErrPersistence) {
+				s.metricsData.statePersistErrors.Add(1)
+				errorJSON(w, http.StatusInsufficientStorage, "could not persist preflight receipt: "+issueErr.Error())
+			} else {
+				errorJSON(w, 500, "could not issue preflight receipt")
+			}
+			return
+		}
+		receipt = rcpt
+	}
+	s.metricsData.policyPlans.Add(1)
+	writeJSON(w, 200, map[string]any{"plan": plan, "dryRun": dryRun, "receipt": receipt})
+}
+
 func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request) {
 	b, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil {
@@ -152,20 +245,280 @@ func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dry := r.URL.Query().Get("dryRun") == "true"
+	if !dry && s.requirePreflight {
+		token := strings.TrimSpace(r.Header.Get("X-Netra-Plan-Token"))
+		if token == "" {
+			s.metricsData.preflightRejects.Add(1)
+			errorJSON(w, http.StatusPreconditionRequired, "a fresh preflight receipt is required; run /api/v1/policies/plan first")
+			return
+		}
+		risk, ok, consumeErr := s.store.ConsumePreflight(token, b)
+		if consumeErr != nil {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, "could not persist preflight consumption: "+consumeErr.Error())
+			return
+		}
+		if !ok {
+			s.metricsData.preflightRejects.Add(1)
+			errorJSON(w, http.StatusPreconditionFailed, "preflight receipt is expired, already used, or does not match this exact policy body")
+			return
+		}
+		if risk == "high" || risk == "critical" {
+			if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Netra-Confirm-Risk")), risk) {
+				s.metricsData.preflightRejects.Add(1)
+				errorJSON(w, 409, "preflight risk is "+risk+"; repeat preflight and apply with X-Netra-Confirm-Risk: "+risk)
+				return
+			}
+		}
+	}
+	var current []byte
+	var found bool
+	if !dry {
+		current, found, err = s.kube.GetPolicy(r.Context(), ns, name)
+		if err != nil {
+			errorJSON(w, 502, err.Error())
+			return
+		}
+	}
 	out, err := s.kube.ApplyPolicy(r.Context(), ns, name, b, dry)
 	if err != nil {
 		errorJSON(w, 502, err.Error())
 		return
 	}
+	if !dry {
+		who := actor(r)
+		if found {
+			if snap, snapErr := kube.PreparePolicyForApply(current); snapErr == nil {
+				_, stateErr := s.store.RecordPolicyRevision(ns, name, "checkpoint", who, snap)
+				s.stateWarning(w, stateErr)
+			}
+		}
+		if snap, snapErr := kube.PreparePolicyForApply(out); snapErr == nil {
+			_, stateErr := s.store.RecordPolicyRevision(ns, name, "apply", who, snap)
+			s.stateWarning(w, stateErr)
+		} else if snap, snapErr := kube.PreparePolicyForApply(b); snapErr == nil {
+			_, stateErr := s.store.RecordPolicyRevision(ns, name, "apply", who, snap)
+			s.stateWarning(w, stateErr)
+		}
+		s.metricsData.policyApplies.Add(1)
+		s.stateWarning(w, s.store.AddAudit(models.AuditEvent{Actor: who, Action: "policy.apply", Target: ns + "/" + name}))
+	}
 	writeRawJSON(w, 200, out)
 }
-func (s *Server) deletePolicy(w http.ResponseWriter, r *http.Request) {
-	if err := s.kube.DeletePolicy(r.Context(), r.PathValue("namespace"), r.PathValue("name")); err != nil {
+
+func (s *Server) policyHistory(w http.ResponseWriter, r *http.Request) {
+	ns := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	writeJSON(w, 200, map[string]any{"items": s.store.PolicyHistory(ns, name, limit)})
+}
+
+func (s *Server) exportPolicyHistory(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Disposition", `attachment; filename="netra-policy-history.json"`)
+	writeJSON(w, 200, s.store.ExportPolicyArchive())
+}
+
+func (s *Server) importPolicyHistory(w http.ResponseWriter, r *http.Request) {
+	var archive models.PolicyArchive
+	if err := decodeJSON(r, &archive, 16<<20); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("mode")))
+	if mode == "replace" && !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Netra-Confirm-History-Replace")), "replace") {
+		errorJSON(w, 409, "replacing history requires X-Netra-Confirm-History-Replace: replace")
+		return
+	}
+	for i := range archive.Revisions {
+		snap, err := kube.PreparePolicyForApply(archive.Revisions[i].Manifest)
+		if err != nil {
+			errorJSON(w, 400, fmt.Sprintf("revision %d is not an applyable Cilium policy snapshot: %v", i, err))
+			return
+		}
+		ns, name, err := kube.ExtractIdentity(snap)
+		if err != nil || ns != archive.Revisions[i].Namespace || name != archive.Revisions[i].Name {
+			errorJSON(w, 400, fmt.Sprintf("revision %d manifest identity does not match archive metadata", i))
+			return
+		}
+		archive.Revisions[i].Manifest = snap
+	}
+	count, err := s.store.ImportPolicyArchive(archive, mode, actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+		} else {
+			errorJSON(w, 400, err.Error())
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"imported": count, "mode": func() string {
+		if mode == "" {
+			return "merge"
+		}
+		return mode
+	}()})
+}
+
+func (s *Server) stateWarning(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+	s.metricsData.statePersistErrors.Add(1)
+	s.log.Error("durable state write failed after cluster mutation", "error", err)
+	w.Header().Set("X-Netra-State-Warning", "persistence-failed")
+	w.Header().Add("Warning", `199 Netra "cluster mutation succeeded but durable local history write failed"`)
+}
+
+func (s *Server) rollbackPolicy(w http.ResponseWriter, r *http.Request) {
+	ns := r.PathValue("namespace")
+	name := r.PathValue("name")
+	id, err := strconv.ParseUint(r.PathValue("revision"), 10, 64)
+	if err != nil || id == 0 {
+		errorJSON(w, 400, "valid revision id required")
+		return
+	}
+	rev, ok := s.store.PolicyRevision(ns, name, id)
+	if !ok {
+		errorJSON(w, 404, "policy revision not found")
+		return
+	}
+	current, found, err := s.kube.GetPolicy(r.Context(), ns, name)
+	if err != nil {
 		errorJSON(w, 502, err.Error())
 		return
 	}
+	plan, err := policy.AnalyzeChange(current, rev.Manifest)
+	if err != nil {
+		errorJSON(w, 500, err.Error())
+		return
+	}
+	plan.Exists = found
+	_, dryErr := s.kube.ApplyPolicy(r.Context(), ns, name, rev.Manifest, true)
+	dryRun := map[string]any{"passed": dryErr == nil}
+	if dryErr != nil {
+		dryRun["error"] = dryErr.Error()
+		plan.Warnings = append(plan.Warnings, "rollback Kubernetes server-side dry-run failed")
+		elevateRiskForAPI(&plan, "high")
+	}
+	if r.URL.Query().Get("dryRun") == "true" {
+		writeJSON(w, 200, map[string]any{"revision": rev, "plan": plan, "dryRun": dryRun})
+		return
+	}
+	if dryErr != nil {
+		errorJSON(w, 409, "rollback dry-run failed; inspect with ?dryRun=true")
+		return
+	}
+	if plan.Risk == "high" || plan.Risk == "critical" {
+		if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("confirmRisk")), plan.Risk) {
+			errorJSON(w, 409, "rollback risk is "+plan.Risk+"; repeat with confirmRisk="+plan.Risk)
+			return
+		}
+	}
+	who := actor(r)
+	if found {
+		if snap, snapErr := kube.PreparePolicyForApply(current); snapErr == nil {
+			_, stateErr := s.store.RecordPolicyRevision(ns, name, "rollback-checkpoint", who, snap)
+			s.stateWarning(w, stateErr)
+		}
+	}
+	out, err := s.kube.ApplyPolicy(r.Context(), ns, name, rev.Manifest, false)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	if snap, snapErr := kube.PreparePolicyForApply(out); snapErr == nil {
+		_, stateErr := s.store.RecordPolicyRevision(ns, name, "rollback", who, snap)
+		s.stateWarning(w, stateErr)
+	} else {
+		_, stateErr := s.store.RecordPolicyRevision(ns, name, "rollback", who, rev.Manifest)
+		s.stateWarning(w, stateErr)
+	}
+	s.metricsData.policyRollbacks.Add(1)
+	s.stateWarning(w, s.store.AddAudit(models.AuditEvent{Actor: who, Action: "policy.rollback", Target: ns + "/" + name, Details: map[string]any{"revision": id, "risk": plan.Risk}}))
+	writeRawJSON(w, 200, out)
+}
+
+func elevateRiskForAPI(plan *policy.ChangePlan, risk string) {
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2, "critical": 3}
+	if rank[risk] > rank[plan.Risk] {
+		plan.Risk = risk
+	}
+}
+
+func (s *Server) deletePolicy(w http.ResponseWriter, r *http.Request) {
+	ns, name := r.PathValue("namespace"), r.PathValue("name")
+	current, found, err := s.kube.GetPolicy(r.Context(), ns, name)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	if !found {
+		errorJSON(w, 404, "policy not found")
+		return
+	}
+	if err := s.kube.DeletePolicy(r.Context(), ns, name); err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	who := actor(r)
+	if snap, snapErr := kube.PreparePolicyForApply(current); snapErr == nil {
+		_, stateErr := s.store.RecordPolicyRevision(ns, name, "delete-checkpoint", who, snap)
+		s.stateWarning(w, stateErr)
+	}
+	s.metricsData.policyDeletes.Add(1)
+	s.stateWarning(w, s.store.AddAudit(models.AuditEvent{Actor: who, Action: "policy.delete", Target: ns + "/" + name}))
 	writeJSON(w, 200, map[string]any{"deleted": true})
 }
+
+func (s *Server) flowSummary(w http.ResponseWriter, r *http.Request) {
+	n := uint64(500)
+	if x, err := strconv.ParseUint(r.URL.Query().Get("number"), 10, 64); err == nil && x > 0 && x <= 5000 {
+		n = x
+	}
+	filter := hubble.Filter{
+		Verdict:     r.URL.Query().Get("verdict"),
+		Namespace:   r.URL.Query().Get("namespace"),
+		Pod:         r.URL.Query().Get("pod"),
+		Direction:   r.URL.Query().Get("direction"),
+		Protocol:    r.URL.Query().Get("protocol"),
+		Destination: r.URL.Query().Get("destination"),
+	}
+	if filter.Verdict != "" && !oneOfFold(filter.Verdict, "FORWARDED", "DROPPED", "ERROR", "AUDIT", "REDIRECTED", "TRACED", "TRANSLATED") {
+		errorJSON(w, 400, "unsupported verdict")
+		return
+	}
+	if filter.Direction != "" && !oneOfFold(filter.Direction, "EGRESS", "INGRESS") {
+		errorJSON(w, 400, "direction must be EGRESS or INGRESS")
+		return
+	}
+	if filter.Destination != "" {
+		if _, err := netip.ParseAddr(filter.Destination); err != nil {
+			if _, err := netip.ParsePrefix(filter.Destination); err != nil {
+				errorJSON(w, 400, "destination must be an IP address or CIDR")
+				return
+			}
+		}
+	}
+	collector := flowstats.New()
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	err := s.hubble.Stream(ctx, n, false, filter, func(b []byte) error {
+		if hubble.MatchFlowJSON(b, filter) {
+			collector.Add(b)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, collector.Summary(10))
+}
+
 func (s *Server) streamFlows(w http.ResponseWriter, r *http.Request) {
 	f, ok := w.(http.Flusher)
 	if !ok {
@@ -282,7 +635,25 @@ func (s *Server) ebpfMode(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "mode must be observe or enforce")
 		return
 	}
-	writeJSON(w, 200, s.store.SetMode(x.Mode))
+	lease := time.Duration(0)
+	if x.Mode == "enforce" {
+		lease = 15 * time.Minute
+		if raw := r.URL.Query().Get("lease"); raw != "" {
+			d, err := time.ParseDuration(raw)
+			if err != nil || d < time.Minute || d > 24*time.Hour {
+				errorJSON(w, 400, "lease must be a duration between 1m and 24h")
+				return
+			}
+			lease = d
+		}
+	}
+	cfg, err := s.store.SetMode(x.Mode, lease, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist fast-path state: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
 }
 func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 	var x struct {
@@ -297,7 +668,13 @@ func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "a valid IPv4 address is required")
 		return
 	}
-	writeJSON(w, 200, s.store.AddBlocked(a.String()))
+	cfg, err := s.store.AddBlocked(a.String(), actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
 }
 func (s *Server) ebpfDenyDelete(w http.ResponseWriter, r *http.Request) {
 	a, err := netip.ParseAddr(r.PathValue("ip"))
@@ -305,10 +682,16 @@ func (s *Server) ebpfDenyDelete(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "valid IPv4 required")
 		return
 	}
-	writeJSON(w, 200, s.store.DelBlocked(a.String()))
+	cfg, err := s.store.DelBlocked(a.String(), actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
 }
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{"items": s.store.Agents()})
+	writeJSON(w, 200, map[string]any{"items": s.store.AgentStatuses(time.Now(), s.agentStaleAfter), "staleAfterSeconds": int64(s.agentStaleAfter.Seconds())})
 }
 func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 	var x models.AgentReport
@@ -321,7 +704,30 @@ func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.Report(x)
+	s.metricsData.agentReports.Add(1)
 	writeJSON(w, 202, map[string]any{"accepted": true})
+}
+
+func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+		limit = n
+	}
+	writeJSON(w, 200, map[string]any{"items": s.store.Audit(limit)})
+}
+
+func actor(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Netra-Actor")); v != "" {
+		return v
+	}
+	host := r.RemoteAddr
+	if i := strings.LastIndex(host, ":"); i > 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return "api"
+	}
+	return "api:" + host
 }
 
 func (s *Server) serveWeb(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +781,10 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -387,9 +797,10 @@ func oneOfFold(value string, allowed ...string) bool {
 	return false
 }
 
-func requestLog(log *slog.Logger, next http.Handler) http.Handler {
+func requestLog(log *slog.Logger, metrics *telemetry, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		metrics.requests.Add(1)
 		next.ServeHTTP(w, r)
 		if r.URL.Path != "/healthz" {
 			log.Info("http", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started).String())

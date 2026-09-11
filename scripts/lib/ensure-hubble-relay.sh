@@ -20,7 +20,11 @@ kubectl_cmd() {
       fi
     fi
   fi
-  if command -v k3s >/dev/null 2>&1 && [[ ! -x "$(command -v kubectl 2>/dev/null || true)" ]]; then
+  if [[ -x /usr/local/bin/kubectl ]]; then
+    /usr/local/bin/kubectl "$@"
+    return $?
+  fi
+  if command -v k3s >/dev/null 2>&1 && ! command -v kubectl >/dev/null 2>&1; then
     k3s kubectl "$@"
     return $?
   fi
@@ -30,6 +34,23 @@ kubectl_cmd() {
 hubble_relay_ready() {
   kubectl_cmd get deploy -n kube-system hubble-relay &>/dev/null \
     && kubectl_cmd -n kube-system wait --for=condition=available deploy/hubble-relay --timeout=5s &>/dev/null
+}
+
+patch_gatewayclass_for_helm() {
+  if ! kubectl_cmd get gatewayclass cilium &>/dev/null; then
+    return 0
+  fi
+  local managed
+  managed="$(kubectl_cmd get gatewayclass cilium -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)"
+  if [[ "$managed" == "Helm" ]]; then
+    return 0
+  fi
+  echo "  Patching GatewayClass cilium for Helm ownership..."
+  kubectl_cmd label gatewayclass cilium app.kubernetes.io/managed-by=Helm --overwrite
+  kubectl_cmd annotate gatewayclass cilium \
+    meta.helm.sh/release-name=cilium \
+    meta.helm.sh/release-namespace=kube-system \
+    --overwrite
 }
 
 if hubble_relay_ready; then
@@ -42,9 +63,12 @@ if ! kubectl_cmd get daemonset -n kube-system cilium &>/dev/null; then
   exit 1
 fi
 
+patch_gatewayclass_for_helm
+
 if command -v cilium >/dev/null 2>&1; then
   echo "Enabling Hubble Relay via cilium CLI..."
-  cilium hubble enable --relay || true
+  # May fail on validate templates; Helm path below is authoritative.
+  cilium hubble enable --relay 2>/dev/null || true
 fi
 
 if ! hubble_relay_ready && command -v helm >/dev/null 2>&1; then
@@ -60,10 +84,12 @@ for r in rels:
   if r.get("name")=="cilium":
     print(r["chart"].split("-")[-1]); sys.exit(0)
 sys.exit(1)' 2>/dev/null || echo 1.20.0)"
+  patch_gatewayclass_for_helm
   helm upgrade cilium cilium/cilium --version "$chart_version" --namespace kube-system \
     --reuse-values \
     --set hubble.enabled=true \
     --set hubble.relay.enabled=true \
+    --set hubble.ui.enabled=false \
     --wait --timeout 300s
 fi
 

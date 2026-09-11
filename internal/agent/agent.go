@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -48,15 +49,20 @@ type Agent struct {
 	lastRevision                       uint64
 	lastSync                           time.Time
 	failsafeAfter                      time.Duration
+	enforceUntil                       time.Time
 }
 
 func New(log *slog.Logger) *Agent {
-	server := strings.TrimRight(env("NETRA_SERVER", "http://netra.netra-system.svc:8080"), "/")
+	server := strings.TrimRight(env("NETRA_SERVER", "https://netra.netra-system.svc:30870"), "/")
 	ifs := splitCSV(env("NETRA_INTERFACES", "cilium_host"))
+	client := &http.Client{Timeout: 10 * time.Second}
+	if strings.EqualFold(env("NETRA_TLS_INSECURE", "true"), "true") {
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}}
+	}
 	return &Agent{
 		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
-		interfaces: ifs, http: &http.Client{Timeout: 10 * time.Second}, events: make(chan models.FastPathEvent, 2048),
+		interfaces: ifs, http: client, events: make(chan models.FastPathEvent, 2048),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second),
 	}
 }
@@ -80,6 +86,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+			if !a.enforceUntil.IsZero() && !time.Now().Before(a.enforceUntil) {
+				if err := a.forceObserve(); err != nil {
+					a.log.Error("enforcement lease local expiry", "error", err)
+				} else {
+					a.lastRevision = 0
+					a.log.Warn("enforcement lease expired locally; forced observe")
+				}
+			}
 			if err := a.syncAndReport(ctx); err != nil {
 				a.log.Warn("agent sync", "error", err)
 				if a.failsafeAfter > 0 && time.Since(a.lastSync) >= a.failsafeAfter {
@@ -188,6 +202,7 @@ func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, err
 	return cfg, err
 }
 func (a *Agent) forceObserve() error {
+	a.enforceUntil = time.Time{}
 	if a.collection == nil || a.collection.Maps["config_map"] == nil {
 		return fmt.Errorf("config_map unavailable")
 	}
@@ -196,6 +211,10 @@ func (a *Agent) forceObserve() error {
 }
 
 func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
+	a.enforceUntil = time.Time{}
+	if cfg.Mode == "enforce" && cfg.EnforceUntil != nil {
+		a.enforceUntil = cfg.EnforceUntil.UTC()
+	}
 	mode := uint32(0)
 	if cfg.Mode == "enforce" {
 		mode = 1
@@ -294,7 +313,7 @@ func (a *Agent) readEvents(ctx context.Context) {
 			SourceIP:    net.IP(b[8:12]).String(), DestinationIP: net.IP(b[12:16]).String(),
 			InterfaceIndex: binary.LittleEndian.Uint32(b[16:20]), Length: binary.LittleEndian.Uint32(b[20:24]),
 			SourcePort: binary.BigEndian.Uint16(b[24:26]), DestinationPort: binary.BigEndian.Uint16(b[26:28]),
-			Protocol: proto, Action: action,
+			Protocol: proto, Action: action, ObservedAt: time.Now().UTC(),
 		}
 		select {
 		case a.events <- e:

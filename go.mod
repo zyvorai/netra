@@ -1,6 +1,8 @@
 module github.com/zyvorai/netra
 
-go 1.26.0
+go 1.27.0
+
+toolchain go1.27.1
 
 require (
 	github.com/cilium/cilium v1.20.1

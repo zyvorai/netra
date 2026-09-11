@@ -1,25 +1,44 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Release.Name }}-controller
-  labels:
-    app.kubernetes.io/name: netra
+  name: {{ .Release.Name }}-netra
 rules:
-  - apiGroups: ["cilium.io"]
-    resources: ["ciliumnetworkpolicies"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["cilium.io"]
+  resources: ["ciliumnetworkpolicies"]
+  verbs: ["get","list","watch","create","update","patch","delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments","statefulsets","daemonsets","replicasets"]
+  verbs: ["get","list"]
+- apiGroups: ["kubevirt.io"]
+  resources: ["virtualmachines","virtualmachineinstances"]
+  verbs: ["get","list","watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ .Release.Name }}-controller
-  labels:
-    app.kubernetes.io/name: netra
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ .Release.Name }}-controller
+  name: {{ .Release.Name }}-netra
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Name }}-netra}
 subjects:
-  - kind: ServiceAccount
-    name: {{ .Values.serviceAccount.name }}
-    namespace: {{ .Release.Namespace }}
+- {kind: ServiceAccount, name: netra, namespace: {{ .Release.Namespace }} }
+{{- if .Values.ha.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-netra-leader-election
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get","create","update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-netra-leader-election
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ .Release.Name }}-netra-leader-election}
+subjects:
+- {kind: ServiceAccount, name: netra, namespace: {{ .Release.Namespace }} }
+{{- end }}

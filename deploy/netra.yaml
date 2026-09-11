@@ -1,86 +1,63 @@
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: netra-system
----
-apiVersion: v1
-kind: ServiceAccount
+kind: Service
 metadata:
   name: netra
   namespace: netra-system
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: netra-agent
-  namespace: netra-system
-automountServiceAccountToken: false
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: netra-controller
-rules:
-  - apiGroups: ["cilium.io"]
-    resources: ["ciliumnetworkpolicies"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: netra-controller
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: netra-controller
-subjects:
-  - kind: ServiceAccount
-    name: netra
-    namespace: netra-system
+spec:
+  selector: {app.kubernetes.io/name: netra}
+  ports:
+  - name: http
+    port: 30870
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: netra
   namespace: netra-system
-  labels:
-    app.kubernetes.io/name: netra
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector:
-    matchLabels:
-      app.kubernetes.io/name: netra
+    matchLabels: {app.kubernetes.io/name: netra}
   template:
     metadata:
-      labels:
-        app.kubernetes.io/name: netra
+      labels: {app.kubernetes.io/name: netra}
     spec:
       serviceAccountName: netra
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
       containers:
-        - name: netrad
-          image: ghcr.io/zyvorai/netra:0.1.0
-          ports:
-            - containerPort: 8080
-              name: http
-          env:
-            - name: NETRA_HUBBLE_ADDR
-              value: hubble-relay.kube-system.svc:80
-            - name: NETRA_WEB_DIR
-              value: /usr/share/netra/web
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: netra
-  namespace: netra-system
-spec:
-  selector:
-    app.kubernetes.io/name: netra
-  ports:
-    - port: 8080
-      targetPort: http
-      name: http
+      - name: netra
+        image: ghcr.io/zyvorai/netra:0.6.0
+        imagePullPolicy: IfNotPresent
+        ports: [{name: http, containerPort: 30870}]
+        env:
+        - {name: NETRA_HUBBLE_ADDR, value: hubble-relay.kube-system.svc:80}
+        - {name: NETRA_AGENT_STALE_AFTER, value: 45s}
+        - {name: NETRA_ALLOW_UNAUTHENTICATED, value: "false"}
+        - {name: NETRA_REQUIRE_PREFLIGHT, value: "true"}
+        - {name: NETRA_STATE_FILE, value: /var/lib/netra/state.json}
+        - name: NETRA_API_KEY
+          valueFrom: {secretKeyRef: {name: netra-auth, key: api-key, optional: false}}
+        - name: NETRA_AGENT_KEY
+          valueFrom: {secretKeyRef: {name: netra-auth, key: agent-key, optional: false}}
+        readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 2, periodSeconds: 5}
+        livenessProbe: {httpGet: {path: /livez, port: http}, initialDelaySeconds: 5, periodSeconds: 10}
+        volumeMounts:
+        - {name: state, mountPath: /var/lib/netra}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 256Mi}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities: {drop: ["ALL"]}
+      volumes:
+      - name: state
+        persistentVolumeClaim: {claimName: netra-state}

@@ -1,37 +1,55 @@
-replicaCount: 1
-
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.1.0"
+  tag: "0.6.0"
   pullPolicy: IfNotPresent
-
-agent:
+agentImage:
+  repository: ghcr.io/zyvorai/netra-agent
+  tag: "0.6.0"
+replicaCount: 1
+ha:
   enabled: false
-  image:
-    repository: ghcr.io/zyvorai/netra-agent
-    tag: "0.1.0"
-    pullPolicy: IfNotPresent
-  interfaces: cilium_host
-  failsafeAfter: 60s
-
-service:
-  type: ClusterIP
-  port: 8080
-
+  leaseName: netra-controller
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+hubble:
+  address: hubble-relay.kube-system.svc:80
 auth:
-  # Leave empty for local/dev. Set independently for shared installs.
+  allowUnauthenticated: false
+  existingSecret: ""
   apiKey: ""
   agentKey: ""
+policy:
+  requirePreflight: true
+service:
+  type: ClusterIP
+  port: 30870
+  nodePort: null
 
-hubble:
-  address: "hubble-relay.kube-system.svc:80"
+# Zorvia-style in-pod HTTPS (self-signed via openssl initContainer).
+tls:
+  enabled: true
+  opensslImage: alpine/openssl:3.3.2
 
-serviceAccount:
-  create: true
-  name: netra
-
-agentServiceAccount:
-  create: true
-  name: netra-agent
-
-resources: {}
+metrics:
+  enabled: true
+  prometheusAnnotations: false
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {cpu: 500m, memory: 256Mi}
+agent:
+  enabled: false
+  interfaces: cilium_host
+  pinPath: /sys/fs/bpf/netra
+  failsafeAfter: 60s
+  staleAfter: 45s
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+  stateFile: /var/lib/netra/state.json

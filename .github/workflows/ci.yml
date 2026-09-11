@@ -1,46 +1,66 @@
-name: ci
+name: CI
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
-
+permissions:
+  contents: read
 jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.x"
-      - run: go test ./...
-      - run: go vet ./...
-      - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent
-
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.26.0', cache: true}
+    - run: go mod tidy
+    - run: go test ./...
+    - run: go vet ./...
+    - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm --prefix web install
-      - run: npm --prefix web run build
-
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with: {node-version: '22', cache: npm, cache-dependency-path: web/package.json}
+    - run: npm --prefix web install
+    - run: npm --prefix web run typecheck
+    - run: npm --prefix web test
+    - run: npm --prefix web run build
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-      - run: helm lint ./helm/netra
-      - run: helm template netra ./helm/netra >/dev/null
-      - run: helm template netra ./helm/netra --set agent.enabled=true >/dev/null
-
-  bpf:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4
+    - name: Secure default must reject missing credentials
+      run: |
+        if helm template insecure helm/netra >/tmp/netra-insecure.yaml 2>/tmp/netra-insecure.err; then
+          echo "chart unexpectedly rendered without authentication" >&2
+          exit 1
+        fi
+    - run: helm lint helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key
+    - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key >/tmp/netra.yaml
+    - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
+    - name: HA must reject a chart-managed RWO volume
+      run: |
+        if helm template bad-ha helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set ha.enabled=true --set replicaCount=3 >/tmp/netra-bad-ha.yaml 2>/tmp/netra-bad-ha.err; then
+          echo "chart unexpectedly allowed HA on the default RWO claim" >&2
+          exit 1
+        fi
+    - name: Render HA with RWX storage
+      run: |
+        helm template ha helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set ha.enabled=true --set replicaCount=3 \
+          --set 'persistence.accessModes[0]=ReadWriteMany' >/tmp/netra-ha.yaml
+        grep -q 'kind: PodDisruptionBudget' /tmp/netra-ha.yaml
+        grep -q 'coordination.k8s.io' /tmp/netra-ha.yaml
+        grep -q 'NETRA_HA_ENABLED' /tmp/netra-ha.yaml
+        grep -q 'path: /readyz' /tmp/netra-ha.yaml
+  ebpf:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang llvm libbpf-dev linux-libc-dev
-      - run: clang -O2 -g -Wall -Wextra -Werror -target bpf -c bpf/netra_tc.c -o bpf/netra_tc.o
+    - uses: actions/checkout@v4
+    - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tc.c -o /tmp/netra_tc.o

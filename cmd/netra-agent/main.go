@@ -1,25 +1,22 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
 // SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import (
 	"context"
+	"github.com/zyvorai/netra/internal/agent"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/zyvorai/netra/internal/agent"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	a := agent.New(log)
-	if err := a.Run(ctx); err != nil {
-		log.Error("netra-agent", "error", err)
+	if err := agent.New(log).Run(ctx); err != nil {
+		log.Error("agent", "error", err)
 		os.Exit(1)
 	}
 }
