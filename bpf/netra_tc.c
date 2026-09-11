@@ -12,6 +12,9 @@
 #include <linux/udp.h>
 #include <linux/pkt_cls.h>
 
+#define NETRA_BPF 1
+#include "netra_ipv6.h"
+
 #define SEC(NAME) __attribute__((section(NAME), used))
 #define __uint(name, val) int (*name)[val]
 #define __type(name, val) val *name
@@ -939,11 +942,35 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
         ip6=(void *)(eth+1);
     } else ip6=data;
     if ((void *)(ip6+1)>data_end) return allow_value;
-    void *l4=(void *)(ip6+1); __u8 proto=ip6->nexthdr; __u16 sport=0,dport=0; __u8 flags=0; void *payload=0;
-    if (proto==IPPROTO_TCP) { struct tcphdr *tcp=l4;if((void *)(tcp+1)>data_end || tcp->doff<5)return allow_value;sport=tcp->source;dport=tcp->dest;flags=*(((unsigned char*)tcp)+13);payload=(void *)tcp+((__u32)tcp->doff*4);if(payload>data_end)payload=0; }
-    else if(proto==IPPROTO_UDP){struct udphdr *udp=l4;if((void *)(udp+1)>data_end)return allow_value;sport=udp->source;dport=udp->dest;payload=(void *)(udp+1);}
+
+    struct netra_ipv6_l4 walk;
+    netra_ipv6_walk((unsigned char *)(ip6 + 1), data_end, ip6->nexthdr, &walk);
+    void *l4=walk.l4; __u8 proto=walk.proto; __u16 sport=0,dport=0; __u8 flags=0; void *payload=0;
+    int l4_ok=0;
+    if (walk.l4_parseable && !walk.nonfirst_fragment && proto==IPPROTO_TCP) {
+        struct tcphdr *tcp=l4;
+        if ((void *)(tcp+1)<=data_end && tcp->doff>=5) {
+            void *tcp_end=(void *)tcp+((__u32)tcp->doff*4);
+            if (tcp_end<=data_end) {
+                sport=tcp->source; dport=tcp->dest; flags=*(((unsigned char*)tcp)+13);
+                payload=tcp_end; l4_ok=1;
+            }
+        }
+    } else if (walk.l4_parseable && !walk.nonfirst_fragment && proto==IPPROTO_UDP) {
+        struct udphdr *udp=l4;
+        if ((void *)(udp+1)<=data_end) {
+            sport=udp->source; dport=udp->dest; payload=(void *)(udp+1); l4_ok=1;
+        }
+    }
     const __u8 *peer=direction==DIR_EGRESS?(const __u8 *)&ip6->daddr:(const __u8 *)&ip6->saddr;
-    __u16 policy_port=dport;__u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;if(proto==IPPROTO_TCP)track_tcp_signal(cgroup_id,flags);__u8 reason=0;int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    __u16 policy_port=dport;
+    __u64 cgroup_id=hook==HOOK_CGROUP?bpf_get_current_cgroup_id():0;
+    if(proto==IPPROTO_TCP && l4_ok) track_tcp_signal(cgroup_id,flags);
+    __u8 reason=0;
+    // Exact/CIDR policy remains available even when the extension chain is
+    // opaque/truncated or this is a non-first fragment. Port policy is only
+    // evaluated when a trustworthy L4 destination port was parsed.
+    int blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
     char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
     char sni[96]={};char http_m[8]={};char http_h[96]={};int sni_len=0;if(direction==DIR_EGRESS&&hook==HOOK_CGROUP&&proto==IPPROTO_TCP&&payload){sni_len=tls_sni(payload,data_end,sni);if(sni_len>0&&!blocked&&enforcing()&&scope_allows(cgroup_id)){struct dns_key sk={};__builtin_memcpy(sk.name,sni,96);if(bpf_map_lookup_elem(&blocked_sni,&sk)){blocked=1;reason=REASON_SNI;}}if(sni_len>0)track_tls(cgroup_id,sni,blocked&&reason==REASON_SNI);if(http_method(payload,data_end,http_m)>0&&http_host(payload,data_end,http_h)>0)track_http(cgroup_id,http_m,http_h);}
     __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
@@ -1141,7 +1168,27 @@ SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
     if(eth->h_proto==__builtin_bswap16(ETH_P_IP)){
         struct iphdr *ip=(void *)(eth+1);if((void *)(ip+1)>end)return XDP_PASS;void *l4=(void *)ip+ip->ihl*4;__u16 sport=0,dport=0;if(ip->protocol==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip->protocol==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide4(DIR_INGRESS,ip->saddr,ip->protocol,dport,&reason,0,0)){__u8 src[16],dst[16];copy4(src,ip->saddr);copy4(dst,ip->daddr);update_flow(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);submit_packet_event(FAMILY_V4,DIR_INGRESS,HOOK_XDP,ip->protocol,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);return XDP_DROP;}
     } else if(eth->h_proto==__builtin_bswap16(ETH_P_IPV6)){
-        struct ipv6hdr *ip6=(void *)(eth+1);if((void *)(ip6+1)>end)return XDP_PASS;void*l4=(void *)(ip6+1);__u16 sport=0,dport=0;if(ip6->nexthdr==IPPROTO_TCP){struct tcphdr*t=l4;if((void*)(t+1)>end)return XDP_PASS;sport=t->source;dport=t->dest;}else if(ip6->nexthdr==IPPROTO_UDP){struct udphdr*u=l4;if((void*)(u+1)>end)return XDP_PASS;sport=u->source;dport=u->dest;}__u8 reason=0;if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,ip6->nexthdr,dport,&reason,0)){__u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);update_flow(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);submit_packet_event(FAMILY_V6,DIR_INGRESS,HOOK_XDP,ip6->nexthdr,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);return XDP_DROP;}
+        struct ipv6hdr *ip6=(void *)(eth+1);
+        if((void *)(ip6+1)>end)return XDP_PASS;
+        struct netra_ipv6_l4 walk;
+        netra_ipv6_walk((unsigned char *)(ip6+1),end,ip6->nexthdr,&walk);
+        void*l4=walk.l4;__u16 sport=0,dport=0;
+        if(walk.l4_parseable&&!walk.nonfirst_fragment&&walk.proto==IPPROTO_TCP){
+            struct tcphdr*t=l4;
+            if((void*)(t+1)<=end&&t->doff>=5){
+                void*tend=(void*)t+((__u32)t->doff*4);
+                if(tend<=end){sport=t->source;dport=t->dest;}
+            }
+        }else if(walk.l4_parseable&&!walk.nonfirst_fragment&&walk.proto==IPPROTO_UDP){
+            struct udphdr*u=l4;if((void*)(u+1)<=end){sport=u->source;dport=u->dest;}
+        }
+        __u8 reason=0;
+        if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,walk.proto,dport,&reason,0)){
+            __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);
+            update_flow(FAMILY_V6,DIR_INGRESS,HOOK_XDP,walk.proto,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);
+            submit_packet_event(FAMILY_V6,DIR_INGRESS,HOOK_XDP,walk.proto,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);
+            return XDP_DROP;
+        }
     }
     return XDP_PASS;
 }
