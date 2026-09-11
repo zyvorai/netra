@@ -9,6 +9,7 @@ export default function Overview() {
   const [l7, setL7] = useState<any>();
   const [insights, setInsights] = useState<any>();
   const [path, setPath] = useState<any>();
+  const [drops, setDrops] = useState<any>();
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -19,14 +20,16 @@ export default function Overview() {
       api('/api/v1/ebpf/l7?limit=1'),
       api('/api/v1/insights/summary'),
       api('/api/v1/ebpf/path?limit=1'),
+      api('/api/v1/ebpf/drops?limit=1'),
     ])
-      .then(([s, o, h, l, i, pathDiag]) => {
+      .then(([s, o, h, l, i, pathDiag, dropDiag]) => {
         setData(s);
         setObs(o);
         setHealth(h);
         setL7(l);
         setInsights(i);
         setPath(pathDiag);
+        setDrops(dropDiag);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -163,6 +166,30 @@ export default function Overview() {
           </div>
         </div>
         <p>Full tables live on Path Diagnostics — observe-only sockops path health.</p>
+      </section>
+
+      <section className="card">
+        <p className="eyebrow">DROP DIAGNOSTICS</p>
+        <h3>Kernel · softnet · iface</h3>
+        <div className="metrics">
+          <div>
+            <b>{drops?.summary?.kernelDropEvents ?? 0}</b>
+            <span>kernel drop events</span>
+          </div>
+          <div>
+            <b>{drops?.summary?.softnetDropped ?? 0}</b>
+            <span>softnet dropped</span>
+          </div>
+          <div>
+            <b>{(drops?.summary?.rxDropped ?? 0) + (drops?.summary?.txDropped ?? 0)}</b>
+            <span>iface rx+tx drops</span>
+          </div>
+          <div>
+            <b>{(drops?.summary?.anomalies || []).length}</b>
+            <span>drop signals</span>
+          </div>
+        </div>
+        <p>Node-level drop reasons live on Drop Diagnostics — optional kfree_skb + stack counters.</p>
       </section>
 
       <section className="card span2">

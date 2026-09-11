@@ -70,7 +70,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | health | l7 | capabilities
+  ebpf stats | summary | health | path | drops | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP | deny del IP
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
@@ -339,6 +339,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/health", nil)
 	case "path":
 		return request("GET", "/api/v1/ebpf/path", nil)
+	case "drops":
+		return request("GET", "/api/v1/ebpf/drops", nil)
 	case "l7":
 		return request("GET", "/api/v1/ebpf/l7", nil)
 	case "capabilities":

@@ -10,6 +10,7 @@ Netra owns these programs and maps independently of Cilium. It does not read, mu
 - `tc/ingress`, `tc/egress`: optional TCX interface attachment from the agent.
 - `sockops`: TCP lifecycle, RTT, connect latency and transport-pressure telemetry.
 - `xdp`: optional early-ingress CIDR/port drop.
+- `raw_tracepoint/kfree_skb`: optional node-level kernel skb drop-reason counting on kernels whose tracepoint exposes a reason field.
 
 ## Maps
 
@@ -29,6 +30,13 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `enforced_cgroups`: cgroup IDs currently selected for enforcement.
 - `config_map`: observe/enforce mode.
 - `events`: sampled flow/DNS/socket/block metadata ring buffer.
+
+
+## v0.14 drop-diagnostic map
+
+- `kernel_drops`: cumulative node-level `kfree_skb` drop-reason counters. The agent pins this map when available so counters survive agent restart. The raw tracepoint is attached only after userspace confirms the host tracepoint format contains a drop-reason field.
+
+Linux softnet and interface counters are read directly by the agent and are not BPF maps.
 
 ## v0.13 path-diagnostic maps
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 — 2026-09-11
+
+- Added optional Cilium-independent raw `kfree_skb` eBPF tracing for node-level kernel skb drop-reason counters.
+- Added tracefs capability guard so kernels without a verified drop-reason field skip the hook instead of producing misleading data.
+- Added Linux softnet processed/drop/time-squeeze counters and per-interface rx/tx drop/error/missed/no-handler counters.
+- Added `kernel_drops` pinned map without resizing any existing pinned map ABI.
+- Added `/api/v1/ebpf/drops`, `netractl ebpf drops`, Prometheus drop/stack gauges, and a dedicated Drop Diagnostics dashboard.
+- Added `internal/dropdiag` aggregation/anomaly tests and documentation for attribution/root-cause boundaries.
+
 ## 0.13.0 — 2026-09-11
 
 - Added standalone TCP path diagnostics using cgroup sockops; no Cilium/Hubble dependency.

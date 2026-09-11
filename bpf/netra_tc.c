@@ -405,6 +405,24 @@ struct {
     __type(value, __u8);
 } blocked_sni SEC(".maps");
 
+// v0.14 node-level kernel skb drop diagnostics. The raw kfree_skb
+// tracepoint keeps the drop reason as args[2] across kernels that expose the
+// reason argument, avoiding formatted-tracepoint layout dependencies.
+struct kernel_drop_key {
+    __u32 reason;
+    __u32 pad;
+};
+struct kernel_drop_value {
+    __u64 count;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct kernel_drop_key);
+    __type(value, struct kernel_drop_value);
+} kernel_drops SEC(".maps");
+
 struct obs_event {
     __u64 ts_ns;
     __u64 cgroup_id;
@@ -1095,6 +1113,23 @@ SEC("sockops") int netra_sockops(struct bpf_sock_ops *skops)
         break;
     default:
         break;
+    }
+    return 0;
+}
+
+
+SEC("raw_tracepoint/kfree_skb") int netra_kfree_skb(struct bpf_raw_tracepoint_args *ctx)
+{
+    struct kernel_drop_key key = {.reason = (__u32)ctx->args[2]};
+    struct kernel_drop_value zero = {};
+    struct kernel_drop_value *v = bpf_map_lookup_elem(&kernel_drops, &key);
+    if (!v) {
+        bpf_map_update_elem(&kernel_drops, &key, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&kernel_drops, &key);
+    }
+    if (v) {
+        __sync_fetch_and_add(&v->count, 1);
+        v->last_ns = bpf_ktime_get_ns();
     }
     return 0;
 }

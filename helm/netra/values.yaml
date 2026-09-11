@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.13.0"
+  tag: "0.14.0"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.13.0"
+  tag: "0.14.0"
 replicaCount: 1
 ha:
   enabled: false

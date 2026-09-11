@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/l7"
@@ -99,6 +100,16 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_connection_attempts", "Socket connect/sendmsg attempts observed by cgroup hooks.", float64(healthSummary.ConnectionAttempts))
 	metricGauge(w, "netra_estimated_connect_failures", "Estimated TCP attempts not matched by active establishment counters; cumulative heuristic.", float64(healthSummary.EstimatedConnectFailures))
 	metricGauge(w, "netra_network_health_score", "Deterministic 0-100 network health heuristic.", float64(healthSummary.HealthScore))
+	dropSummary := dropdiag.Build(agents, 10).Summary
+	metricGauge(w, "netra_kernel_skb_drops", "Cumulative skb:kfree_skb events reported by node agents when the tracepoint is available.", float64(dropSummary.KernelDropEvents))
+	metricGauge(w, "netra_softnet_dropped", "Cumulative packets dropped by Linux softnet before protocol processing.", float64(dropSummary.SoftnetDropped))
+	metricGauge(w, "netra_softnet_time_squeeze", "Cumulative softnet processing budget exhaustion events.", float64(dropSummary.SoftnetTimeSqueeze))
+	metricGauge(w, "netra_interface_rx_dropped", "Aggregate interface receive dropped counters across fresh agents.", float64(dropSummary.RXDropped))
+	metricGauge(w, "netra_interface_tx_dropped", "Aggregate interface transmit dropped counters across fresh agents.", float64(dropSummary.TXDropped))
+	metricGauge(w, "netra_interface_rx_errors", "Aggregate interface receive error counters across fresh agents.", float64(dropSummary.RXErrors))
+	metricGauge(w, "netra_interface_tx_errors", "Aggregate interface transmit error counters across fresh agents.", float64(dropSummary.TXErrors))
+	metricGauge(w, "netra_interface_rx_missed", "Aggregate interface receive missed-error counters across fresh agents.", float64(dropSummary.RXMissed))
+	metricGauge(w, "netra_interface_rx_nohandler", "Aggregate interface receive no-handler counters across fresh agents.", float64(dropSummary.RXNoHandler))
 	pathSummary := pathdiag.Build(agents, 10).Summary
 	metricGauge(w, "netra_tcp_connect_established_measured", "TCP active establishments with connect latency measured by Netra.", float64(pathSummary.ConnectionsMeasured))
 	metricGauge(w, "netra_tcp_connect_average_latency_us", "Average measured TCP active connect establishment latency in microseconds.", float64(pathSummary.AverageConnectUS))

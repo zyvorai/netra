@@ -20,7 +20,7 @@ import (
 	"github.com/zyvorai/netra/internal/store"
 )
 
-const version = "0.13.0"
+const version = "0.14.0"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))

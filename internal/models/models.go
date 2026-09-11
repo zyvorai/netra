@@ -340,6 +340,55 @@ type PathDiagnosticsResponse struct {
 	Connect  []ConnectLatencyStat   `json:"connect"`
 }
 
+type KernelDropStat struct {
+	Reason     uint32 `json:"reason"`
+	Protocol   string `json:"protocol,omitempty"`
+	Count      uint64 `json:"count"`
+	LastSeenNS uint64 `json:"lastSeenNs"`
+}
+
+type InterfaceStackStat struct {
+	Name        string `json:"name"`
+	RXDropped   uint64 `json:"rxDropped"`
+	TXDropped   uint64 `json:"txDropped"`
+	RXErrors    uint64 `json:"rxErrors"`
+	TXErrors    uint64 `json:"txErrors"`
+	RXMissed    uint64 `json:"rxMissed"`
+	RXNoHandler uint64 `json:"rxNoHandler"`
+}
+
+type NodeStackStat struct {
+	SoftnetProcessed   uint64               `json:"softnetProcessed"`
+	SoftnetDropped     uint64               `json:"softnetDropped"`
+	SoftnetTimeSqueeze uint64               `json:"softnetTimeSqueeze"`
+	Interfaces         []InterfaceStackStat `json:"interfaces,omitempty"`
+}
+
+type DropDiagnosticsSummary struct {
+	KernelDropEvents   uint64                 `json:"kernelDropEvents"`
+	SoftnetProcessed   uint64                 `json:"softnetProcessed"`
+	SoftnetDropped     uint64                 `json:"softnetDropped"`
+	SoftnetTimeSqueeze uint64                 `json:"softnetTimeSqueeze"`
+	RXDropped          uint64                 `json:"rxDropped"`
+	TXDropped          uint64                 `json:"txDropped"`
+	RXErrors           uint64                 `json:"rxErrors"`
+	TXErrors           uint64                 `json:"txErrors"`
+	RXMissed           uint64                 `json:"rxMissed"`
+	RXNoHandler        uint64                 `json:"rxNoHandler"`
+	Anomalies          []NetworkHealthAnomaly `json:"anomalies,omitempty"`
+}
+
+type NodeDropDiagnostics struct {
+	Node        string           `json:"node"`
+	KernelDrops []KernelDropStat `json:"kernelDrops,omitempty"`
+	Stack       NodeStackStat    `json:"stack"`
+}
+
+type DropDiagnosticsResponse struct {
+	Summary DropDiagnosticsSummary `json:"summary"`
+	Nodes   []NodeDropDiagnostics  `json:"nodes"`
+}
+
 type AgentReport struct {
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
@@ -357,6 +406,8 @@ type AgentReport struct {
 	TLSMetadata        []TLSMetadataStat       `json:"tlsMetadata,omitempty"`
 	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
+	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
+	Stack              NodeStackStat           `json:"stack,omitempty"`
 	Events             []FastPathEvent         `json:"events"`
 	ObservedAt         time.Time               `json:"observedAt"`
 	Workloads          []WorkloadIdentity      `json:"workloads,omitempty"`

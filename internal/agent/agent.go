@@ -113,7 +113,7 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 }
@@ -174,6 +174,21 @@ func (a *Agent) loadAndAttach() error {
 			a.hooks = append(a.hooks, h.name)
 		}
 	}
+	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
+	// the modern drop-reason argument so older kernels cannot produce garbage.
+	if p := coll.Programs["netra_kfree_skb"]; p != nil {
+		if !kfreeDropReasonAvailable() {
+			a.log.Warn("kernel drop reason tracepoint unavailable; using stack counters only", "tracepoint", "kfree_skb")
+		} else {
+			lnk, err := link.AttachRawTracepoint(link.RawTracepointOptions{Name: "kfree_skb", Program: p})
+			if err != nil {
+				a.log.Warn("kernel drop raw tracepoint unavailable", "tracepoint", "kfree_skb", "error", err)
+			} else {
+				a.links = append(a.links, lnk)
+				a.hooks = append(a.hooks, "raw-tracepoint:kfree_skb")
+			}
+		}
+	}
 	ifs, err := a.resolveInterfaces(a.interfaces)
 	if err != nil {
 		return err
@@ -225,6 +240,23 @@ func (a *Agent) loadAndAttach() error {
 	sort.Strings(a.hooks)
 	a.log.Info("Netra standalone datapath attached", "cgroup", a.cgroupEnabled, "cgroupPath", a.cgroupPath, "interfaces", a.interfaces, "xdpInterfaces", a.xdpInterfaces, "hooks", a.hooks)
 	return nil
+}
+
+func kfreeDropReasonAvailable() bool {
+	for _, p := range []string{
+		"/sys/kernel/tracing/events/skb/kfree_skb/format",
+		"/sys/kernel/debug/tracing/events/skb/kfree_skb/format",
+	} {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		text := string(b)
+		if strings.Contains(text, "skb_drop_reason") && strings.Contains(text, "reason") {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) resolveInterfaces(in []string) ([]string, error) {
@@ -309,8 +341,13 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	kernelDrops, err := a.readKernelDrops()
+	if err != nil {
+		return err
+	}
+	stack := a.readNodeStack()
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, Stack: stack, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
@@ -1168,6 +1205,86 @@ func (a *Agent) drainEvents(limit int) []models.FastPathEvent {
 	}
 	return out
 }
+func (a *Agent) readKernelDrops() ([]models.KernelDropStat, error) {
+	m := a.collection.Maps["kernel_drops"]
+	if m == nil {
+		return nil, nil
+	}
+	type key struct {
+		Reason uint32
+		Pad    uint32
+	}
+	type value struct {
+		Count  uint64
+		LastNS uint64
+	}
+	var k key
+	var v value
+	out := make([]models.KernelDropStat, 0, 128)
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		out = append(out, models.KernelDropStat{Reason: k.Reason, Count: v.Count, LastSeenNS: v.LastNS})
+		if len(out) >= 4096 {
+			break
+		}
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
+func parseHexField(s string) uint64 {
+	v, _ := strconv.ParseUint(strings.TrimSpace(s), 16, 64)
+	return v
+}
+
+func readUintFile(path string) uint64 {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	v, _ := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
+	return v
+}
+
+func (a *Agent) readNodeStack() models.NodeStackStat {
+	var out models.NodeStackStat
+	if b, err := os.ReadFile("/proc/net/softnet_stat"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			out.SoftnetProcessed += parseHexField(fields[0])
+			out.SoftnetDropped += parseHexField(fields[1])
+			out.SoftnetTimeSqueeze += parseHexField(fields[2])
+		}
+	}
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, it := range ifs {
+		if it.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		base := filepath.Join("/sys/class/net", it.Name, "statistics")
+		out.Interfaces = append(out.Interfaces, models.InterfaceStackStat{
+			Name:        it.Name,
+			RXDropped:   readUintFile(filepath.Join(base, "rx_dropped")),
+			TXDropped:   readUintFile(filepath.Join(base, "tx_dropped")),
+			RXErrors:    readUintFile(filepath.Join(base, "rx_errors")),
+			TXErrors:    readUintFile(filepath.Join(base, "tx_errors")),
+			RXMissed:    readUintFile(filepath.Join(base, "rx_missed_errors")),
+			RXNoHandler: readUintFile(filepath.Join(base, "rx_nohandler")),
+		})
+	}
+	sort.Slice(out.Interfaces, func(i, j int) bool { return out.Interfaces[i].Name < out.Interfaces[j].Name })
+	return out
+}
+
 func (a *Agent) report(ctx context.Context, r models.AgentReport) error {
 	b, _ := json.Marshal(r)
 	req, _ := http.NewRequestWithContext(ctx, "POST", a.server+"/api/v1/agents/report", bytes.NewReader(b))

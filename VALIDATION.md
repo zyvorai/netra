@@ -1,63 +1,68 @@
-# Validation record — Netra v0.13.0
+# Validation record — Netra v0.14.0
 
-This release adds Cilium-independent TCP path diagnostics while preserving the v0.12 pinned-map ABIs and all existing standalone eBPF, workload-scoping, health, L7, HA, baseline and rate-intelligence features.
+Validated on 2026-09-11 in the artifact build environment.
 
-## Locally executed checks
+## Passed locally
 
-The following checks were executed successfully on this v0.13 source tree:
+- `gofmt` on all modified Go sources.
+- Dependency-free Go regression tests passed for:
+  - `internal/dropdiag`
+  - `internal/pathdiag`
+  - `internal/health`
+  - `internal/insights`
+  - `internal/store`
+  - `internal/observability`
+  - `internal/workload`
+  - `internal/flowstats`
+  - `internal/policy`
+  - `internal/cgroupmeta`
+  - `internal/l7`
+  - `cmd/netractl`
+- `go vet` passed for the same packages.
+- `internal/dropdiag` tests cover aggregation, anomaly generation, and stale-agent exclusion.
+- Strict eBPF C syntax passed with `clang -Wall -Wextra -Werror -fsyntax-only`.
+- Plain deployment YAML and GitHub Actions workflow YAML parsed successfully.
+- JSON examples parsed successfully.
+- `sh -n hack/smoke.sh` passed.
+- TypeScript compiler was invoked; React/Vitest/lucide packages are not installed in this offline workspace, so expected missing-module/JSX diagnostics were produced, with no TS1xxx parser-class diagnostics.
+- Active release files were checked for v0.14.0 consistency; Go module was restored to `go 1.27.0` / `toolchain go1.27.1` after local dependency-free tests.
 
-- temporary local-only Go directive downgrade to Go 1.23, restored immediately afterward;
-- `GOTOOLCHAIN=local go test` for `internal/pathdiag`, `internal/health`, `internal/insights`, `internal/store`, `internal/policy`, `internal/workload`, `internal/observability`, `internal/l7`, `internal/cgroupmeta`, and `cmd/netractl`;
-- `GOTOOLCHAIN=local go vet` for the same packages;
-- `clang -Wall -Wextra -Werror -fsyntax-only bpf/netra_tc.c`;
-- `sh -n hack/smoke.sh`;
-- JSON parsing for examples and `web/package.json`;
-- PyYAML parsing for all plain deployment manifests and the GitHub Actions workflow;
-- Helm template token scan confirming every `{{` opener is contained in a complete template token;
-- TypeScript compiler parser-class diagnostic scan: React/Vitest dependencies are not installed locally, but no parser-class TypeScript errors were reported;
-- version consistency check confirming the active source tree is on `0.13.0` and `go.mod` is restored to Go 1.27 / toolchain 1.27.1.
+## v0.14 drop-diagnostics coverage
 
-## v0.13 path-diagnostics coverage
+- New `kernel_drops` pinned map, separate from all existing map ABIs.
+- `raw_tracepoint/kfree_skb` program increments cumulative kernel drop-reason counters using the third tracepoint argument.
+- Agent checks tracefs for an explicit `skb_drop_reason` field before attaching the optional raw tracepoint.
+- Agent reads Linux `/proc/net/softnet_stat` processed/drop/time-squeeze counters.
+- Agent reads interface `rx_dropped`, `tx_dropped`, `rx_errors`, `tx_errors`, `rx_missed_errors`, and `rx_nohandler` counters.
+- New `GET /api/v1/ebpf/drops` API.
+- New `netractl ebpf drops` command.
+- New Drop Diagnostics web page.
+- New low-cardinality Prometheus drop/stack gauges.
+- Kernel drop reasons remain node-level; Netra does not fabricate Pod/workload attribution.
 
-Unit tests cover path-summary aggregation, connect-latency averaging, cwnd-pressure detection, loss/retransmit anomaly generation, and stale-agent exclusion.
+## Upstream interface verification
 
-The eBPF syntax check covers the new `connect_start`, `connect_health`, and `tcp_pressure` maps plus the sockops/connect-hook changes. The agent decodes those maps and joins cgroup IDs to the existing Kubernetes workload identity cache.
+The v0.14 agent uses `link.AttachRawTracepoint(link.RawTracepointOptions{Name: "kfree_skb", Program: p})`, matching the `github.com/cilium/ebpf` raw-tracepoint API used by the project dependency. The running-kernel tracepoint is still validated at runtime before attachment.
 
-Upgrade compatibility is deliberate:
+## Environment-gated checks
 
-- existing `tcp_health`, `socket_owner`, flow, policy, and enforcement map layouts are unchanged;
-- `tcp_pressure` and `connect_health` are new pinned maps;
-- `connect_start` is temporary socket-cookie state and is intentionally not pinned across agent restart.
+The build environment has Go 1.23.2 and no outbound package resolution. The release targets Go 1.27.0 / toolchain 1.27.1, and external Cilium/eBPF/gRPC modules are not available in the local module cache. Therefore the following remain GitHub CI/integration gates:
 
-## Environment limitations
+- full `go test ./...`, `go vet ./...`, and builds of `netrad`, `netra-agent`, and dependency-using packages;
+- real `clang -target bpfel` object generation and Linux BPF verifier/load testing;
+- actual `raw_tracepoint/kfree_skb` attachment on representative production kernels;
+- npm dependency installation, full React typecheck/tests/build;
+- Helm lint/render because Helm is not installed locally;
+- live Kubernetes/Cilium/Hubble integration testing.
 
-The build container has Go 1.23, while the repository intentionally targets Go 1.27.0 with toolchain Go 1.27.1. Outbound package/DNS access and a BPF-capable Clang backend are not available here, so the following remain repository CI / integration-cluster gates:
+The optional kernel-drop hook failing to attach does not fail the agent: softnet/interface diagnostics and the rest of the standalone datapath remain available.
 
-- dependency-complete `go test ./...`, `go vet ./...`, and full Go 1.27 binary builds;
-- actual `clang -target bpfel` object generation and kernel verifier load;
-- Helm `lint` / `template` with a real Helm binary;
-- React dependency installation, Vitest, and Vite production build;
-- live Linux cgroup-v2 sockops attachment and real TCP connect-latency measurements;
-- real-kernel validation of `snd_cwnd`, `packets_out`, `lost_out`, `retrans_out`, delivered-rate, and TCP-state fields across supported kernels;
-- Kubernetes workload attribution, HA failover, Cilium/Hubble optional integration, and Prometheus scrape testing.
+## Lab verification (zyvor) — v0.14
 
-## Required integration scenarios before GA
+Executed after merge into the Netra lab tree (Apple CSS, TLS NodePort 30870, Insights null-safety, Overview/Flows/path wiring preserved):
 
-1. Upgrade from v0.12 with existing pinned maps and verify the agent creates the new maps without deleting old state.
-2. Generate TCP traffic with known latency and confirm active connect timing is populated only after active establishment.
-3. Introduce packet loss/latency in a test namespace and confirm `lost_out`, retransmit pressure and connect-latency signals rise without false enforcement changes.
-4. Restart the agent during active connections and verify ephemeral `connect_start` state is cleared while cumulative diagnostic maps remain usable.
-5. Confirm Path Diagnostics is observe-only in both `scopeMode=all` and `scopeMode=selected`.
-6. Confirm stale agent reports are excluded from controller path summaries.
-
-Netra does not claim generic skb drop-reason tracing in v0.13. TCP `lost_out`/`retrans_out` are transport-state indicators and must not be presented as proof of a specific switch, NIC, qdisc, firewall, or router failure.
-
-## Lab verification (zyvor)
-
-Executed after merge into the Netra lab tree (Apple CSS, TLS NodePort 30870, Insights null-safety, Overview/Flows wiring preserved):
-
-- `go test ./...` and `web` production build (`tsc -b && vite build`)
-- `GET /api/v1/ebpf/path` registered (routes test) and Path Diagnostics UI shipped
-- Deploy via `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh 212.8.248.187 sus --k8s` + rollout restart
-- Console smoke: Overview path pulse, Path Diagnostics page, Insights rates, Network Health, L7
+- `go test ./...` including `internal/dropdiag` and `web` production build
+- `GET /api/v1/ebpf/drops` registered (routes test) and Drop Diagnostics UI shipped
+- Deploy via `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh 212.8.248.187 sus --k8s`
+- Console smoke: Overview drop pulse, Drop Diagnostics page, Path/Insights/Health/L7
 
