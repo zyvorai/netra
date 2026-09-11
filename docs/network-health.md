@@ -1,6 +1,6 @@
-# Netra Network Health — v0.10
+# Netra Network Health — v0.10 (current in v0.11)
 
-Netra v0.10 adds deep TCP and DNS health telemetry without requiring Cilium, Hubble, a service mesh, or application instrumentation.
+Netra v0.10 adds deep TCP and DNS health telemetry without requiring Cilium, Hubble, a service mesh, or application instrumentation. v0.11 keeps this surface unchanged and continues to expose it on the **Network Health** dashboard and Overview pulse.
 
 ## TCP health
 

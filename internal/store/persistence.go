@@ -37,6 +37,7 @@ type diskState struct {
 	PolicyRevisions []models.PolicyRevision   `json:"policyRevisions"`
 	NextRevisionID  uint64                    `json:"nextRevisionId"`
 	Preflights      map[string]diskPreflight  `json:"preflights,omitempty"`
+	Baseline        models.BehaviorBaseline   `json:"baseline,omitempty"`
 }
 
 // Open returns a store backed by an atomically replaced JSON state file. The
@@ -111,6 +112,7 @@ func (s *Store) load() error {
 	s.policyRevisions = cloneRevisions(tailRevisions(d.PolicyRevisions, 1000))
 	s.nextRevisionID = d.NextRevisionID
 	s.preflights = map[string]preflight{}
+	s.baseline = cloneBaseline(d.Baseline)
 	now := time.Now().UTC()
 	for token, item := range d.Preflights {
 		if token == "" || len(item.Hash) != 32 || !now.Before(item.ExpiresAt) {
@@ -175,6 +177,7 @@ func (s *Store) persistLocked() error {
 		PolicyRevisions: cloneRevisions(s.policyRevisions),
 		NextRevisionID:  s.nextRevisionID,
 		Preflights:      make(map[string]diskPreflight, len(s.preflights)),
+		Baseline:        cloneBaseline(s.baseline),
 	}
 	now := time.Now().UTC()
 	for token, item := range s.preflights {

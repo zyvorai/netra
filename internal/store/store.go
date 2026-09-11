@@ -34,6 +34,7 @@ type Store struct {
 	policyRevisions []models.PolicyRevision
 	nextRevisionID  uint64
 	preflights      map[string]preflight
+	baseline        models.BehaviorBaseline
 	backend         *fileBackend
 }
 

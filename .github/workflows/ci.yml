@@ -51,7 +51,7 @@ jobs:
         grep -q 'NETRA_LISTEN' /tmp/netra.yaml
         grep -q 'NETRA_TLS_CERT' /tmp/netra.yaml
         grep -q 'gen-cert' /tmp/netra.yaml
-        grep -q 'resources: \["pods"\]' /tmp/netra.yaml
+        grep -q 'resources: \["pods","services"\]' /tmp/netra.yaml
         grep -q 'kubevirt.io' /tmp/netra.yaml
         # Helm renders env as name/value pairs; Cilium must stay off by default.
         awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 ~ /"true"/) exit 1}' /tmp/netra.yaml

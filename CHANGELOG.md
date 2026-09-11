@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.0 — 2026-09-11
+
+- Added Kubernetes-aware workload dependency graph resolution from exact standalone eBPF counters, including Pod and Service destination mapping.
+- Added a restart-durable known-good behavior baseline for destinations, DNS names, TLS SNI, HTTP hosts and remote ports.
+- Added baseline drift detection with conservative noise thresholds and stale-agent exclusion.
+- Added review-only CiliumNetworkPolicy drafts generated from observed workload egress, using `toServices` for Kubernetes Services, exact CIDRs for direct IPs, and repeated TLS SNI as optional FQDN evidence.
+- Added `GET /api/v1/insights/*`, `netractl insights ...`, and a dedicated Insights dashboard.
+- Added Prometheus gauges for behavior-baseline entries, drift findings and raw dependency-edge count.
+- Extended controller read-only Kubernetes RBAC from Pods to Pods + Services; the privileged node agent remains tokenless.
+- Persisted the behavior baseline in the same atomic HA-safe state file as policy history and eBPF control state.
+- Deliberately kept recommendations review-only: v0.11 has no auto-learn/auto-enforce path.
+
 ## v0.10.0 — 2026-09-11
 
 - Added metadata-only TLS ClientHello SNI observability, attributed to cgroup/Kubernetes workload, without copying payloads to userspace.

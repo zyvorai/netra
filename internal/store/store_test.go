@@ -2,10 +2,12 @@ package store
 
 import (
 	"errors"
-	"github.com/zyvorai/netra/internal/models"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zyvorai/netra/internal/models"
 )
 
 func TestConfigAndEvents(t *testing.T) {
@@ -330,5 +332,30 @@ func TestWorkloadScopePersists(t *testing.T) {
 	}
 	if len(cfg.Workloads) != 0 {
 		t.Fatal("ephemeral workload inventory must not persist")
+	}
+}
+
+func TestBehaviorBaselinePersists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := models.BehaviorBaseline{SchemaVersion: 1, CapturedAt: time.Unix(123, 0).UTC(), Entries: []models.BehaviorBaselineEntry{{Source: "pod:prod:api", Kind: "sni", Value: "api.example.com", Count: 3}}}
+	if err := s.SetBaseline(b, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	got := s2.Baseline()
+	if len(got.Entries) != 1 || got.Entries[0].Value != "api.example.com" {
+		t.Fatalf("baseline=%#v", got)
 	}
 }

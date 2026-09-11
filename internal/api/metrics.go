@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/health"
+	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/observability"
 )
@@ -103,6 +104,11 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_http1_requests", "Best-effort cleartext HTTP/1 requests with parsed Host metadata.", float64(l7s.HTTPRequests))
 	metricGauge(w, "netra_l7_unique_sni", "Unique parsed TLS SNI names in latest node maps.", float64(l7s.UniqueSNI))
 	metricGauge(w, "netra_l7_unique_http_hosts", "Unique parsed cleartext HTTP Host values in latest node maps.", float64(l7s.UniqueHTTPHosts))
+	baseline := s.store.Baseline()
+	drift := insights.Drift(baseline, agents)
+	metricGauge(w, "netra_behavior_baseline_entries", "Known-good behavior entries in the persisted Netra baseline.", float64(len(baseline.Entries)))
+	metricGauge(w, "netra_behavior_drift_findings", "Current behaviors not present in the persisted baseline and above noise thresholds.", float64(len(drift.Findings)))
+	metricGauge(w, "netra_dependency_edges", "Workload egress dependency edges derived from exact standalone eBPF counters before Kubernetes service resolution.", float64(len(observability.Topology(agents, 5000))))
 }
 
 func metricCounter(w http.ResponseWriter, name, help string, value uint64) {

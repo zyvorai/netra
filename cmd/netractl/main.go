@@ -46,6 +46,8 @@ func main() {
 		err = request("GET", "/api/v1/drops/explain", nil)
 	case "ebpf":
 		err = ebpf()
+	case "insights":
+		err = insightCmd()
 	default:
 		usage()
 		return
@@ -81,7 +83,9 @@ func usage() {
   ebpf workloads [node]
   ebpf scope show | scope all
   ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
-  ebpf scope set FILE`)
+  ebpf scope set FILE
+  insights summary | dependencies [limit] | drift | recommendations [namespace] [workload]
+  insights baseline show | capture | clear`)
 }
 func policy() error {
 	if len(os.Args) < 3 {
@@ -533,6 +537,57 @@ func ebpf() error {
 	}
 	return fmt.Errorf("unknown ebpf command")
 }
+
+func insightCmd() error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("insights subcommand required")
+	}
+	switch os.Args[2] {
+	case "summary":
+		return request("GET", "/api/v1/insights/summary", nil)
+	case "dependencies":
+		p := "/api/v1/insights/dependencies"
+		if len(os.Args) > 3 {
+			if _, err := strconv.Atoi(os.Args[3]); err != nil {
+				return fmt.Errorf("limit must be numeric")
+			}
+			p += "?limit=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "drift":
+		return request("GET", "/api/v1/insights/drift", nil)
+	case "recommendations":
+		q := url.Values{}
+		if len(os.Args) > 3 {
+			q.Set("namespace", os.Args[3])
+		}
+		if len(os.Args) > 4 {
+			q.Set("workload", os.Args[4])
+		}
+		p := "/api/v1/insights/recommendations"
+		if enc := q.Encode(); enc != "" {
+			p += "?" + enc
+		}
+		return request("GET", p, nil)
+	case "baseline":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("baseline show|capture|clear")
+		}
+		switch os.Args[3] {
+		case "show":
+			return request("GET", "/api/v1/insights/baseline", nil)
+		case "capture":
+			return request("POST", "/api/v1/insights/baseline", nil)
+		case "clear":
+			return requestHeaders("DELETE", "/api/v1/insights/baseline", nil, map[string]string{"X-Netra-Confirm-Baseline-Clear": "clear"})
+		default:
+			return fmt.Errorf("baseline show|capture|clear")
+		}
+	default:
+		return fmt.Errorf("unknown insights command")
+	}
+}
+
 func request(method, p string, b []byte) error {
 	return requestHeaders(method, p, b, nil)
 }

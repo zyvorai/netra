@@ -7,6 +7,7 @@ export default function Overview() {
   const [obs, setObs] = useState<any>();
   const [health, setHealth] = useState<any>();
   const [l7, setL7] = useState<any>();
+  const [insights, setInsights] = useState<any>();
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -15,12 +16,14 @@ export default function Overview() {
       api('/api/v1/ebpf/summary'),
       api('/api/v1/ebpf/health?limit=1'),
       api('/api/v1/ebpf/l7?limit=1'),
+      api('/api/v1/insights/summary'),
     ])
-      .then(([s, o, h, l]) => {
+      .then(([s, o, h, l, i]) => {
         setData(s);
         setObs(o);
         setHealth(h);
         setL7(l);
+        setInsights(i);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -29,6 +32,7 @@ export default function Overview() {
   const fp = data?.fastPath;
   const hs = health?.summary || {};
   const ls = l7?.summary || {};
+  const ins = insights || {};
 
   return (
     <div className="grid">
@@ -132,6 +136,30 @@ export default function Overview() {
             <span>blocked attempts</span>
           </div>
         </div>
+      </section>
+
+      <section className="card span2">
+        <p className="eyebrow">BEHAVIOR INSIGHTS</p>
+        <h3>Dependencies · baseline · drift</h3>
+        <div className="metrics">
+          <div>
+            <b>{ins.dependencyEdges ?? 0}</b>
+            <span>dependency edges</span>
+          </div>
+          <div>
+            <b>{ins.baselineEntries ?? 0}</b>
+            <span>baseline entries</span>
+          </div>
+          <div>
+            <b>{ins.driftFindings ?? 0}</b>
+            <span>drift findings</span>
+          </div>
+          <div>
+            <b>{ins.recommendations ?? 0}</b>
+            <span>policy drafts</span>
+          </div>
+        </div>
+        <p>Review-only drafts live on the Insights page — v0.11 does not auto-enforce learned policy.</p>
       </section>
 
       <section className="card span2">

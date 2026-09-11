@@ -15,15 +15,20 @@ kubectl -n netra-system port-forward svc/netra 30870:30870
 curl -skf https://127.0.0.1:30870/livez
 ```
 
-Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Overview**, **Pods**, **VMs**, **Network Health**, **L7 Metadata**, **Policies**, **Live flows**, **eBPF**, **Audit**.
+Open the UI at `https://127.0.0.1:30870` (self-signed TLS by default). Nav: **Overview**, **Pods**, **VMs**, **Network Health**, **L7 Metadata**, **Insights**, **Policies**, **Live flows**, **eBPF**, **Audit**.
 
+- **Overview** — agents/datapath pulse plus Network Health score, L7 metadata, and Insights summary.
 - **Pods / VMs** — pick a workload for scoped live flows, create/delete CNP rules, lock down / unlock.
+- **Network Health** — TCP/DNS sockops health, anomalies, health score.
+- **L7 Metadata** — TLS SNI / HTTP Host observation and leased SNI deny.
+- **Insights** — dependency graph, known-good baseline, drift, review-only CNP drafts.
 - **Policies** — guided builder + JSON workbench with preflight receipts.
-- **Live flows** — cluster-wide Hubble stream.
+- **Live flows** — Hubble stream plus `flows/summary` aggregates (verdicts, top destinations).
+- **eBPF** — observe/enforce lease, scope, deny rules, workloads, topology.
 
 ## Path B — Remote full stack (K3s + Cilium + Netra)
 
-SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.10.0`); after deploy, restart the Deployment so the new layers are picked up:
+SSH host gets K3s (or uses existing), Cilium with Hubble Relay, then Netra via Helm. Image tag is reused (`0.11.0`); after deploy, restart the Deployment so the new layers are picked up:
 
 ```bash
 NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh HOST USER --k8s
@@ -52,4 +57,16 @@ Requires reachable Kubernetes API + Hubble Relay (`NETRA_HUBBLE_ADDR`, default `
 curl -skf https://HOST:30870/api/v1/pods | head
 curl -skf https://HOST:30870/api/v1/vms | head
 curl -skf https://HOST:30870/api/v1/workloads/pod/default/PODNAME
+curl -skf https://HOST:30870/api/v1/ebpf/health | head
+curl -skf https://HOST:30870/api/v1/ebpf/l7 | head
+curl -skf https://HOST:30870/api/v1/flows/summary?number=50 | head
+curl -skf https://HOST:30870/api/v1/insights/summary | head
+curl -skf https://HOST:30870/api/v1/insights/dependencies?limit=20 | head
+```
+
+```bash
+netractl ebpf health
+netractl ebpf l7
+netractl flows summary --direction EGRESS
+netractl insights summary
 ```
