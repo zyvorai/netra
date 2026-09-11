@@ -1204,7 +1204,10 @@ static __always_inline int handle_v6(void *data, void *data_end, __u32 ifindex, 
     // opaque/truncated or this is a non-first fragment. Port policy is only
     // evaluated when a trustworthy L4 destination port was parsed.
     int blocked=0;
-    if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    if (!established) {
+        blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+        // IPv4-only netpol map in v0.19; v6 peers remain emergency CIDR/exact path.
+    }
     char dns_name[96]={};int dns_len=0;if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&payload){dns_len=dns_qname(payload,data_end,dns_name);if(!blocked&&enforcing()&&scope_allows(cgroup_id)&&dns_len>0){struct dns_key dk={};__builtin_memcpy(dk.name,dns_name,96);if(bpf_map_lookup_elem(&blocked_dns,&dk)){blocked=1;reason=REASON_DNS;}}}
     char sni[96]={};char http_m[8]={};char http_h[96]={};int sni_len=0;if(direction==DIR_EGRESS&&hook==HOOK_CGROUP&&proto==IPPROTO_TCP&&payload){sni_len=tls_sni(payload,data_end,sni);if(sni_len>0&&!blocked&&enforcing()&&scope_allows(cgroup_id)){struct dns_key sk={};__builtin_memcpy(sk.name,sni,96);if(bpf_map_lookup_elem(&blocked_sni,&sk)){blocked=1;reason=REASON_SNI;}}if(sni_len>0)track_tls(cgroup_id,sni,blocked&&reason==REASON_SNI);if(http_method(payload,data_end,http_m)>0&&http_host(payload,data_end,http_h)>0)track_http(cgroup_id,http_m,http_h);}
     if(direction==DIR_EGRESS&&proto==IPPROTO_UDP&&dport==__builtin_bswap16(53)&&dns_len>0)dns_query_track(cgroup_id,FAMILY_V6,dst,sport,payload,data_end,dns_name,dns_len);if(direction==DIR_INGRESS&&proto==IPPROTO_UDP&&sport==__builtin_bswap16(53)&&payload)dns_response_track(cgroup_id,FAMILY_V6,src,dport,payload,data_end,ifindex,len,src,dst);update_flow(FAMILY_V6,direction,hook,proto,sport,dport,src,dst,len,blocked,cgroup_id);
