@@ -66,7 +66,7 @@ func usage() {
   policy archive import <file> [--mode merge|replace]
   policy rollback <namespace> <name> <revision> [--dry-run] [--confirm-risk high|critical]
   policy delete <namespace> <name>
-  flows watch [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
+  flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
   ebpf stats | summary | health | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
@@ -303,10 +303,10 @@ func planAndApply(body []byte, confirmedRisk string) error {
 }
 
 func flows() error {
-	if len(os.Args) < 3 || os.Args[2] != "watch" {
-		return fmt.Errorf("use flows watch")
+	if len(os.Args) < 3 || (os.Args[2] != "watch" && os.Args[2] != "summary") {
+		return fmt.Errorf("use flows watch|summary")
 	}
-	q := url.Values{"number": {"100"}}
+	q := url.Values{"number": {map[string]string{"watch": "100", "summary": "500"}[os.Args[2]]}}
 	for i := 3; i+1 < len(os.Args); i += 2 {
 		m := map[string]string{"--verdict": "verdict", "--direction": "direction", "--protocol": "protocol", "--namespace": "namespace", "--pod": "pod", "--to": "destination"}
 		k, ok := m[os.Args[i]]
@@ -314,6 +314,9 @@ func flows() error {
 			return fmt.Errorf("unknown flag %s", os.Args[i])
 		}
 		q.Set(k, os.Args[i+1])
+	}
+	if os.Args[2] == "summary" {
+		return request("GET", "/api/v1/flows/summary?"+q.Encode(), nil)
 	}
 	return stream("/api/v1/flows/stream?" + q.Encode())
 }

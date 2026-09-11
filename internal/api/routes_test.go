@@ -30,6 +30,7 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/workloads/pod/default/demo"},
 		{"POST", "/api/v1/policies/lockdown"},
 		{"DELETE", "/api/v1/policies/lockdown/default/demo"},
+		{"GET", "/api/v1/flows/summary"},
 		{"GET", "/api/v1/ebpf/summary"},
 		{"GET", "/api/v1/ebpf/health"},
 		{"GET", "/api/v1/ebpf/l7"},
