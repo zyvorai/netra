@@ -12,6 +12,7 @@ import (
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/observability"
+	"github.com/zyvorai/netra/internal/pathdiag"
 )
 
 type telemetry struct {
@@ -98,6 +99,15 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_connection_attempts", "Socket connect/sendmsg attempts observed by cgroup hooks.", float64(healthSummary.ConnectionAttempts))
 	metricGauge(w, "netra_estimated_connect_failures", "Estimated TCP attempts not matched by active establishment counters; cumulative heuristic.", float64(healthSummary.EstimatedConnectFailures))
 	metricGauge(w, "netra_network_health_score", "Deterministic 0-100 network health heuristic.", float64(healthSummary.HealthScore))
+	pathSummary := pathdiag.Build(agents, 10).Summary
+	metricGauge(w, "netra_tcp_connect_established_measured", "TCP active establishments with connect latency measured by Netra.", float64(pathSummary.ConnectionsMeasured))
+	metricGauge(w, "netra_tcp_connect_average_latency_us", "Average measured TCP active connect establishment latency in microseconds.", float64(pathSummary.AverageConnectUS))
+	metricGauge(w, "netra_tcp_connect_max_latency_us", "Maximum measured TCP active connect establishment latency in microseconds.", float64(pathSummary.MaxConnectUS))
+	metricGauge(w, "netra_tcp_packets_out", "Current aggregate TCP packets_out from sockops path diagnostics.", float64(pathSummary.PacketsOut))
+	metricGauge(w, "netra_tcp_retrans_out", "Current aggregate retransmitted TCP segments outstanding.", float64(pathSummary.RetransOut))
+	metricGauge(w, "netra_tcp_lost_out", "Current aggregate TCP segments marked lost by the kernel.", float64(pathSummary.LostOut))
+	metricGauge(w, "netra_tcp_total_retrans", "Aggregate kernel total_retrans snapshots across reported sockets.", float64(pathSummary.TotalRetrans))
+	metricGauge(w, "netra_tcp_cwnd_pressure_flows", "TCP flows with packets_out at least 80 percent of snd_cwnd.", float64(pathSummary.CongestedFlows))
 	l7s := l7.Build(agents, 10).Summary
 	metricGauge(w, "netra_tls_sni_handshakes", "Best-effort TLS ClientHello records with parsed SNI.", float64(l7s.TLSHandshakes))
 	metricGauge(w, "netra_tls_sni_blocked", "Best-effort TLS ClientHello records blocked by exact SNI rules.", float64(l7s.TLSBlocked))

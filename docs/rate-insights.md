@@ -75,7 +75,3 @@ netractl insights rate-drift 5m
 netractl insights exposure 5m
 netractl insights remediations 5m
 ```
-
-## Dashboard
-
-The **Insights** page surfaces rate windows, rate baseline capture/clear, rate drift, exposure ranking, and remediation proposals alongside the v0.11 behavior inventory. Overview shows a compact pulse for rate anomalies and high exposure.

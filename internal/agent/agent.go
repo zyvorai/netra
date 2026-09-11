@@ -113,7 +113,7 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 }
@@ -281,6 +281,14 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	tcpPressure, err := a.readTCPPressure()
+	if err != nil {
+		return err
+	}
+	connectLatency, err := a.readConnectLatency()
+	if err != nil {
+		return err
+	}
 	tcpSignals, err := a.readTCPSignals()
 	if err != nil {
 		return err
@@ -302,7 +310,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
@@ -733,6 +741,23 @@ func (a *Agent) enrichTCPHealth(st *models.TCPHealthStat) {
 		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName, st.ContainerID = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName, w.ContainerID
 	}
 }
+func (a *Agent) enrichTCPPressure(st *models.TCPPressureStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+func (a *Agent) enrichConnectLatency(st *models.ConnectLatencyStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+
 func (a *Agent) enrichTCPSignal(st *models.TCPSignalStat) {
 	if st.CgroupID == 0 {
 		return
@@ -871,6 +896,87 @@ func (a *Agent) readTCPHealth() ([]models.TCPHealthStat, error) {
 	sort.Slice(out, func(i, j int) bool {
 		ai := out[i].Retransmissions*1000 + out[i].RTOs*10000 + out[i].SRTTUS/1000
 		aj := out[j].Retransmissions*1000 + out[j].RTOs*10000 + out[j].SRTTUS/1000
+		return ai > aj
+	})
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readTCPPressure() ([]models.TCPPressureStat, error) {
+	m := a.collection.Maps["tcp_pressure"]
+	if m == nil {
+		return nil, fmt.Errorf("tcp_pressure unavailable")
+	}
+	it := m.Iterate()
+	var k [56]byte
+	var v [104]byte
+	out := make([]models.TCPPressureStat, 0, 256)
+	for it.Next(&k, &v) {
+		family := k[8]
+		localIP, remoteIP := "", ""
+		if family == 4 {
+			localIP = net.IP(k[12:16]).String()
+			remoteIP = net.IP(k[16:20]).String()
+		}
+		if family == 6 {
+			localIP = net.IP(k[20:36]).String()
+			remoteIP = net.IP(k[36:52]).String()
+		}
+		st := models.TCPPressureStat{
+			CgroupID: native.Uint64(k[0:8]), Family: familyName(family), LocalIP: localIP, RemoteIP: remoteIP, LocalPort: native.Uint16(k[52:54]), RemotePort: native.Uint16(k[54:56]),
+			Callbacks: native.Uint64(v[0:8]), SendCWND: native.Uint64(v[8:16]), SendSSThresh: native.Uint64(v[16:24]), PacketsOut: native.Uint64(v[24:32]),
+			RetransOut: native.Uint64(v[32:40]), TotalRetrans: native.Uint64(v[40:48]), LostOut: native.Uint64(v[48:56]), SackedOut: native.Uint64(v[56:64]),
+			RateDelivered: native.Uint64(v[64:72]), RateIntervalUS: native.Uint64(v[72:80]), MSS: native.Uint64(v[80:88]), TCPState: native.Uint64(v[88:96]), LastSeenNS: native.Uint64(v[96:104]),
+		}
+		a.enrichTCPPressure(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].LostOut*100000+out[i].RetransOut*10000+out[i].PacketsOut > out[j].LostOut*100000+out[j].RetransOut*10000+out[j].PacketsOut
+	})
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readConnectLatency() ([]models.ConnectLatencyStat, error) {
+	m := a.collection.Maps["connect_health"]
+	if m == nil {
+		return nil, fmt.Errorf("connect_health unavailable")
+	}
+	it := m.Iterate()
+	var k [28]byte
+	var v [32]byte
+	out := make([]models.ConnectLatencyStat, 0, 256)
+	for it.Next(&k, &v) {
+		family := k[8]
+		remote := ""
+		if family == 4 {
+			remote = net.IP(k[12:16]).String()
+		} else if family == 6 {
+			remote = net.IP(k[12:28]).String()
+		}
+		st := models.ConnectLatencyStat{CgroupID: native.Uint64(k[0:8]), Family: familyName(family), RemotePort: binary.BigEndian.Uint16(k[10:12]), RemoteIP: remote, Established: native.Uint64(v[0:8]), TotalLatencyUS: native.Uint64(v[8:16]), MaxLatencyUS: native.Uint64(v[16:24]), LastSeenNS: native.Uint64(v[24:32])}
+		a.enrichConnectLatency(&st)
+		out = append(out, st)
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ai, aj := uint64(0), uint64(0)
+		if out[i].Established > 0 {
+			ai = out[i].TotalLatencyUS / out[i].Established
+		}
+		if out[j].Established > 0 {
+			aj = out[j].TotalLatencyUS / out[j].Established
+		}
 		return ai > aj
 	})
 	if len(out) > 1000 {

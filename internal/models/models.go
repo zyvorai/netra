@@ -279,6 +279,67 @@ type NetworkHealthResponse struct {
 	Signals []TCPSignalStat      `json:"signals"`
 }
 
+type TCPPressureStat struct {
+	CgroupID       uint64 `json:"cgroupId,omitempty"`
+	Family         string `json:"family"`
+	LocalIP        string `json:"localIp"`
+	RemoteIP       string `json:"remoteIp"`
+	LocalPort      uint16 `json:"localPort"`
+	RemotePort     uint16 `json:"remotePort"`
+	Callbacks      uint64 `json:"callbacks"`
+	SendCWND       uint64 `json:"sendCwnd"`
+	SendSSThresh   uint64 `json:"sendSsthresh"`
+	PacketsOut     uint64 `json:"packetsOut"`
+	RetransOut     uint64 `json:"retransOut"`
+	TotalRetrans   uint64 `json:"totalRetrans"`
+	LostOut        uint64 `json:"lostOut"`
+	SackedOut      uint64 `json:"sackedOut"`
+	RateDelivered  uint64 `json:"rateDelivered"`
+	RateIntervalUS uint64 `json:"rateIntervalUs"`
+	MSS            uint64 `json:"mss"`
+	TCPState       uint64 `json:"tcpState"`
+	LastSeenNS     uint64 `json:"lastSeenNs"`
+	Namespace      string `json:"namespace,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	WorkloadKind   string `json:"workloadKind,omitempty"`
+	WorkloadName   string `json:"workloadName,omitempty"`
+}
+
+type ConnectLatencyStat struct {
+	CgroupID       uint64 `json:"cgroupId,omitempty"`
+	Family         string `json:"family"`
+	RemoteIP       string `json:"remoteIp"`
+	RemotePort     uint16 `json:"remotePort"`
+	Established    uint64 `json:"established"`
+	TotalLatencyUS uint64 `json:"totalLatencyUs"`
+	MaxLatencyUS   uint64 `json:"maxLatencyUs"`
+	LastSeenNS     uint64 `json:"lastSeenNs"`
+	Namespace      string `json:"namespace,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	WorkloadKind   string `json:"workloadKind,omitempty"`
+	WorkloadName   string `json:"workloadName,omitempty"`
+}
+
+type PathDiagnosticsSummary struct {
+	ConnectionsMeasured uint64                 `json:"connectionsMeasured"`
+	AverageConnectUS    uint64                 `json:"averageConnectUs"`
+	MaxConnectUS        uint64                 `json:"maxConnectUs"`
+	PressureFlows       uint64                 `json:"pressureFlows"`
+	CongestedFlows      uint64                 `json:"congestedFlows"`
+	PacketsOut          uint64                 `json:"packetsOut"`
+	RetransOut          uint64                 `json:"retransOut"`
+	LostOut             uint64                 `json:"lostOut"`
+	TotalRetrans        uint64                 `json:"totalRetrans"`
+	DeliveredRatePPS    uint64                 `json:"deliveredRatePps"`
+	Anomalies           []NetworkHealthAnomaly `json:"anomalies"`
+}
+
+type PathDiagnosticsResponse struct {
+	Summary  PathDiagnosticsSummary `json:"summary"`
+	Pressure []TCPPressureStat      `json:"pressure"`
+	Connect  []ConnectLatencyStat   `json:"connect"`
+}
+
 type AgentReport struct {
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
@@ -289,6 +350,8 @@ type AgentReport struct {
 	Standalone         bool                    `json:"standalone"`
 	Stats              []DestinationStat       `json:"stats"`
 	TCPHealth          []TCPHealthStat         `json:"tcpHealth,omitempty"`
+	TCPPressure        []TCPPressureStat       `json:"tcpPressure,omitempty"`
+	ConnectLatency     []ConnectLatencyStat    `json:"connectLatency,omitempty"`
 	TCPSignals         []TCPSignalStat         `json:"tcpSignals,omitempty"`
 	DNSHealth          []DNSHealthStat         `json:"dnsHealth,omitempty"`
 	TLSMetadata        []TLSMetadataStat       `json:"tlsMetadata,omitempty"`

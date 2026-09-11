@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
       - name: netra
-        image: ghcr.io/zyvorai/netra:0.12.0
+        image: ghcr.io/zyvorai/netra:0.13.0
         imagePullPolicy: IfNotPresent
         ports: [{name: http, containerPort: 30870}]
         env:

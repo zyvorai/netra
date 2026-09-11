@@ -8,6 +8,7 @@ export default function Overview() {
   const [health, setHealth] = useState<any>();
   const [l7, setL7] = useState<any>();
   const [insights, setInsights] = useState<any>();
+  const [path, setPath] = useState<any>();
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -17,13 +18,15 @@ export default function Overview() {
       api('/api/v1/ebpf/health?limit=1'),
       api('/api/v1/ebpf/l7?limit=1'),
       api('/api/v1/insights/summary'),
+      api('/api/v1/ebpf/path?limit=1'),
     ])
-      .then(([s, o, h, l, i]) => {
+      .then(([s, o, h, l, i, pathDiag]) => {
         setData(s);
         setObs(o);
         setHealth(h);
         setL7(l);
         setInsights(i);
+        setPath(pathDiag);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -138,6 +141,30 @@ export default function Overview() {
         </div>
       </section>
 
+      <section className="card">
+        <p className="eyebrow">PATH DIAGNOSTICS</p>
+        <h3>TCP connect · pressure</h3>
+        <div className="metrics">
+          <div>
+            <b>{path?.summary?.connectionsMeasured ?? 0}</b>
+            <span>connects timed</span>
+          </div>
+          <div>
+            <b>{path?.summary?.congestedFlows ?? 0}</b>
+            <span>cwnd-pressure flows</span>
+          </div>
+          <div>
+            <b>{(path?.summary?.lostOut ?? 0) + (path?.summary?.retransOut ?? 0)}</b>
+            <span>lost + retrans out</span>
+          </div>
+          <div>
+            <b>{(path?.summary?.anomalies || []).length}</b>
+            <span>path signals</span>
+          </div>
+        </div>
+        <p>Full tables live on Path Diagnostics — observe-only sockops path health.</p>
+      </section>
+
       <section className="card span2">
         <p className="eyebrow">BEHAVIOR INSIGHTS</p>
         <h3>Dependencies · drift · exposure</h3>
@@ -159,7 +186,7 @@ export default function Overview() {
             <span>high exposure</span>
           </div>
         </div>
-        <p>Review-only drafts and rate baselines live on the Insights page — v0.12 does not auto-enforce learned policy.</p>
+        <p>Review-only drafts and rate baselines live on the Insights page — Netra does not auto-enforce learned policy.</p>
       </section>
 
       <section className="card span2">

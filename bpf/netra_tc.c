@@ -350,6 +350,54 @@ struct {
     __type(value, struct connect_attempt_value);
 } connect_attempts SEC(".maps");
 
+
+// v0.13 path diagnostics use new maps so existing pinned map ABIs remain valid.
+struct connect_start_value {
+    __u64 start_ns;
+    struct connect_attempt_key key;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, __u64);
+    __type(value, struct connect_start_value);
+} connect_start SEC(".maps");
+
+struct connect_health_value {
+    __u64 established;
+    __u64 total_latency_us;
+    __u64 max_latency_us;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct connect_attempt_key);
+    __type(value, struct connect_health_value);
+} connect_health SEC(".maps");
+
+struct tcp_pressure_value {
+    __u64 callbacks;
+    __u64 snd_cwnd;
+    __u64 snd_ssthresh;
+    __u64 packets_out;
+    __u64 retrans_out;
+    __u64 total_retrans;
+    __u64 lost_out;
+    __u64 sacked_out;
+    __u64 rate_delivered;
+    __u64 rate_interval_us;
+    __u64 mss_cache;
+    __u64 state;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct tcp_health_key);
+    __type(value, struct tcp_pressure_value);
+} tcp_pressure SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
@@ -913,7 +961,7 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
     __u32 dst=ctx->user_ip4;__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u8 addr[16];copy4(addr,dst);
     __u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id);
-    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
+    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); struct connect_start_value cv={}; cv.start_ns=bpf_ktime_get_ns(); cv.key.cgroup_id=cgroup_id; cv.key.family=FAMILY_V4; cv.key.protocol=IPPROTO_TCP; cv.key.remote_port=dport; copy4(cv.key.remote,dst); bpf_map_update_elem(&connect_start,&cookie,&cv,BPF_ANY); } }
     track_connect_attempt(cgroup_id,FAMILY_V4,proto,addr,dport,blocked);
     submit_socket_event(ctx,FAMILY_V4,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
@@ -921,7 +969,7 @@ static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
     int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,cgroup_id);
-    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); } }
+    if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); struct connect_start_value cv={}; cv.start_ns=bpf_ktime_get_ns(); cv.key.cgroup_id=cgroup_id; cv.key.family=FAMILY_V6; cv.key.protocol=IPPROTO_TCP; cv.key.remote_port=dport; copy16(cv.key.remote,addr); bpf_map_update_elem(&connect_start,&cookie,&cv,BPF_ANY); } }
     track_connect_attempt(cgroup_id,FAMILY_V6,proto,addr,dport,blocked);
     submit_socket_event(ctx,FAMILY_V6,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
 }
@@ -979,9 +1027,51 @@ SEC("sockops") int netra_sockops(struct bpf_sock_ops *skops)
         v->segs_in = skops->segs_in;
         v->segs_out = skops->segs_out;
     }
+    struct tcp_pressure_value pzero = {};
+    struct tcp_pressure_value *pv = bpf_map_lookup_elem(&tcp_pressure, &key);
+    if (!pv) {
+        bpf_map_update_elem(&tcp_pressure, &key, &pzero, BPF_NOEXIST);
+        pv = bpf_map_lookup_elem(&tcp_pressure, &key);
+    }
+    if (pv) {
+        __sync_fetch_and_add(&pv->callbacks, 1);
+        pv->last_ns = now;
+        pv->state = skops->state;
+        if (skops->is_fullsock) {
+            pv->snd_cwnd = skops->snd_cwnd;
+            pv->snd_ssthresh = skops->snd_ssthresh;
+            pv->packets_out = skops->packets_out;
+            pv->retrans_out = skops->retrans_out;
+            pv->total_retrans = skops->total_retrans;
+            pv->lost_out = skops->lost_out;
+            pv->sacked_out = skops->sacked_out;
+            pv->rate_delivered = skops->rate_delivered;
+            pv->rate_interval_us = skops->rate_interval_us;
+            pv->mss_cache = skops->mss_cache;
+        }
+    }
     switch (skops->op) {
     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
         __sync_fetch_and_add(&v->active_established, 1);
+        if (cookie) {
+            struct connect_start_value *cs = bpf_map_lookup_elem(&connect_start, &cookie);
+            if (cs && now >= cs->start_ns) {
+                struct connect_health_value chzero = {};
+                struct connect_health_value *ch = bpf_map_lookup_elem(&connect_health, &cs->key);
+                if (!ch) {
+                    bpf_map_update_elem(&connect_health, &cs->key, &chzero, BPF_NOEXIST);
+                    ch = bpf_map_lookup_elem(&connect_health, &cs->key);
+                }
+                if (ch) {
+                    __u64 latency = (now - cs->start_ns) / 1000;
+                    __sync_fetch_and_add(&ch->established, 1);
+                    __sync_fetch_and_add(&ch->total_latency_us, latency);
+                    if (latency > ch->max_latency_us) ch->max_latency_us = latency;
+                    ch->last_ns = now;
+                }
+                bpf_map_delete_elem(&connect_start, &cookie);
+            }
+        }
         bpf_sock_ops_cb_flags_set(skops, BPF_SOCK_OPS_RTO_CB_FLAG | BPF_SOCK_OPS_RETRANS_CB_FLAG |
                                          BPF_SOCK_OPS_STATE_CB_FLAG | BPF_SOCK_OPS_RTT_CB_FLAG);
         break;

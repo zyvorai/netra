@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0 — 2026-09-11
+
+- Added standalone TCP path diagnostics using cgroup sockops; no Cilium/Hubble dependency.
+- Added measured active TCP connect-establishment latency from cgroup connect to active-established sockops callback.
+- Added `tcp_pressure` snapshots for `snd_cwnd`, `snd_ssthresh`, `packets_out`, `retrans_out`, `total_retrans`, `lost_out`, `sacked_out`, delivered-rate samples, MSS and TCP state.
+- Added `GET /api/v1/ebpf/path`, `netractl ebpf path`, a Path Diagnostics dashboard, and low-cardinality Prometheus path metrics.
+- Added threshold-based signals for slow connect establishment, cwnd pressure, outstanding loss/retransmits and high cumulative retransmits.
+- Kept existing pinned map ABIs unchanged; `connect_health` and `tcp_pressure` are new pin-compatible maps while ephemeral `connect_start` is intentionally unpinned.
+- Path diagnostics are observe-only and do not modify congestion control, socket options or enforcement state.
+
 ## 0.12.0 — 2026-09-11
 
 - Added bounded controller-side rolling samples built from consecutive node-agent cumulative reports.

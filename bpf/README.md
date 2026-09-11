@@ -8,6 +8,7 @@ Netra owns these programs and maps independently of Cilium. It does not read, mu
 - `cgroup/connect4`, `cgroup/connect6`: TCP socket attribution and policy for new connects.
 - `cgroup/sendmsg4`, `cgroup/sendmsg6`: UDP socket attribution and policy for sends.
 - `tc/ingress`, `tc/egress`: optional TCX interface attachment from the agent.
+- `sockops`: TCP lifecycle, RTT, connect latency and transport-pressure telemetry.
 - `xdp`: optional early-ingress CIDR/port drop.
 
 ## Maps
@@ -28,6 +29,14 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `enforced_cgroups`: cgroup IDs currently selected for enforcement.
 - `config_map`: observe/enforce mode.
 - `events`: sampled flow/DNS/socket/block metadata ring buffer.
+
+## v0.13 path-diagnostic maps
+
+- `tcp_pressure`: current sockops snapshots for cwnd, ssthresh, packets/retrans/loss outstanding, total retransmits, delivered-rate samples, MSS and TCP state.
+- `connect_health`: cumulative active TCP connect-establishment latency per cgroup/remote tuple.
+- `connect_start`: temporary socket-cookie timestamps used to measure connect latency; this map is intentionally not pinned.
+
+The existing `tcp_health` and `socket_owner` map ABIs are unchanged for upgrade compatibility.
 
 ## Workload attribution and scope
 

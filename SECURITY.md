@@ -6,7 +6,7 @@ Report suspected vulnerabilities privately to the Zyvor maintainers through the 
 
 The Netra agent is privileged because it loads host kernel BPF programs, pins maps in bpffs and attaches to host cgroup/interface hooks. Run it only on trusted nodes. The agent uses a dedicated ServiceAccount with `automountServiceAccountToken: false`; it does not need Kubernetes API credentials.
 
-Netra programs/maps live below `/sys/fs/bpf/netra` and do not read or modify Cilium-owned maps. Cilium and Hubble are optional in v0.12. Helm does not render CiliumNetworkPolicy RBAC unless `cilium.enabled=true`, and the controller rejects live Cilium policy operations while `NETRA_CILIUM_ENABLED` is disabled.
+Netra programs/maps live below `/sys/fs/bpf/netra` and do not read or modify Cilium-owned maps. Cilium and Hubble are optional in v0.13. Helm does not render CiliumNetworkPolicy RBAC unless `cilium.enabled=true`, and the controller rejects live Cilium policy operations while `NETRA_CILIUM_ENABLED` is disabled.
 
 XDP and TCX attachment are opt-in. The standalone default is root-cgroup v2 attachment, which avoids coupling policy behavior to a CNI-specific host interface.
 Root-cgroup attachment is intentionally broad and can cover host/system processes as well as container workloads. Treat broad CIDR/port/UID/process rules as node-level controls, test them in observe mode, and maintain an out-of-band recovery path before enforcing on production nodes.
@@ -15,7 +15,7 @@ For workload attribution, only the controller receives read-only `get/list` RBAC
 
 The default DaemonSet uses one shared agent credential, so the controller filters inventory by the requested node but does not cryptographically bind that credential to a particular node identity. Treat possession of the agent key as cluster-agent trust and rotate it after any node compromise. Pod metadata is the only Kubernetes inventory delivered on the agent config path; Secrets and ServiceAccount tokens are not exposed by this mechanism.
 
-`scopeMode=selected` is the preferred production containment mode. It gates cgroup packet/socket enforcement through the resolved `enforced_cgroups` map. If Pod metadata or local cgroup identity cannot be resolved, that traffic fails open. TCX/XDP remain observe-only in selected mode because v0.12 does not claim trustworthy workload identity at those hooks. Preview is advisory Pod metadata; confirm each agent's `selectedCgroups` coverage before enabling a lease.
+`scopeMode=selected` is the preferred production containment mode. It gates cgroup packet/socket enforcement through the resolved `enforced_cgroups` map. If Pod metadata or local cgroup identity cannot be resolved, that traffic fails open. TCX/XDP remain observe-only in selected mode because v0.13 does not claim trustworthy workload identity at those hooks. Preview is advisory Pod metadata; confirm each agent's `selectedCgroups` coverage before enabling a lease.
 
 ## Enforcement safety
 
@@ -33,7 +33,13 @@ DNS-name blocking is limited to exact cleartext UDP/53 qnames. It does not inspe
 
 TLS SNI enforcement is best-effort. It applies only when Netra parses an exact ordinary ClientHello SNI in the current cgroup egress skb. Fragmented handshakes, TCP segmentation that splits the SNI, ECH, QUIC/HTTP3 and unrecognized layouts are not blocked by an SNI rule. Treat SNI deny as an emergency supplemental control, not a substitute for a proxy/firewall with stream-aware TLS policy.
 
-HTTP metadata is observation-only in v0.12 and limited to cleartext HTTP/1 method + `Host` seen in a single skb. Netra does not export request paths or bodies and does not decode HTTPS, HTTP/2 or HTTP/3 application data.
+HTTP metadata is observation-only in v0.13 and limited to cleartext HTTP/1 method + `Host` seen in a single skb. Netra does not export request paths or bodies and does not decode HTTPS, HTTP/2 or HTTP/3 application data.
+
+## TCP path-diagnostics safety
+
+Path Diagnostics is observation-only. It reads Linux TCP transport fields exposed to the cgroup sockops program and never changes congestion control or socket options. `lost_out` and `retrans_out` are TCP's current transport-state markers; they are not generic skb drop reasons and do not identify a switch, NIC, firewall, qdisc, or router as the root cause. `packets_out / snd_cwnd` is reported as congestion-window pressure, not as a byte-accurate socket send-queue measurement.
+
+Active connect latency is measured only when Netra sees both the cgroup connect hook and the matching active-established sockops callback. The temporary `connect_start` map is deliberately not pinned across agent restarts.
 
 ## Behavior Insights safety
 
