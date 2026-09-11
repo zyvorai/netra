@@ -59,3 +59,11 @@ Lab deploy/smoke against `212.8.248.187:30870` not run in this merge step.
 Deployed Netra **0.11.0** with `NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh … --k8s` plus rollout restart.
 
 Feature checks **23/23**: health/version `0.11.0`, HTTPS UI, pods/VMs, `flows/summary`, `ebpf/{summary,health,l7,workloads,config}`, all `insights/{summary,dependencies,baseline,drift,recommendations}`, baseline capture, scope preview, Overview/Flows JS wiring for insights + flows summary, Apple CSS.
+
+## UX walkthrough — 2026-09-11
+
+Headless Playwright against `https://212.8.248.187:30870` clicked every nav page and exercised interactive controls.
+
+**62/62 passed**, including: Overview pulses (health/L7/insights), Pods inventory+detail+lockdown plan+live flows, VMs, Network Health metrics, L7 SNI add/delete, Insights sections+baseline capture, eBPF deny add/delete, Hubble flow summary refresh, Policies, Audit, and all primary `/api/v1/*` fetches returning 2xx with **no page errors**.
+
+Fixed Insights crash when `baseline.entries` is JSON `null` (`entries?.length ?? 0`).

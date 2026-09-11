@@ -74,7 +74,7 @@ export default function Insights() {
     <section className="card">
       <p className="eyebrow">KNOWN GOOD</p>
       <h3>Behavior baseline</h3>
-      <p>{baseline?.captured ? `Captured ${new Date(baseline.baseline.capturedAt).toLocaleString()} · ${baseline.baseline.entries.length} entries` : 'No baseline captured yet.'}</p>
+      <p>{baseline?.captured ? `Captured ${new Date(baseline.baseline?.capturedAt || Date.now()).toLocaleString()} · ${baseline.baseline?.entries?.length ?? 0} entries` : 'No baseline captured yet.'}</p>
       <div className="toolbar"><button className="primary" onClick={capture}>{baseline?.captured ? 'Recapture' : 'Capture baseline'}</button><button onClick={clear} disabled={!baseline?.captured}>Clear</button></div>
     </section>
 
@@ -97,7 +97,7 @@ export default function Insights() {
       {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="flowrow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}>
         <span>{label(e.source)}</span><span>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span>
       </div>)}
-      {graph && !graph.edges.length && <p>No workload egress counters are available yet.</p>}
+      {graph && !(graph.edges || []).length && <p>No workload egress counters are available yet.</p>}
     </section>
 
     <section className="card span3">
