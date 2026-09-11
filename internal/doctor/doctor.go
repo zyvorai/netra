@@ -88,9 +88,14 @@ func Run(opts Options) Report {
 	if b, err := readTrim(root, "/proc/sys/kernel/osrelease"); err == nil {
 		r.KernelRelease = b
 	}
+	// Support-bundle / fixture roots are always Linux trees even when the
+	// inspecting binary is built on darwin/windows for CI and developer laptops.
+	if root != "/" {
+		r.OS = "linux"
+	}
 
 	r.Checks = append(r.Checks,
-		checkOS(),
+		checkOS(root),
 		checkArch(),
 		checkKernel(r.KernelRelease),
 		checkTCX(r.KernelRelease, opts.RequireTCX),
@@ -129,7 +134,13 @@ func Run(opts Options) Report {
 	return r
 }
 
-func checkOS() Check {
+func checkOS(root string) Check {
+	if root != "/" {
+		if _, err := os.Stat(rooted(root, "/proc/sys/kernel/osrelease")); err == nil {
+			return Check{ID: "os", Title: "Linux host", Status: StatusPass, Detail: "linux (offline --root)"}
+		}
+		return Check{ID: "os", Title: "Linux host", Status: StatusFail, Detail: "offline root missing /proc/sys/kernel/osrelease", Remediation: "point --root at a Linux support bundle or live host"}
+	}
 	if runtime.GOOS == "linux" {
 		return Check{ID: "os", Title: "Linux host", Status: StatusPass, Detail: "linux"}
 	}

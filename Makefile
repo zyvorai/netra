@@ -6,7 +6,7 @@ test:
 	go test ./...
 
 build: web
-	go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent
+	go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor
 
 web:
 	npm --prefix web install

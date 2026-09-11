@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0 — 2026-09-11
+
+- Added `netra-doctor`, a read-only host readiness preflight for cgroup v2, bpffs, BTF, tracefs, kernel baseline, capabilities, lockdown and memlock.
+- Added optional gates for TCX (`--require-tcx`) and v0.14 `kfree_skb` drop-reason tracing (`--require-drop-reasons`), plus `--json`, `--strict` and offline `--root` inspection.
+- Added operator documentation in `docs/host-readiness.md`.
+
 ## 0.14.0 — 2026-09-11
 
 - Added optional Cilium-independent raw `kfree_skb` eBPF tracing for node-level kernel skb drop-reason counters.
