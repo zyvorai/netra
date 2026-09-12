@@ -229,9 +229,9 @@ export default function Policies() {
         <p className="warning">Selecting an endpoint with egress policy can place it into egress default-deny. Preflight compares the live policy, runs Kubernetes dry-run, then issues a five-minute one-shot receipt bound to the exact candidate.</p>
         <div className="toolbar">
           <input value={ns} onChange={(e) => setNs(e.target.value)} />
-          <button onClick={refresh}>Refresh</button>
-          <button onClick={preflight}>Preflight</button>
-          <button onClick={() => apply(true)}>Server dry-run</button>
+          <button className="btn-refresh" onClick={refresh}>Refresh</button>
+          <button className="btn-warn" onClick={preflight}>Preflight</button>
+          <button className="btn-warn" onClick={() => apply(true)}>Server dry-run</button>
           <button className="primary" onClick={() => apply(false)}>Apply CRD</button>
         </div>
         {msg && <p>{msg}</p>}
@@ -288,7 +288,7 @@ export default function Policies() {
               <button onClick={() => { setText(JSON.stringify(x, null, 2)); setPlan(null); void loadHistory(x.metadata?.namespace || ns, x.metadata?.name); }}>
                 <b>{x.metadata?.name}</b><span>{x.metadata?.namespace}</span>
               </button>
-              <button onClick={() => loadHistory(x.metadata?.namespace || ns, x.metadata?.name)}>History</button>
+              <button className="btn-diag" onClick={() => loadHistory(x.metadata?.namespace || ns, x.metadata?.name)}>History</button>
               <button className="policydelete" onClick={() => removePolicy(x.metadata?.namespace || ns, x.metadata?.name)}>Delete</button>
             </div>
           )) : 'No policies loaded.'}
@@ -298,8 +298,8 @@ export default function Policies() {
       <section className="card span3">
         <p className="eyebrow">DURABLE REVISION SAFETY NET</p>
         <div className="toolbar">
-          <button onClick={exportHistory}>Export history</button>
-          <label className="buttonlike">Import history<input type="file" accept="application/json,.json" hidden onChange={(e) => void importHistory(e.target.files?.[0])} /></label>
+          <button className="btn-secondary" onClick={exportHistory}>Export history</button>
+          <label className="buttonlike btn-secondary">Import history<input type="file" accept="application/json,.json" hidden onChange={(e) => void importHistory(e.target.files?.[0])} /></label>
         </div>
         <h3>{historyTarget ? `${historyTarget.namespace}/${historyTarget.name}` : 'Select a policy to inspect history'}</h3>
         {!history.length && <p>No Netra-managed revisions recorded for this policy yet. History begins when Netra applies, deletes, or rolls back the policy.</p>}
@@ -307,8 +307,8 @@ export default function Policies() {
           {history.map((r) => (
             <div className="revisionrow" key={r.id}>
               <span>#{r.id}</span><b>{r.action}</b><span>{new Date(r.at).toLocaleString()}</span><span>{r.actor}</span>
-              <button onClick={() => { setText(JSON.stringify(r.manifest, null, 2)); setPlan(null); }}>Load</button>
-              <button onClick={() => rollback(r)}>Rollback</button>
+              <button className="btn-secondary" onClick={() => { setText(JSON.stringify(r.manifest, null, 2)); setPlan(null); }}>Load</button>
+              <button className="btn-warn" onClick={() => rollback(r)}>Rollback</button>
             </div>
           ))}
         </div>

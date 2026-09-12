@@ -180,7 +180,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
             placeholder="search name / node / IP"
             onChange={(e) => setQ(e.target.value)}
           />
-          <button onClick={refresh}>Refresh</button>
+          <button className="btn-refresh" onClick={refresh}>Refresh</button>
         </div>
         {msg && <p>{msg}</p>}
       </section>
@@ -203,13 +203,13 @@ export default function Workloads({ kind }: { kind: Kind }) {
           <span>
             Showing {showingFrom}–{showingTo} of {filtered.length}
           </span>
-          <button disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+          <button className="btn-prev" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
             Prev
           </button>
           <span>
             Page {safePage} / {totalPages}
           </span>
-          <button disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+          <button className="btn-next" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
             Next
           </button>
         </div>
@@ -246,10 +246,10 @@ export default function Workloads({ kind }: { kind: Kind }) {
               <button className="danger" onClick={lockdown} disabled={detail.lockedDown}>
                 Lock down
               </button>
-              <button onClick={unlock} disabled={!detail.lockedDown}>
+              <button className="btn-success" onClick={unlock} disabled={!detail.lockedDown}>
                 Unlock
               </button>
-              <button onClick={preflight} disabled={!candidate}>
+              <button className="btn-warn" onClick={preflight} disabled={!candidate}>
                 Preflight
               </button>
               <button className="primary" onClick={apply} disabled={!receipt?.receipt?.token}>

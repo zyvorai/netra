@@ -121,7 +121,7 @@ export default function Overview() {
         ))}
       </section>
 
-      <section className="card">
+      <section className="card span2">
         <p className="eyebrow">L7 METADATA</p>
         <h3>TLS SNI · HTTP Host</h3>
         <div className="metrics">

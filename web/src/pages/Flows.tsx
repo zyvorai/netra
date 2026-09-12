@@ -123,7 +123,7 @@ export default function Flows() {
             </label>
           ))}
           <button
-            className="primary"
+            className="btn-refresh"
             onClick={() => {
               setFlows([]);
               setRun((x) => x + 1);
@@ -131,8 +131,8 @@ export default function Flows() {
           >
             Reconnect
           </button>
-          <button onClick={() => void loadSummary()}>Refresh summary</button>
-          <button onClick={explainDrops}>Explain recent drops</button>
+          <button className="btn-refresh" onClick={() => void loadSummary()}>Refresh summary</button>
+          <button className="btn-diag" onClick={explainDrops}>Explain recent drops</button>
         </div>
       </section>
 

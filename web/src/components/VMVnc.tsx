@@ -55,7 +55,7 @@ export default function VMVnc({ namespace, name }: Props) {
             Connect VNC
           </button>
         ) : (
-          <button onClick={disconnect}>Disconnect</button>
+          <button className="btn-secondary" onClick={disconnect}>Disconnect</button>
         )}
       </div>
       {err && <p>{err}</p>}

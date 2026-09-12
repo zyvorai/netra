@@ -21,8 +21,15 @@
   --danger: #ff3b30;
   --danger-bg: #fff1f0;
   --accent-cyan: #32ade6;
+  --accent-cyan-hover: #28a0d8;
   --accent-green: #34c759;
+  --accent-green-hover: #30b753;
   --accent-amber: #ff9f0a;
+  --accent-amber-hover: #f09400;
+  --accent-purple: #af52de;
+  --accent-purple-hover: #a246d4;
+  --btn-secondary: #6e6e73;
+  --btn-secondary-hover: #5a5a5e;
   --warning-bg: #fff6ed;
   --warning-border: #ffd8ba;
   --warning-text: #8b3d00;
@@ -58,6 +65,16 @@
   --apple-link: #2997ff;
   --danger: #ff453a;
   --danger-bg: rgba(255, 69, 58, 0.14);
+  --accent-cyan: #64d2ff;
+  --accent-cyan-hover: #70d7ff;
+  --accent-green: #30d158;
+  --accent-green-hover: #3ad463;
+  --accent-amber: #ff9f0a;
+  --accent-amber-hover: #ffb340;
+  --accent-purple: #bf5af2;
+  --accent-purple-hover: #c767f3;
+  --btn-secondary: #636366;
+  --btn-secondary-hover: #6e6e73;
   --warning-bg: rgba(255, 159, 10, 0.12);
   --warning-border: rgba(255, 159, 10, 0.35);
   --warning-text: #ffd60a;
@@ -158,6 +175,112 @@ button.danger {
 .policydelete:hover,
 button.danger:hover {
   filter: brightness(1.08);
+}
+
+/* Semantic filled pills — Apple system colors by job. */
+.btn-refresh,
+button.btn-refresh {
+  background: var(--accent-cyan) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-refresh:hover,
+button.btn-refresh:hover {
+  background: var(--accent-cyan-hover) !important;
+}
+
+.btn-prev,
+button.btn-prev {
+  background: var(--accent-purple) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-prev:hover,
+button.btn-prev:hover {
+  background: var(--accent-purple-hover) !important;
+}
+
+.btn-next,
+button.btn-next {
+  background: var(--apple-blue) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-next:hover,
+button.btn-next:hover {
+  background: var(--apple-blue-hover) !important;
+}
+
+.btn-success,
+button.btn-success {
+  background: var(--accent-green) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-success:hover,
+button.btn-success:hover {
+  background: var(--accent-green-hover) !important;
+}
+
+.btn-warn,
+button.btn-warn {
+  background: var(--accent-amber) !important;
+  color: #1d1d1f !important;
+  border-color: transparent !important;
+}
+.btn-warn:hover,
+button.btn-warn:hover {
+  background: var(--accent-amber-hover) !important;
+}
+
+.btn-secondary,
+button.btn-secondary,
+.buttonlike.btn-secondary {
+  background: var(--btn-secondary) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-secondary:hover,
+button.btn-secondary:hover,
+.buttonlike.btn-secondary:hover {
+  background: var(--btn-secondary-hover) !important;
+}
+
+.btn-diag,
+button.btn-diag {
+  background: var(--accent-purple) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.btn-diag:hover,
+button.btn-diag:hover {
+  background: var(--accent-purple-hover) !important;
+}
+
+button.btn-refresh:disabled,
+button.btn-prev:disabled,
+button.btn-next:disabled,
+button.btn-success:disabled,
+button.btn-warn:disabled,
+button.btn-secondary:disabled,
+button.btn-diag:disabled,
+button.primary:disabled,
+button.danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+
+/* Chip remove controls — compact Apple red. */
+.chips button {
+  background: var(--danger-bg) !important;
+  color: var(--danger) !important;
+  border-color: transparent !important;
+}
+.chips button:hover {
+  filter: brightness(0.97);
+  background: var(--danger-bg) !important;
 }
 
 .buttonlike {
@@ -523,7 +646,7 @@ main {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   gap: 12px;
   margin-top: 24px;
 }
@@ -533,6 +656,7 @@ main {
   border-radius: 18px;
   border: 1px solid var(--border);
   border-top: 2px solid rgba(0, 113, 227, 0.45);
+  min-width: 0;
 }
 .metrics b {
   display: block;
@@ -542,8 +666,13 @@ main {
   color: var(--text-primary);
 }
 .metrics span {
+  display: block;
   color: var(--text-tertiary);
   font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .warning {
@@ -747,7 +876,15 @@ code {
   min-height: 36px;
   color: var(--text-primary);
 }
-.chips button:hover,
+.chips button {
+  background: var(--danger-bg) !important;
+  color: var(--danger) !important;
+  border-color: transparent !important;
+}
+.chips button:hover {
+  background: var(--danger-bg) !important;
+  filter: brightness(0.97);
+}
 .revisionrow button:hover,
 .flowrow.rules button:hover { background: var(--hover-fill); }
 .flowrow.rules > span:last-child {
@@ -1006,7 +1143,7 @@ code {
   .grid { grid-template-columns: 1fr; }
   .span2,
   .span3 { grid-column: auto; }
-  .metrics { grid-template-columns: 1fr 1fr; }
+  .metrics { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .filters { grid-template-columns: 1fr 1fr; }
   .hero p { font-size: 17px; }
   .page-hero p { font-size: 17px; }

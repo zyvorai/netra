@@ -102,11 +102,11 @@ export default function PodLogs({ namespace, name, containers = [], defaultConta
           </label>
         )}
         {!running ? (
-          <button className="primary" onClick={() => void start()}>
+          <button className="btn-refresh" onClick={() => void start()}>
             Follow logs
           </button>
         ) : (
-          <button onClick={stop}>Stop</button>
+          <button className="danger" onClick={stop}>Stop</button>
         )}
       </div>
       {err && <p>{err}</p>}
