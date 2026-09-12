@@ -106,7 +106,7 @@ export default function PodExec({ namespace, name, containers = [], defaultConta
             Connect
           </button>
         ) : (
-          <button onClick={disconnect}>Disconnect</button>
+          <button className="btn-secondary" onClick={disconnect}>Disconnect</button>
         )}
       </div>
       {err && <p>{err}</p>}

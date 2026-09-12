@@ -64,7 +64,7 @@ export default function Insights() {
     <section className="card span3">
       <p className="eyebrow">CONTROLS</p>
       <h3>Rate window and baselines</h3>
-      <div className="toolbar"><label>Rate window <select value={window} onChange={e => setWindow(e.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option></select></label><button className="primary" onClick={refresh}>Refresh</button></div>
+      <div className="toolbar"><label>Rate window <select value={window} onChange={e => setWindow(e.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option></select></label><button className="btn-refresh" onClick={refresh}>Refresh</button></div>
       {msg && <p className="warning">{msg}</p>}
       {summary?.rateWarming && <p className="warning">Rate engine is warming up. At least two fresh agent reports are required before rate drift is evaluated.</p>}
       <div className="metrics">
@@ -78,13 +78,13 @@ export default function Insights() {
     <section className="card">
       <p className="eyebrow">KNOWN GOOD</p><h3>Behavior inventory</h3>
       <p>{baseline?.captured ? `Captured ${new Date(baseline.baseline?.capturedAt).toLocaleString()} · ${baseline.baseline?.entries?.length ?? 0} entries` : 'No behavior baseline captured.'}</p>
-      <div className="toolbar"><button className="primary" onClick={captureBehavior}>{baseline?.captured ? 'Recapture' : 'Capture'}</button><button onClick={clearBehavior} disabled={!baseline?.captured}>Clear</button></div>
+      <div className="toolbar"><button className="primary" onClick={captureBehavior}>{baseline?.captured ? 'Recapture' : 'Capture'}</button><button className="btn-secondary" onClick={clearBehavior} disabled={!baseline?.captured}>Clear</button></div>
     </section>
 
     <section className="card">
       <p className="eyebrow">TRAFFIC RATE</p><h3>Window baseline</h3>
       <p>{rateBaseline?.captured ? `Captured ${new Date(rateBaseline.baseline?.capturedAt).toLocaleString()} · ${rateBaseline.baseline?.entries?.length ?? 0} metric rates` : 'No traffic-rate baseline captured.'}</p>
-      <div className="toolbar"><button className="primary" onClick={captureRate} disabled={Boolean(rateDrift?.window?.warming)}>{rateBaseline?.captured ? 'Recapture' : 'Capture'}</button><button onClick={clearRate} disabled={!rateBaseline?.captured}>Clear</button></div>
+      <div className="toolbar"><button className="primary" onClick={captureRate} disabled={Boolean(rateDrift?.window?.warming)}>{rateBaseline?.captured ? 'Recapture' : 'Capture'}</button><button className="btn-secondary" onClick={clearRate} disabled={!rateBaseline?.captured}>Clear</button></div>
     </section>
 
     <section className="card span2">
