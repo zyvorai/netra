@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.27.3 — 2026-09-12
+
+- **Fixed**: the in-browser pod Shell console (`workloadConsole.enabled`) failed every connection attempt with a 403 (`cannot get resource "pods/exec"`), discovered when first enabling the feature against a real cluster — VNC and Logs consoles both worked, only Shell/exec was broken. `internal/kube/console.go`'s `DialPodExec` opens `pods/exec` via a raw WebSocket dial (`gorilla/websocket`), whose opening handshake is always an HTTP GET per RFC 6455; the API server's RBAC check for that request maps to the `get` verb, not `create` (which only covers the SPDY-protocol exec path `client-go`'s `remotecommand` executor uses). `helm/netra/templates/rbac.yaml`'s `pods/exec` rule now grants both `create` and `get`.
+- Extended `scripts/deploy-remote.sh` with an opt-in `NETRA_WORKLOAD_CONSOLE_ENABLED=true` to enable the console feature (`workloadConsole.enabled`) at deploy time, matching the existing `NETRA_AGENT_ENABLED` pattern.
+
 ## 0.27.2 — 2026-09-12
 
 - Isolated the SNI and HTTP Host-header scan loops (`netra_l7_tls_sni`/`netra_l7_http_host`) as their own `noinline` BPF-to-BPF subprograms, giving them an independent verifier budget from the CT/policy/DNS logic inlined ahead of them — a real ~19% reduction in verifier-processed instructions on affected kernels, no behavior change (all existing parser tests pass unchanged). Investigated in depth as a fix for the known verifier rejection documented in 0.27.1/`docs/l7-metadata.md` (kernels where these loops hit a fixed jump-history complexity limit): this refactor does not clear that threshold on its own — reducing loop trip counts, subprogram isolation, and testing clang 18/20/22 all made no difference, and a separate LLVM full-unroll limitation rules out forcing a compile-time unroll for these two loops specifically. `NETRA_L7=auto`'s graceful degradation remains the practical behavior on affected kernels; see `docs/l7-metadata.md`'s new "Known verifier rejection" section for the full investigation and the one untried, more invasive fix candidate (a bulk-copy-then-scan rewrite).

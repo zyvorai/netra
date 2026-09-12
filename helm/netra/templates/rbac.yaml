@@ -18,7 +18,14 @@ rules:
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods/exec"]
-  verbs: ["create"]
+  # "get" is required alongside "create": DialPodExec (internal/kube/console.go)
+  # opens a raw WebSocket connection via gorilla/websocket, whose opening
+  # handshake is always an HTTP GET per RFC 6455 — the API server's RBAC
+  # check for that request maps to the "get" verb, not "create" (which only
+  # covers the SPDY-protocol exec path client-go's remotecommand executor
+  # uses). Without "get" here, exec fails with a 403 even though the
+  # connection itself succeeds at the network level.
+  verbs: ["create","get"]
 - apiGroups: ["subresources.kubevirt.io"]
   resources: ["virtualmachineinstances/vnc"]
   verbs: ["get","create"]
