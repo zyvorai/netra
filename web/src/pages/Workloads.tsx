@@ -221,19 +221,18 @@ export default function Workloads({ kind }: { kind: Kind }) {
           <p className="empty-state">No {kind === 'pod' ? 'pods' : 'VMs'} match these filters.</p>
         )}
         <div className="list">
-          {pageItems.map((x) => (
-            <button key={`${x.namespace}/${x.name}`} onClick={() => open(x)}>
-              <span>
-                <b>{x.name}</b>
-                <small style={{ display: 'block' }}>
-                  {x.namespace}
-                  {x.node ? ` · ${x.node}` : ''}
-                  {x.podIP ? ` · ${x.podIP}` : ''}
-                </small>
-              </span>
-              <span>{x.lockedDown ? 'LOCKED' : x.phase || (x.running ? 'Running' : '—')}</span>
-            </button>
-          ))}
+          {pageItems.map((x) => {
+            const subtitle = `${x.namespace}${x.node ? ` · ${x.node}` : ''}${x.podIP ? ` · ${x.podIP}` : ''}`;
+            return (
+              <button key={`${x.namespace}/${x.name}`} onClick={() => open(x)}>
+                <span>
+                  <b className="truncate" title={x.name}>{x.name}</b>
+                  <small className="truncate" title={subtitle}>{subtitle}</small>
+                </span>
+                <span>{x.lockedDown ? 'LOCKED' : x.phase || (x.running ? 'Running' : '—')}</span>
+              </button>
+            );
+          })}
         </div>
       </section>
       <section className="card">

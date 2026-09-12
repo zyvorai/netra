@@ -599,6 +599,30 @@ main {
 .span2 { grid-column: span 2; }
 .span3 { grid-column: 1 / -1; }
 
+/* Full-width group heading — breaks a long flat stack of same-weight cards
+   (e.g. Firewall's 15+ sections) into named groups. Deliberately NOT blue
+   like .eyebrow, so it reads as a structural break rather than competing
+   with each card's own topic label. */
+.section-divider {
+  grid-column: 1 / -1;
+  margin: 8px 0 -6px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.section-divider h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 4px;
+}
+.section-divider p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
