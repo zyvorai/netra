@@ -1,4 +1,12 @@
-# Validation record — Netra v0.14.0
+# Validation record — Netra v0.14.0 (historical, frozen)
+
+> **Historical snapshot, not a living document.** This is a one-time, point-in-time
+> validation record from the v0.14.0 release cycle, written from an offline build
+> environment with no outbound package resolution — several checks it lists as
+> "environment-gated" (full `go test`, real BPF verifier load, Helm lint, npm
+> build) are exactly what `.github/workflows/ci.yml`'s `go`/`web`/`helm`/`ebpf`
+> jobs now run automatically on every push. Treat CI as the current, living
+> validation record; this file is kept only for historical reference.
 
 Validated on 2026-09-11 in the artifact build environment.
 
