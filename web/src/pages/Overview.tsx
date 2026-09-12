@@ -144,7 +144,7 @@ export default function Overview() {
         </div>
       </section>
 
-      <section className="card">
+      <section className="card span2">
         <p className="eyebrow">PATH DIAGNOSTICS</p>
         <h3>TCP connect · pressure</h3>
         <div className="metrics">
@@ -168,7 +168,7 @@ export default function Overview() {
         <p>Full tables live on Path Diagnostics — observe-only sockops path health.</p>
       </section>
 
-      <section className="card">
+      <section className="card span2">
         <p className="eyebrow">DROP DIAGNOSTICS</p>
         <h3>Kernel · softnet · iface</h3>
         <div className="metrics">

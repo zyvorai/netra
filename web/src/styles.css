@@ -277,6 +277,11 @@ button.danger:disabled {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
   border-color: transparent !important;
+  white-space: normal;
+  max-width: 100%;
+  text-align: left;
+  line-height: 1.25;
+  height: auto;
 }
 .chips button:hover {
   filter: brightness(0.97);
@@ -604,7 +609,8 @@ main {
   padding: 28px;
   box-shadow: var(--card-shadow);
   position: relative;
-  overflow: hidden;
+  /* visible so metric/toolbar labels are not clipped at the card edge */
+  overflow: visible;
 }
 /* Dark mode has no shadow to read depth from (--card-shadow: none), so a
    small lift + border brighten on hover stands in for it — light mode's
@@ -664,6 +670,8 @@ main {
   font-weight: 600;
   letter-spacing: -0.03em;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .metrics span {
   display: block;
@@ -788,12 +796,16 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  white-space: normal;
+  line-height: 1.2;
+  height: auto;
 }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
 .list button {
   display: flex;
   justify-content: space-between;
+  gap: 12px;
   border: 1px solid var(--border);
   background: var(--bg-elevated-2);
   padding: 14px 18px;
@@ -802,52 +814,70 @@ code {
   font-size: 15px;
   min-height: 0;
   color: var(--text-primary);
+  white-space: normal;
+  align-items: flex-start;
+}
+.list button span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .list button:hover { background: var(--hover-fill); }
 
 .filters {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
+  align-items: end;
 }
-.filters label { font-size: 11px; color: var(--text-tertiary); }
+.filters label { font-size: 11px; color: var(--text-tertiary); min-width: 0; }
+.filters button {
+  white-space: normal;
+  line-height: 1.2;
+  height: auto;
+  min-height: 44px;
+}
 
 .flowhead,
 .flowrow {
   display: grid;
-  grid-template-columns: 120px 100px 1fr 1fr;
+  grid-template-columns: minmax(100px, 120px) minmax(80px, 100px) minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   padding: 9px 4px;
   border-bottom: 1px solid var(--border);
+  align-items: start;
 }
 .flowhead { color: var(--text-tertiary); font-size: 10px; letter-spacing: 0.08em; }
+.flowhead span,
 .flowrow span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
   color: var(--text-primary);
 }
+.flowhead span { color: var(--text-tertiary); }
 .flowhead.ebpf,
 .flowrow.ebpf,
 .flowhead.audit,
 .flowrow.audit {
-  grid-template-columns: 160px 150px 170px 1fr;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr) minmax(0, 1.4fr);
 }
 .flowhead.obs,
 .flowrow.obs {
-  grid-template-columns: 1.2fr 0.9fr 1fr 1.1fr 0.9fr;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .flowhead.stats,
 .flowrow.stats {
-  grid-template-columns: 160px 1fr 100px 1fr;
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) minmax(80px, 100px) minmax(0, 1fr);
 }
 .flowhead.deps,
 .flowrow.deps {
-  grid-template-columns: 1.2fr 1.2fr 120px 180px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(90px, 120px) minmax(120px, 180px);
 }
 .flowhead.rules,
 .flowrow.rules {
-  grid-template-columns: 80px 1fr 100px 210px 230px;
+  grid-template-columns: minmax(70px, 90px) minmax(0, 1fr) minmax(80px, 100px) minmax(140px, 210px) minmax(160px, 230px);
 }
 .flowrow.rules .ruleform {
   margin: 6px 0;
@@ -880,6 +910,11 @@ code {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
   border-color: transparent !important;
+  white-space: normal;
+  max-width: 100%;
+  text-align: left;
+  line-height: 1.25;
+  height: auto;
 }
 .chips button:hover {
   background: var(--danger-bg) !important;
@@ -895,15 +930,20 @@ code {
 
 .agent {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 8px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
+  align-items: start;
+}
+.agent > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .agent small { grid-column: 1 / -1; color: var(--text-tertiary); }
 .agent.wide {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .risk {
@@ -933,10 +973,15 @@ code {
 
 .buildergrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
 }
-.buildergrid label { font-size: 11px; color: var(--text-tertiary); }
+.buildergrid label { font-size: 11px; color: var(--text-tertiary); min-width: 0; }
+.buildergrid label input,
+.buildergrid label select {
+  width: 100%;
+  max-width: 100%;
+}
 .buildergrid .check {
   display: flex;
   align-items: center;
@@ -962,12 +1007,14 @@ code {
 
 .policyrow {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
+  align-items: start;
 }
 .policyrow > button:first-child {
   display: flex;
   justify-content: space-between;
+  gap: 12px;
   border: 1px solid var(--border);
   background: var(--bg-elevated-2);
   padding: 14px 16px;
@@ -976,13 +1023,19 @@ code {
   font-size: 15px;
   min-height: 0;
   color: var(--text-primary);
+  white-space: normal;
+  min-width: 0;
+}
+.policyrow > button:first-child span,
+.policyrow > button:first-child b {
+  overflow-wrap: anywhere;
 }
 .policyrow > button:first-child:hover { background: var(--hover-fill); }
 
 .revisionlist { display: flex; flex-direction: column; gap: 8px; }
 .revisionrow {
   display: grid;
-  grid-template-columns: 70px 150px 1fr 1fr auto auto;
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--border);
@@ -990,27 +1043,41 @@ code {
   padding: 12px;
   border-radius: 14px;
 }
-.revisionrow span { color: var(--text-secondary); font-size: 12px; }
+.revisionrow span,
+.revisionrow b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.revisionrow b { color: var(--text-primary); font-size: 14px; }
 
 .insightlist { gap: 10px; }
 .insightrow {
   display: grid;
-  grid-template-columns: 110px 1fr 1fr;
+  grid-template-columns: minmax(140px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px;
   background: var(--bg-elevated-2);
   color: var(--text-primary);
+  align-items: start;
+}
+.insightrow > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .insightrow.warning {
   border-color: rgba(255, 214, 10, 0.4);
   background: rgba(255, 214, 10, 0.08);
 }
 .insightrow code {
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--accent-cyan);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .insightrow small {
   grid-column: 1 / -1;
@@ -1030,10 +1097,15 @@ code {
   justify-content: space-between;
   gap: 16px;
   cursor: pointer;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 .recommendation summary span {
   color: var(--text-tertiary);
   font-size: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .recommendation pre {
   max-height: 420px;
@@ -1144,9 +1216,13 @@ code {
   .span2,
   .span3 { grid-column: auto; }
   .metrics { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
-  .filters { grid-template-columns: 1fr 1fr; }
+  .filters { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   .hero p { font-size: 17px; }
   .page-hero p { font-size: 17px; }
+  /* Keep all columns readable: scroll horizontally instead of hiding. */
+  .terminalbody {
+    overflow-x: auto;
+  }
   .flowhead,
   .flowrow,
   .flowhead.ebpf,
@@ -1154,26 +1230,20 @@ code {
   .flowhead.audit,
   .flowrow.audit,
   .flowhead.obs,
-  .flowrow.obs {
-    grid-template-columns: 100px 90px 1fr;
-  }
-  .flowhead span:last-child,
-  .flowrow span:last-child { display: none; }
-  .buildergrid { grid-template-columns: 1fr 1fr; }
-  .revisionrow { grid-template-columns: 70px 1fr auto auto; }
-  .revisionrow span:nth-of-type(2),
-  .revisionrow span:nth-of-type(3) { display: none; }
+  .flowrow.obs,
   .flowhead.deps,
-  .flowrow.deps { grid-template-columns: 1fr 1fr 90px; }
-  .flowhead.deps span:last-child,
-  .flowrow.deps span:last-child { display: none; }
+  .flowrow.deps,
   .flowhead.rules,
-  .flowrow.rules { grid-template-columns: 70px 1fr 60px; }
-  .flowhead.rules span:nth-of-type(3),
-  .flowrow.rules span:nth-of-type(3),
-  .flowhead.rules span:nth-of-type(4),
-  .flowrow.rules span:nth-of-type(4) { display: none; }
-  .insightrow { grid-template-columns: 90px 1fr; }
-  .insightrow code { grid-column: 1 / -1; }
+  .flowrow.rules {
+    min-width: 640px;
+  }
+  .buildergrid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .revisionrow {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .insightrow {
+    grid-template-columns: 1fr;
+  }
+  .insightrow code { grid-column: auto; }
   .recommendation summary { display: block; }
 }
