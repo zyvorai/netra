@@ -23,7 +23,7 @@ const items: [Page, string][] = [
   ['drops', 'Drops'],
   ['l7', 'L7'],
   ['insights', 'Insights'],
-  ['ebpf', 'eBPF'],
+  ['ebpf', 'Firewall'],
   ['flows', 'Hubble'],
   ['policies', 'Policies'],
   ['audit', 'Audit'],
@@ -34,17 +34,19 @@ export default function Nav({
   setPage,
   theme,
   onToggleTheme,
+  onLogout,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   theme: Theme;
   onToggleTheme: () => void;
+  onLogout: () => void;
 }) {
   return (
     <nav className="nav" aria-label="Global">
       <div className="nav-inner">
         <button type="button" className="brand" onClick={() => setPage('overview')} aria-label="Netra home">
-          <span className="dot" aria-hidden />
+          <img src="/zyvor-mark.svg" alt="" className="brand-mark" aria-hidden />
           Netra
         </button>
         <div className="navlinks">
@@ -61,6 +63,12 @@ export default function Nav({
           ))}
         </div>
         <div className="nav-actions">
+          <button type="button" className="theme-toggle" onClick={onLogout} aria-label="Log out" title="Log out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+              <path d="M15 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 12h11m0 0-3.5-3.5M21 12l-3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <button
             type="button"
             className="theme-toggle"

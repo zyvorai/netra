@@ -115,6 +115,19 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/ebpf/sni/delete", s.auth(http.HandlerFunc(s.ebpfSNIDelete)))
 	mux.Handle("PUT /api/v1/ebpf/rate", s.auth(http.HandlerFunc(s.ebpfRateSet)))
 	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
+	mux.Handle("PUT /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldSet)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/config", s.auth(http.HandlerFunc(s.ebpfNetPolConfigSet)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/v2/config", s.auth(http.HandlerFunc(s.ebpfNetPolV2ConfigSet)))
+	mux.Handle("POST /api/v1/ebpf/netpol/rules", s.auth(http.HandlerFunc(s.ebpfNetPolRuleAdd)))
+	mux.Handle("DELETE /api/v1/ebpf/netpol/rules/{id}", s.auth(http.HandlerFunc(s.ebpfNetPolRuleDelete)))
+	mux.Handle("POST /api/v1/ebpf/netpol/default-deny/plan", s.auth(http.HandlerFunc(s.ebpfNetPolDefaultDenyPlan)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/default-deny", s.auth(http.HandlerFunc(s.ebpfNetPolDefaultDenySet)))
+	mux.Handle("GET /api/v1/ebpf/rules", s.auth(http.HandlerFunc(s.ebpfRulesList)))
+	mux.Handle("GET /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRuleGet)))
+	mux.Handle("PATCH /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRulePatch)))
+	mux.Handle("DELETE /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRuleDelete)))
+	mux.Handle("GET /api/v1/ebpf/rules/{id}/history", s.auth(http.HandlerFunc(s.ebpfRuleHistory)))
+	mux.Handle("POST /api/v1/ebpf/rules/{id}/rollback/{revision}", s.auth(http.HandlerFunc(s.ebpfRuleRollback)))
 	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
@@ -1158,6 +1171,512 @@ func (s *Server) ebpfRateDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, cfg)
 }
+func (s *Server) ebpfShieldSet(w http.ResponseWriter, r *http.Request) {
+	var x models.ShieldConfig
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	switch x.Mode {
+	case "off", "audit", "enforce":
+	default:
+		errorJSON(w, 400, "mode must be off, audit, or enforce")
+		return
+	}
+	for _, ip := range x.ProtectedIPv4 {
+		a, err := netip.ParseAddr(strings.TrimSpace(ip))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "protectedIpv4 entries must be exact IPv4 addresses: "+ip)
+			return
+		}
+	}
+	for _, pps := range []uint32{x.SynPPS, x.UDPPPS, x.ICMPPPS, x.OtherPPS} {
+		if pps > 10000000 {
+			errorJSON(w, 400, "pps thresholds must be at most 10000000 (0 disables that class)")
+			return
+		}
+	}
+	if x.BurstSeconds > 60 {
+		errorJSON(w, 400, "burstSeconds must be at most 60")
+		return
+	}
+	cfg, err := s.store.SetShield(x, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist shield config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolConfigSet(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	cfg, err := s.store.SetNetPolEnabled(x.Enabled, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+// validateWorkloadScope trims and validates a workload selector in place —
+// factored out of ebpfScope so the NetPol v2 endpoints (which also target
+// workloads via EBPFWorkloadScope) validate identically rather than
+// duplicating the checks with a chance to drift.
+func validateWorkloadScope(sc *models.EBPFWorkloadScope) error {
+	sc.Namespace, sc.Pod = strings.TrimSpace(sc.Namespace), strings.TrimSpace(sc.Pod)
+	sc.WorkloadKind, sc.WorkloadName = strings.TrimSpace(sc.WorkloadKind), strings.TrimSpace(sc.WorkloadName)
+	clean := map[string]string{}
+	for k, v := range sc.Labels {
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k == "" {
+			return fmt.Errorf("scope label key cannot be empty")
+		}
+		clean[k] = v
+	}
+	sc.Labels = clean
+	if sc.CgroupID == 0 && sc.Namespace == "" && sc.Pod == "" && sc.WorkloadKind == "" && sc.WorkloadName == "" && len(sc.Labels) == 0 {
+		return fmt.Errorf("empty workload scope is not allowed")
+	}
+	return nil
+}
+
+func (s *Server) ebpfNetPolV2ConfigSet(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	cfg, err := s.store.SetNetPolV2Enabled(x.Enabled, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol v2 config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolRuleAdd(w http.ResponseWriter, r *http.Request) {
+	var x models.NetPolRule
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	a, err := netip.ParseAddr(strings.TrimSpace(x.PeerIPv4))
+	if err != nil || !a.Is4() {
+		errorJSON(w, 400, "peerIpv4 must be an exact IPv4 address")
+		return
+	}
+	x.PeerIPv4 = a.String()
+	var ok bool
+	x.Protocol, ok = normalizeProtocol(x.Protocol)
+	if !ok {
+		errorJSON(w, 400, "protocol must be TCP, UDP, or ANY")
+		return
+	}
+	x.Direction, ok = normalizeDirection(x.Direction)
+	if !ok {
+		errorJSON(w, 400, "direction must be ingress, egress, or both")
+		return
+	}
+	x.Action = strings.ToLower(strings.TrimSpace(x.Action))
+	if x.Action != "allow" && x.Action != "deny" {
+		errorJSON(w, 400, "action must be allow or deny")
+		return
+	}
+	cfg, err := s.store.AddNetPolRule(x, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist netpol rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolRuleDelete(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.store.DelNetPolRule(r.PathValue("id"), actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+type netPolDefaultDenyRequest struct {
+	Selector models.EBPFWorkloadScope `json:"selector"`
+	Enabled  bool                     `json:"enabled"`
+	Lease    string                   `json:"lease,omitempty"`
+}
+
+// ebpfNetPolDefaultDenyPlan is the mandatory first step of activating
+// default-deny for a workload selector: it never mutates state, only
+// assesses risk and issues a preflight token (the same
+// IssuePreflight/ConsumePreflight mechanism the CiliumNetworkPolicy
+// plan/apply flow already uses, hash-bound to this exact request body).
+// Deactivating (enabled=false) is always risk "low" — turning default-deny
+// off is the fail-open direction and needs no risk gate.
+func (s *Server) ebpfNetPolDefaultDenyPlan(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var x netPolDefaultDenyRequest
+	if err := json.Unmarshal(b, &x); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	risk := "low"
+	matched, allowCovered := 0, 0
+	if x.Enabled {
+		if s.kube == nil {
+			errorJSON(w, http.StatusServiceUnavailable, "Kubernetes client unavailable")
+			return
+		}
+		items, err := s.kube.ListWorkloads(r.Context(), "")
+		if err != nil {
+			errorJSON(w, 502, err.Error())
+			return
+		}
+		cfg := s.store.Config()
+		for _, pod := range items {
+			if !workload.Match(x.Selector, pod) {
+				continue
+			}
+			matched++
+			for _, rule := range cfg.NetPolRules {
+				if strings.EqualFold(rule.Action, "allow") && workload.Match(rule.Selector, pod) {
+					allowCovered++
+					break
+				}
+			}
+		}
+		if matched == 0 {
+			errorJSON(w, 400, "no workloads match this selector")
+			return
+		}
+		// Deliberately just the unambiguous binary check for now: zero
+		// covering allow rules anywhere is a certain-outage config.
+		// Partial-coverage ("some but not all matched workloads have an
+		// allow rule") is a real "high" tier the design considered, but
+		// needs a traffic-coverage heuristic beyond simple rule presence —
+		// deferred rather than shipped as a guess.
+		if allowCovered == 0 {
+			risk = "critical"
+		} else {
+			risk = "medium"
+		}
+	}
+	if risk == "critical" && r.URL.Query().Get("allowNoRules") != "true" {
+		errorJSON(w, 409, fmt.Sprintf("%d matched workload(s) have zero allow rules covering them — this would certainly cut off their traffic; add allow rules first, or repeat with ?allowNoRules=true to override", matched))
+		return
+	}
+	rcpt, err := s.store.IssuePreflight(b, risk, actor(r), 5*time.Minute)
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+		} else {
+			errorJSON(w, 500, "could not issue preflight receipt")
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"risk": risk, "matchedWorkloads": matched, "workloadsWithAllowRule": allowCovered, "receipt": rcpt})
+}
+
+// ebpfNetPolDefaultDenySet is the second, gated step: unlike every other
+// /ebpf/* mutation (and unlike even the general CiliumNetworkPolicy apply
+// flow, which only requires preflight when s.requirePreflight is set), a
+// fresh preflight token is unconditionally required here — this is the
+// single highest-blast-radius mutation in the firewall feature.
+func (s *Server) ebpfNetPolDefaultDenySet(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var x netPolDefaultDenyRequest
+	if err := json.Unmarshal(b, &x); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Netra-Plan-Token"))
+	if token == "" {
+		s.metricsData.preflightRejects.Add(1)
+		errorJSON(w, http.StatusPreconditionRequired, "a fresh preflight receipt is required; run /api/v1/ebpf/netpol/default-deny/plan first")
+		return
+	}
+	risk, ok, consumeErr := s.store.ConsumePreflight(token, b)
+	if consumeErr != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist preflight consumption: "+consumeErr.Error())
+		return
+	}
+	if !ok {
+		s.metricsData.preflightRejects.Add(1)
+		errorJSON(w, http.StatusPreconditionFailed, "preflight receipt is expired, already used, or does not match this exact request body")
+		return
+	}
+	if risk == "high" || risk == "critical" {
+		if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Netra-Confirm-Risk")), risk) {
+			s.metricsData.preflightRejects.Add(1)
+			errorJSON(w, 409, "preflight risk is "+risk+"; repeat plan and apply with X-Netra-Confirm-Risk: "+risk)
+			return
+		}
+	}
+	lease := 5 * time.Minute
+	if x.Enabled && x.Lease != "" {
+		d, err := time.ParseDuration(x.Lease)
+		if err != nil || d < time.Minute || d > time.Hour {
+			errorJSON(w, 400, "lease must be a duration between 1m and 60m")
+			return
+		}
+		lease = d
+	}
+	cfg, err := s.store.SetNetPolDefaultDeny(x.Selector, x.Enabled, lease, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist default-deny state: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRulesList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"items": s.store.ListRules()})
+}
+
+func (s *Server) ebpfRuleGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	for _, rule := range s.store.ListRules() {
+		if rule.ID == id {
+			writeJSON(w, 200, rule)
+			return
+		}
+	}
+	errorJSON(w, 404, "rule not found")
+}
+
+// ebpfRulePatch decodes and validates a PATCH body using exactly the same
+// per-type checks as the corresponding legacy Add* handler (ebpfCIDRMutate,
+// ebpfPortMutate, etc.) before handing a store.RuleEdit to Store.PatchRule
+// — PATCH can never accept a value the value-keyed POST path would reject.
+func (s *Server) ebpfRulePatch(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	typ, ok := s.store.RuleType(id)
+	if !ok {
+		errorJSON(w, 404, "rule not found")
+		return
+	}
+	var edit store.RuleEdit
+	switch typ {
+	case "ip4":
+		var x struct {
+			IP string `json:"ip"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.IP))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "valid IPv4 required")
+			return
+		}
+		edit.Str = a.String()
+	case "ip6":
+		var x struct {
+			IP string `json:"ip"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.IP))
+		if err != nil || !a.Is6() || a.Is4In6() {
+			errorJSON(w, 400, "valid IPv6 required")
+			return
+		}
+		edit.Str = a.String()
+	case "cidr":
+		var x models.EBPFCIDRRule
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		p, err := netip.ParsePrefix(strings.TrimSpace(x.CIDR))
+		if err != nil {
+			errorJSON(w, 400, "valid IPv4 or IPv6 CIDR required")
+			return
+		}
+		x.CIDR = p.Masked().String()
+		var dirOK bool
+		x.Direction, dirOK = normalizeDirection(x.Direction)
+		if !dirOK {
+			errorJSON(w, 400, "direction must be ingress, egress, or both")
+			return
+		}
+		edit.CIDR = x
+	case "port":
+		var x models.EBPFPortRule
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		if x.Port == 0 {
+			errorJSON(w, 400, "port must be 1-65535")
+			return
+		}
+		var ok bool
+		x.Protocol, ok = normalizeProtocol(x.Protocol)
+		if !ok {
+			errorJSON(w, 400, "protocol must be TCP, UDP, or ANY")
+			return
+		}
+		x.Direction, ok = normalizeDirection(x.Direction)
+		if !ok {
+			errorJSON(w, 400, "direction must be ingress, egress, or both")
+			return
+		}
+		edit.Port = x
+	case "uid":
+		var x struct {
+			UID uint32 `json:"uid"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.UID = x.UID
+	case "dns", "sni":
+		var x struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		name, err := normalizeDNSName(x.Name)
+		if err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.Str = name
+	case "process":
+		var x struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		name, err := normalizeProcessName(x.Name)
+		if err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.Str = name
+	case "rate":
+		var x models.EBPFRateLimit
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.Destination))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "rate limiting currently requires an exact IPv4 destination")
+			return
+		}
+		if x.PPS < 1 || x.PPS > 10000000 {
+			errorJSON(w, 400, "pps must be between 1 and 10000000")
+			return
+		}
+		x.Destination = a.String()
+		edit.Rate = x
+	default:
+		errorJSON(w, 400, "rule type "+typ+" does not support edit")
+		return
+	}
+	cfg, err := s.store.PatchRule(id, edit, actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRuleDelete(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.store.DeleteRule(r.PathValue("id"), actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRuleHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	writeJSON(w, 200, map[string]any{"items": s.store.FirewallRuleHistory(r.PathValue("id"), limit)})
+}
+
+func (s *Server) ebpfRuleRollback(w http.ResponseWriter, r *http.Request) {
+	revID, err := strconv.ParseUint(r.PathValue("revision"), 10, 64)
+	if err != nil {
+		errorJSON(w, 400, "valid revision id required")
+		return
+	}
+	cfg, err := s.store.RollbackFirewallRule(r.PathValue("id"), revID, actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
 func (s *Server) ebpfSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, observability.Summarize(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), 10))
 }
@@ -1230,8 +1749,26 @@ func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, l7.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
+// ebpfRuleLimits mirrors the hardcoded BPF map max_entries values in
+// bpf/netra_tc.c — these are compile-time constants, not runtime-tunable,
+// so raising any of them requires a source change and program reload.
+var ebpfRuleLimits = map[string]int{
+	"exactIPv4":           4096,  // blocked_v4
+	"exactIPv6":           4096,  // blocked_v6
+	"cidr":                8192,  // blocked_cidr_v4 + blocked_cidr_v6 (each)
+	"ports":               4096,  // blocked_ports
+	"uids":                4096,  // blocked_uids
+	"dns":                 4096,  // blocked_dns
+	"sni":                 4096,  // blocked_sni
+	"processes":           4096,  // blocked_comms
+	"rate":                4096,  // rate_v4
+	"netpol":              65536, // netpol_deny4
+	"netpolV2Rules":       65536, // netpol_rules4
+	"netpolV2DefaultDeny": 16384, // netpol_default4
+}
+
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

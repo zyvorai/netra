@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.24.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.27.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -18,6 +18,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 - [Dashboard gallery](#dashboard-gallery)
 - [Standalone eBPF capabilities](#standalone-ebpf-capabilities)
+- [Firewall dashboard page](docs/firewall.md)
 - [TCP Path Diagnostics](#tcp-path-diagnostics)
 - [Drop Diagnostics](#drop-diagnostics)
 - [Behavior and Rate Insights](#behavior-and-rate-insights)
@@ -25,6 +26,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Important visibility boundaries](#important-visibility-boundaries)
 - [Optional Cilium / Hubble integration](#optional-cilium--hubble-integration)
 - [HTTPS default](#https-default)
+- [Signing in](#signing-in)
 - [Architecture](#architecture)
 - [Repository](#repository)
 - [Prerequisites](#prerequisites)
@@ -37,6 +39,8 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 ## Dashboard gallery
 
 Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockdown appear above and under Cilium integration; the rest of the console:
+
+![Sign in](docs/ux/07-login.png)
 
 ![Hubble live flows](docs/ux/01-flows.png)
 
@@ -163,6 +167,14 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 
 `netrad` listens on `:30870` by default. Helm enables in-pod HTTPS by default and generates a self-signed P-256 certificate in an init container. The agent chart explicitly opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` only when TLS is terminated by a trusted proxy/ingress. Plain manifests intentionally remain HTTP unless you provide `NETRA_TLS_CERT` and `NETRA_TLS_KEY`.
 
+## Signing in
+
+The dashboard sits behind a login screen (`admin` / `Admin@321` by default) —
+see [docs/dashboard-login.md](docs/dashboard-login.md) for the full guide,
+including what the login maps to server-side and how to rotate the
+credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev)
+mark; Netra is Zyvor's open-source eBPF observability product.
+
 ## Architecture
 
 ```text
@@ -227,7 +239,7 @@ docs/high-availability.md HA runbook
 docs/host-readiness.md    netra-doctor host readiness runbook
 docs/drop-detective.md    conntrack + policy Drop Detective
 docs/tcx-and-shield.md    TCX modes + XDP Shield
-docs/native-netpol.md     optional native deny-list NetPol maps
+docs/native-netpol.md     optional native NetPol maps: v1 deny-list + v2 allow-list/default-deny
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
@@ -335,7 +347,7 @@ netractl ebpf mode enforce 15m
 netractl ebpf mode observe
 ```
 
-The same controls are available in the **eBPF Network** dashboard, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
+The same controls are available in the **Firewall** dashboard page, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
 
 Behavior Insights CLI:
 

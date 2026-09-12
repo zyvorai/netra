@@ -94,6 +94,8 @@ button,
   cursor: pointer;
   color: var(--text-primary);
   background: transparent;
+  white-space: nowrap;
+  flex: 0 0 auto;
   transition: background 0.28s ease, color 0.28s ease, border-color 0.28s ease, transform 0.12s ease, filter 0.28s ease;
 }
 button:hover,
@@ -213,12 +215,11 @@ button.danger:hover {
 .brand small {
   display: none;
 }
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: none;
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: block;
 }
 .navlinks {
   flex: 1 1 auto;
@@ -359,9 +360,77 @@ main {
   color: var(--brand) !important;
   text-transform: uppercase;
 }
-.token-rail {
-  margin: -12px 0 28px;
-  max-width: 280px;
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 64px;
+  padding: 48px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.login-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 18% 22%, var(--hero-glow-a), transparent 55%),
+    radial-gradient(ellipse at 85% 78%, var(--hero-glow-b), transparent 55%);
+  pointer-events: none;
+  z-index: -1;
+}
+.login-info {
+  max-width: 440px;
+}
+.login-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  display: block;
+}
+.login-info h1 {
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+  font-weight: 600;
+  margin: 8px 0 14px;
+  color: var(--text-primary);
+}
+.login-info p {
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1.5;
+  max-width: 420px;
+}
+.login-host {
+  margin-top: 20px !important;
+  font-size: 13px !important;
+  color: var(--text-tertiary) !important;
+}
+.login-host code {
+  color: var(--apple-blue);
+  font-weight: 600;
+}
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.login-card h1 {
+  font-size: clamp(28px, 3vw, 40px);
+  letter-spacing: -0.03em;
+  margin: 6px 0 4px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.login-card .primary {
+  width: 100%;
+  margin-top: 4px;
 }
 .tokenbox {
   font-size: 12px;
@@ -621,6 +690,13 @@ code {
 .flowrow.deps {
   grid-template-columns: 1.2fr 1.2fr 120px 180px;
 }
+.flowhead.rules,
+.flowrow.rules {
+  grid-template-columns: 80px 1fr 100px 210px 230px;
+}
+.flowrow.rules .ruleform {
+  margin: 6px 0;
+}
 
 .chips {
   display: flex;
@@ -635,7 +711,8 @@ code {
    button is the same size" — see .revisionrow button below, which
    shares it, and .theme-toggle, which is the same height but circular. */
 .chips button,
-.revisionrow button {
+.revisionrow button,
+.flowrow.rules button {
   border: 1px solid var(--border-strong);
   background: transparent;
   border-radius: 980px;
@@ -645,7 +722,13 @@ code {
   color: var(--text-primary);
 }
 .chips button:hover,
-.revisionrow button:hover { background: var(--hover-fill); }
+.revisionrow button:hover,
+.flowrow.rules button:hover { background: var(--hover-fill); }
+.flowrow.rules > span:last-child {
+  display: flex;
+  gap: 6px;
+  overflow: visible;
+}
 
 .agent {
   display: grid;
@@ -921,6 +1004,12 @@ code {
   .flowrow.deps { grid-template-columns: 1fr 1fr 90px; }
   .flowhead.deps span:last-child,
   .flowrow.deps span:last-child { display: none; }
+  .flowhead.rules,
+  .flowrow.rules { grid-template-columns: 70px 1fr 60px; }
+  .flowhead.rules span:nth-of-type(3),
+  .flowrow.rules span:nth-of-type(3),
+  .flowhead.rules span:nth-of-type(4),
+  .flowrow.rules span:nth-of-type(4) { display: none; }
   .insightrow { grid-template-columns: 90px 1fr; }
   .insightrow code { grid-column: 1 / -1; }
   .recommendation summary { display: block; }

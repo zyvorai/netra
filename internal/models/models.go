@@ -73,9 +73,19 @@ type EBPFFastPathConfig struct {
 	Shield           *ShieldConfig       `json:"shield,omitempty"`
 	NetPolEnabled    bool                `json:"netPolEnabled,omitempty"`
 	NetPolDenies     []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
-	Revision         uint64              `json:"revision"`
-	EnforceUntil     *time.Time          `json:"enforceUntil,omitempty"`
-	LeaseSeconds     int64               `json:"leaseSeconds,omitempty"`
+	// v2: allow-list / default-deny per-workload engine (Phase 3), additive
+	// and independent of NetPolEnabled/NetPolDenies above — see
+	// docs/native-netpol.md. An explicit NetPolRules allow entry can
+	// override even the flat global deny-lists (BlockedIPv4/CIDRs/etc.), by
+	// design; NetPolDefaultDenies is deliberately its own list (not a field
+	// on NetPolRule) since "is this workload in default-deny posture" and
+	// "what does this one rule say" are independent axes.
+	NetPolV2Enabled     bool                `json:"netPolV2Enabled,omitempty"`
+	NetPolRules         []NetPolRule        `json:"netPolRules,omitempty"`
+	NetPolDefaultDenies []NetPolDefaultDeny `json:"netPolDefaultDenies,omitempty"`
+	Revision            uint64              `json:"revision"`
+	EnforceUntil        *time.Time          `json:"enforceUntil,omitempty"`
+	LeaseSeconds        int64               `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
@@ -631,6 +641,37 @@ type NetPolPeerDeny struct {
 	Direction string `json:"direction,omitempty"` // ingress|egress|both
 }
 
+// NetPolRule is a v2 allow/deny entry, workload-targeted via Selector
+// (resolved to cgroup IDs agent-side, per node — see workload.Resolve)
+// rather than a raw CgroupID like the legacy NetPolPeerDeny above. Exact
+// peer IPv4 only in this phase; CIDR-shaped peers and IPv6 are explicit
+// follow-ups (see docs/native-netpol.md).
+type NetPolRule struct {
+	ID        string            `json:"id"`
+	Selector  EBPFWorkloadScope `json:"selector"`
+	PeerIPv4  string            `json:"peerIpv4"`
+	Port      uint16            `json:"port,omitempty"`
+	Protocol  string            `json:"protocol,omitempty"`  // TCP|UDP|ANY
+	Direction string            `json:"direction,omitempty"` // ingress|egress|both
+	Action    string            `json:"action"`              // allow|deny
+	CreatedAt time.Time         `json:"createdAt"`
+	CreatedBy string            `json:"createdBy,omitempty"`
+}
+
+// NetPolDefaultDeny activates default-deny posture for every workload
+// matching Selector: absent from this list means fail-open (default-allow)
+// for that workload, mirroring real Kubernetes NetworkPolicy semantics.
+// Always has a bounded lease (EnabledUntil) — activation goes through a
+// mandatory plan/confirm step precisely because this is the highest
+// blast-radius mutation in the whole firewall feature; see
+// PUT /api/v1/ebpf/netpol/default-deny and its /plan companion.
+type NetPolDefaultDeny struct {
+	Selector     EBPFWorkloadScope `json:"selector"`
+	EnabledUntil *time.Time        `json:"enabledUntil,omitempty"`
+	LeaseSeconds int64             `json:"leaseSeconds,omitempty"`
+	Actor        string            `json:"actor,omitempty"`
+}
+
 type AgentReport struct {
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
@@ -756,6 +797,45 @@ type PolicyRevision struct {
 	Name      string          `json:"name"`
 	Action    string          `json:"action"`
 	Manifest  json.RawMessage `json:"manifest"`
+}
+
+// FirewallRule is a flattened, stable-ID view over one entry from
+// EBPFFastPathConfig's flat rule slices (exact IP, CIDR, port, UID, DNS,
+// SNI, process, or rate limit). It exists purely as a read/edit
+// convenience layer — the underlying config wire shape is unchanged, so
+// older agents/CLIs/MCP clients that only know the legacy value-keyed
+// routes are unaffected. Only the fields relevant to Type are populated.
+type FirewallRule struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"` // ip4|ip6|cidr|port|uid|dns|sni|process|rate
+	Summary     string    `json:"summary"`
+	Value       string    `json:"value,omitempty"` // ip4/ip6/uid(as string)/dns/sni/process
+	CIDR        string    `json:"cidr,omitempty"`
+	Port        uint16    `json:"port,omitempty"`
+	Protocol    string    `json:"protocol,omitempty"`
+	Direction   string    `json:"direction,omitempty"`
+	Destination string    `json:"destination,omitempty"`
+	PPS         uint32    `json:"pps,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	CreatedBy   string    `json:"createdBy,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy   string    `json:"updatedBy,omitempty"`
+}
+
+// FirewallRuleRevision snapshots a single edit to one FirewallRule (not the
+// whole EBPFFastPathConfig — a full-config snapshot already exists
+// implicitly via Revision + persisted state, and would be far larger than
+// needed for "show me what changed on this one rule"). Before/After are
+// JSON-encoded store.RuleEdit values; a rollback re-applies After from an
+// earlier revision as a new edit rather than mutating history in place.
+type FirewallRuleRevision struct {
+	ID     uint64          `json:"id"`
+	RuleID string          `json:"ruleId"`
+	At     time.Time       `json:"at"`
+	Actor  string          `json:"actor"`
+	Action string          `json:"action"` // update (create/delete remain visible via the audit log)
+	Before json.RawMessage `json:"before,omitempty"`
+	After  json.RawMessage `json:"after,omitempty"`
 }
 
 type PolicyArchive struct {

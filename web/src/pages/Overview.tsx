@@ -261,8 +261,8 @@ export default function Overview() {
       <section className="card">
         <h3>Cilium is an integration</h3>
         <p>
-          If Cilium/Hubble is installed, Netra can still build CiliumNetworkPolicy and show Hubble identity/verdict data.
-          The standalone eBPF engine does not read, write, or depend on Cilium maps.
+          If Cilium/Hubble is installed, Netra can build CiliumNetworkPolicy and show Hubble data — the standalone
+          eBPF engine never depends on it.
         </p>
       </section>
     </div>

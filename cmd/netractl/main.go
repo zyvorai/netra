@@ -80,6 +80,14 @@ func usage() {
   ebpf process add COMM | process del COMM
   ebpf sni add NAME | sni del NAME
   ebpf rate set IPv4 PPS | rate del IPv4
+  ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
+  ebpf netpol enable | disable
+  ebpf netpol v2 enable | disable
+  ebpf netpol rule add --peer IP --action allow|deny [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--port N] [--protocol P] [--direction D]
+  ebpf netpol rule del ID
+  ebpf netpol default-deny plan [--namespace NS] ... [--disable] [--allow-no-rules]
+  ebpf netpol default-deny set --token TOKEN [--confirm-risk RISK] [--namespace NS] ... [--disable] [--lease DURATION]
+  ebpf rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION
   ebpf workloads [node]
   ebpf scope show | scope all
   ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
@@ -344,7 +352,228 @@ func ebpf() error {
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":
-		return request("GET", "/api/v1/ebpf/shield", nil)
+		if len(os.Args) < 4 {
+			return request("GET", "/api/v1/ebpf/shield", nil)
+		}
+		if os.Args[3] != "set" {
+			return fmt.Errorf("shield [set --mode off|audit|enforce] [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]")
+		}
+		cfg := map[string]any{}
+		var ips []string
+		for i := 4; i < len(os.Args); i++ {
+			flag := os.Args[i]
+			if flag == "--protect-all" {
+				cfg["protectAll"] = true
+				continue
+			}
+			if i+1 >= len(os.Args) {
+				return fmt.Errorf("%s requires a value", flag)
+			}
+			value := os.Args[i+1]
+			i++
+			switch flag {
+			case "--mode":
+				cfg["mode"] = value
+			case "--ip":
+				ips = append(ips, value)
+			case "--syn-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --syn-pps required")
+				}
+				cfg["synPps"] = uint32(n)
+			case "--udp-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --udp-pps required")
+				}
+				cfg["udpPps"] = uint32(n)
+			case "--icmp-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --icmp-pps required")
+				}
+				cfg["icmpPps"] = uint32(n)
+			case "--other-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --other-pps required")
+				}
+				cfg["otherPps"] = uint32(n)
+			case "--burst-seconds":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --burst-seconds required")
+				}
+				cfg["burstSeconds"] = uint32(n)
+			default:
+				return fmt.Errorf("unknown shield flag %s", flag)
+			}
+		}
+		if _, ok := cfg["mode"]; !ok {
+			return fmt.Errorf("--mode off|audit|enforce is required")
+		}
+		if len(ips) > 0 {
+			cfg["protectedIpv4"] = ips
+		}
+		b, _ := json.Marshal(cfg)
+		return request("PUT", "/api/v1/ebpf/shield", b)
+	case "netpol":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set")
+		}
+		switch os.Args[3] {
+		case "enable":
+			b, _ := json.Marshal(map[string]bool{"enabled": true})
+			return request("PUT", "/api/v1/ebpf/netpol/config", b)
+		case "disable":
+			b, _ := json.Marshal(map[string]bool{"enabled": false})
+			return request("PUT", "/api/v1/ebpf/netpol/config", b)
+		case "v2":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("netpol v2 enable|disable")
+			}
+			switch os.Args[4] {
+			case "enable":
+				b, _ := json.Marshal(map[string]bool{"enabled": true})
+				return request("PUT", "/api/v1/ebpf/netpol/v2/config", b)
+			case "disable":
+				b, _ := json.Marshal(map[string]bool{"enabled": false})
+				return request("PUT", "/api/v1/ebpf/netpol/v2/config", b)
+			default:
+				return fmt.Errorf("netpol v2 enable|disable")
+			}
+		case "rule":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("netpol rule add --peer IP --action allow|deny [selector flags] [--port N] [--protocol P] [--direction D] | netpol rule del ID")
+			}
+			switch os.Args[4] {
+			case "del":
+				if len(os.Args) < 6 {
+					return fmt.Errorf("netpol rule del ID")
+				}
+				return request("DELETE", "/api/v1/ebpf/netpol/rules/"+url.PathEscape(os.Args[5]), nil)
+			case "add":
+				selector, labels := map[string]any{}, map[string]string{}
+				body := map[string]any{}
+				for i := 5; i < len(os.Args); i++ {
+					if i+1 >= len(os.Args) {
+						return fmt.Errorf("%s requires a value", os.Args[i])
+					}
+					flag, value := os.Args[i], os.Args[i+1]
+					i++
+					switch flag {
+					case "--namespace":
+						selector["namespace"] = value
+					case "--pod":
+						selector["pod"] = value
+					case "--kind":
+						selector["workloadKind"] = value
+					case "--workload":
+						selector["workloadName"] = value
+					case "--label":
+						parts := strings.SplitN(value, "=", 2)
+						if len(parts) != 2 || parts[0] == "" {
+							return fmt.Errorf("label must be key=value")
+						}
+						labels[parts[0]] = parts[1]
+					case "--peer":
+						body["peerIpv4"] = value
+					case "--port":
+						port, err := strconv.ParseUint(value, 10, 16)
+						if err != nil {
+							return fmt.Errorf("valid port required")
+						}
+						body["port"] = uint16(port)
+					case "--protocol":
+						body["protocol"] = value
+					case "--direction":
+						body["direction"] = value
+					case "--action":
+						body["action"] = value
+					default:
+						return fmt.Errorf("unknown netpol rule flag %s", flag)
+					}
+				}
+				if len(labels) > 0 {
+					selector["labels"] = labels
+				}
+				body["selector"] = selector
+				b, _ := json.Marshal(body)
+				return request("POST", "/api/v1/ebpf/netpol/rules", b)
+			default:
+				return fmt.Errorf("netpol rule add|del")
+			}
+		case "default-deny":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("netpol default-deny plan|set [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--disable] [--lease DURATION] [--allow-no-rules] [--token TOKEN] [--confirm-risk RISK]")
+			}
+			selector, labels := map[string]any{}, map[string]string{}
+			body := map[string]any{"enabled": true}
+			token, confirmRisk, allowNoRules := "", "", false
+			for i := 5; i < len(os.Args); i++ {
+				flag := os.Args[i]
+				if flag == "--disable" {
+					body["enabled"] = false
+					continue
+				}
+				if flag == "--allow-no-rules" {
+					allowNoRules = true
+					continue
+				}
+				if i+1 >= len(os.Args) {
+					return fmt.Errorf("%s requires a value", flag)
+				}
+				value := os.Args[i+1]
+				i++
+				switch flag {
+				case "--namespace":
+					selector["namespace"] = value
+				case "--pod":
+					selector["pod"] = value
+				case "--kind":
+					selector["workloadKind"] = value
+				case "--workload":
+					selector["workloadName"] = value
+				case "--label":
+					parts := strings.SplitN(value, "=", 2)
+					if len(parts) != 2 || parts[0] == "" {
+						return fmt.Errorf("label must be key=value")
+					}
+					labels[parts[0]] = parts[1]
+				case "--lease":
+					body["lease"] = value
+				case "--token":
+					token = value
+				case "--confirm-risk":
+					confirmRisk = value
+				default:
+					return fmt.Errorf("unknown netpol default-deny flag %s", flag)
+				}
+			}
+			if len(labels) > 0 {
+				selector["labels"] = labels
+			}
+			body["selector"] = selector
+			b, _ := json.Marshal(body)
+			switch os.Args[4] {
+			case "plan":
+				p := "/api/v1/ebpf/netpol/default-deny/plan"
+				if allowNoRules {
+					p += "?allowNoRules=true"
+				}
+				return request("POST", p, b)
+			case "set":
+				if token == "" {
+					return fmt.Errorf("--token TOKEN is required; run 'netpol default-deny plan' first")
+				}
+				return requestHeaders("PUT", "/api/v1/ebpf/netpol/default-deny", b, map[string]string{"X-Netra-Plan-Token": token, "X-Netra-Confirm-Risk": confirmRisk})
+			default:
+				return fmt.Errorf("netpol default-deny plan|set")
+			}
+		default:
+			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set")
+		}
 	case "interfaces":
 		return request("GET", "/api/v1/ebpf/interfaces", nil)
 	case "diagnose":
@@ -547,6 +776,44 @@ func ebpf() error {
 			}
 			b, _ := json.Marshal(map[string]any{"destination": os.Args[4], "pps": uint32(pps)})
 			return request("PUT", "/api/v1/ebpf/rate", b)
+		}
+	case "rules":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION")
+		}
+		switch os.Args[3] {
+		case "list":
+			return request("GET", "/api/v1/ebpf/rules", nil)
+		case "get":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules get ID")
+			}
+			return request("GET", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), nil)
+		case "patch":
+			if len(os.Args) < 6 {
+				return fmt.Errorf("rules patch ID JSON")
+			}
+			if !json.Valid([]byte(os.Args[5])) {
+				return fmt.Errorf("JSON body is not valid")
+			}
+			return request("PATCH", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), []byte(os.Args[5]))
+		case "delete":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules delete ID")
+			}
+			return request("DELETE", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), nil)
+		case "history":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules history ID")
+			}
+			return request("GET", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4])+"/history", nil)
+		case "rollback":
+			if len(os.Args) < 6 {
+				return fmt.Errorf("rules rollback ID REVISION")
+			}
+			return request("POST", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4])+"/rollback/"+url.PathEscape(os.Args[5]), nil)
+		default:
+			return fmt.Errorf("rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION")
 		}
 	}
 	return fmt.Errorf("unknown ebpf command")

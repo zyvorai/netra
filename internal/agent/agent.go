@@ -148,6 +148,7 @@ func (a *Agent) Run(ctx context.Context) error {
 var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
+	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
@@ -168,7 +169,33 @@ func (a *Agent) loadAndAttach() error {
 			defer m.Close()
 		}
 	}
+	l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
+	l7Progs := []string{"netra_l7_cgroup_ingress", "netra_l7_cgroup_egress"}
+	l7Stripped := false
+	if l7Mode == "off" {
+		for _, p := range l7Progs {
+			delete(spec.Programs, p)
+		}
+		l7Stripped = true
+	}
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	if err != nil && l7Mode == "auto" && mentionsAny(err.Error(), l7Progs) {
+		// A kernel verifier rejection of one program fails the WHOLE
+		// collection load, unlike an attach-time failure (handled below via
+		// NETRA_L7's documented attach-with-fallback) which only affects that
+		// one hook — the L7 cgroup programs' un-unrolled SNI/HTTP scan loops
+		// are the ones known to vary in verifier acceptance across kernel
+		// versions (see docs/l7-metadata.md). Drop them from the spec and
+		// retry so a rejection degrades to "no L7 observability" as intended,
+		// rather than crash-looping the whole agent, unless the operator has
+		// explicitly opted into NETRA_L7=required.
+		a.log.Warn("L7/DNS cgroup programs failed verifier load; retrying without L7 observability", "error", err)
+		for _, p := range l7Progs {
+			delete(spec.Programs, p)
+		}
+		l7Stripped = true
+		coll, err = ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	}
 	if err != nil {
 		return fmt.Errorf("load BPF collection: %w", err)
 	}
@@ -218,8 +245,7 @@ func (a *Agent) loadAndAttach() error {
 		// scan loops can vary across kernel versions, so a rejection degrades
 		// to "no L7 observability" rather than failing agent startup, unless
 		// the operator has explicitly opted into NETRA_L7=required.
-		l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
-		if l7Mode != "off" {
+		if l7Mode != "off" && !l7Stripped {
 			for _, h := range []struct {
 				name   string
 				attach ebpf.AttachType
@@ -244,8 +270,10 @@ func (a *Agent) loadAndAttach() error {
 				a.hooks = append(a.hooks, h.name)
 				a.markAttached(h.prog)
 			}
-		} else {
+		} else if l7Mode == "off" {
 			a.log.Info("L7/DNS observability skipped by NETRA_L7=off")
+		} else {
+			a.log.Info("L7/DNS observability skipped: programs failed verifier load")
 		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
@@ -408,6 +436,9 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		a.lastRevision = cfg.Revision
 	}
 	if err := a.applyWorkloadScopes(cfg); err != nil {
+		return err
+	}
+	if err := a.applyNetPolV2(cfg); err != nil {
 		return err
 	}
 	a.lastSync = time.Now()
@@ -1831,6 +1862,121 @@ func (a *Agent) applyNetPol(cfg models.EBPFFastPathConfig) error {
 	return nil
 }
 
+// applyNetPolV2 resolves each NetPolRule/NetPolDefaultDeny's workload
+// selector against this node's cgroups — reusing a.workloadByCgroup, which
+// applyWorkloadScopes (called just before this, every sync, unconditionally)
+// already refreshed — and writes the v2 maps. Rules are always written
+// before default-deny postures, every sync, not just on activation: see
+// netpol_v2_lookup4's doc comment in bpf/netra_tc.c for why a workload must
+// never be marked default-deny while its allow-rules are incomplete (unlike
+// every other race window in this codebase, that direction fails closed).
+func (a *Agent) applyNetPolV2(cfg models.EBPFFastPathConfig) error {
+	enMap := a.collection.Maps["netpol_v2_enabled"]
+	rulesMap := a.collection.Maps["netpol_rules4"]
+	defaultMap := a.collection.Maps["netpol_default4"]
+	if enMap == nil || rulesMap == nil || defaultMap == nil {
+		return nil
+	}
+	a.workloadMu.RLock()
+	resolved := a.workloadByCgroup
+	a.workloadMu.RUnlock()
+
+	type ruleKey struct {
+		CgroupID  uint64
+		Peer      uint32
+		Port      uint16
+		Protocol  uint8
+		Direction uint8
+	}
+	desired := map[ruleKey]uint8{}
+	for _, r := range cfg.NetPolRules {
+		ip := net.ParseIP(r.PeerIPv4)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		proto := uint8(0)
+		switch strings.ToUpper(r.Protocol) {
+		case "TCP":
+			proto = 6
+		case "UDP":
+			proto = 17
+		}
+		dirs := []uint8{1, 2}
+		switch strings.ToLower(r.Direction) {
+		case "ingress":
+			dirs = []uint8{1}
+		case "egress":
+			dirs = []uint8{2}
+		}
+		action := uint8(0)
+		if strings.EqualFold(r.Action, "deny") {
+			action = 1
+		}
+		for cg, w := range resolved {
+			if !workload.Match(r.Selector, w) {
+				continue
+			}
+			for _, dir := range dirs {
+				desired[ruleKey{CgroupID: cg, Peer: native.Uint32(ip.To4()), Port: r.Port, Protocol: proto, Direction: dir}] = action
+			}
+		}
+	}
+	if err := replaceMapFull(rulesMap, desired); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	postures := map[uint64]uint8{}
+	for _, d := range cfg.NetPolDefaultDenies {
+		if d.EnabledUntil != nil && now.After(*d.EnabledUntil) {
+			continue
+		}
+		for cg, w := range resolved {
+			if workload.Match(d.Selector, w) {
+				postures[cg] = 1
+			}
+		}
+	}
+	if err := replaceMapFull(defaultMap, postures); err != nil {
+		return err
+	}
+
+	on := uint32(0)
+	if cfg.NetPolV2Enabled {
+		on = 1
+	}
+	return enMap.Put(uint32(0), on)
+}
+
+// replaceMapFull rewrites a BPF hash map to contain exactly the given
+// entries: every desired key is written first, then anything present that
+// isn't in desired is deleted — matching this codebase's existing
+// full-rebuild-on-sync convention (applyNetPol, applyWorkloadScopes) rather
+// than diffing against the previous call's contents.
+func replaceMapFull[K comparable, V any](m *ebpf.Map, desired map[K]V) error {
+	var existing []K
+	var k K
+	var v V
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		existing = append(existing, k)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return err
+	}
+	for kk, vv := range desired {
+		if err := m.Put(kk, vv); err != nil {
+			return err
+		}
+	}
+	for _, kk := range existing {
+		if _, ok := desired[kk]; !ok {
+			_ = m.Delete(kk)
+		}
+	}
+	return nil
+}
+
 func parseHexField(s string) uint64 {
 	v, _ := strconv.ParseUint(strings.TrimSpace(s), 16, 64)
 	return v
@@ -2007,6 +2153,19 @@ func env(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// mentionsAny reports whether msg names any of names — used to tell whether
+// a collection-load failure was caused specifically by one of the L7 cgroup
+// programs (safe to retry without them) rather than something else entirely
+// (a real failure that retrying blind would only mask).
+func mentionsAny(msg string, names []string) bool {
+	for _, n := range names {
+		if strings.Contains(msg, n) {
+			return true
+		}
+	}
+	return false
 }
 func envBool(k string, d bool) bool {
 	v := strings.TrimSpace(os.Getenv(k))

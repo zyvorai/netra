@@ -2,11 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import TerminalFrame from '../components/TerminalFrame';
 
+type UnifiedRule = { id?: string; type: string; value: string; detail: string; extra: string; created?: string; raw?: any; del?: () => void };
+
+// Fields relevant to each rule type, used to build both the inline edit
+// form and the PATCH body — mirrors the shape internal/api/server.go's
+// ebpfRulePatch expects per type.
+const EDIT_FIELDS: Record<string, string[]> = {
+  ip4: ['ip'], ip6: ['ip'],
+  cidr: ['cidr', 'direction'],
+  port: ['protocol', 'port', 'direction'],
+  uid: ['uid'],
+  dns: ['name'], sni: ['name'], process: ['name'],
+  rate: ['destination', 'pps'],
+};
+
 export default function EBPF() {
   const [cfg, setCfg] = useState<any>();
   const [agents, setAgents] = useState<any[]>([]);
-  const [summary, setSummary] = useState<any>();
   const [caps, setCaps] = useState<any>();
+  const [shieldDiag, setShieldDiag] = useState<any>();
   const [err, setErr] = useState('');
   const [lease, setLease] = useState('15m');
   const [ip, setIP] = useState('');
@@ -17,6 +31,7 @@ export default function EBPF() {
   const [portDir, setPortDir] = useState('egress');
   const [uid, setUID] = useState('');
   const [dns, setDNS] = useState('');
+  const [sni, setSNI] = useState('');
   const [processName, setProcessName] = useState('');
   const [rateIP, setRateIP] = useState('');
   const [pps, setPPS] = useState('1000');
@@ -29,19 +44,60 @@ export default function EBPF() {
   const [scopeLabel, setScopeLabel] = useState('');
   const [scopePreview, setScopePreview] = useState<any>();
   const [topology, setTopology] = useState<any[]>([]);
+  const [shieldMode, setShieldMode] = useState('off');
+  const [shieldProtectAll, setShieldProtectAll] = useState(false);
+  const [shieldSyn, setShieldSyn] = useState('0');
+  const [shieldUdp, setShieldUdp] = useState('0');
+  const [shieldIcmp, setShieldIcmp] = useState('0');
+  const [shieldOther, setShieldOther] = useState('0');
+  const [shieldBurst, setShieldBurst] = useState('2');
+  const [shieldIP, setShieldIP] = useState('');
+  const [npSelNS, setNpSelNS] = useState('');
+  const [npSelPod, setNpSelPod] = useState('');
+  const [npSelLabel, setNpSelLabel] = useState('');
+  const [npPeer, setNpPeer] = useState('');
+  const [npPort, setNpPort] = useState('');
+  const [npProto, setNpProto] = useState('TCP');
+  const [npDir, setNpDir] = useState('egress');
+  const [npAction, setNpAction] = useState('allow');
+  const [ddSelNS, setDdSelNS] = useState('');
+  const [ddSelPod, setDdSelPod] = useState('');
+  const [ddSelLabel, setDdSelLabel] = useState('');
+  const [ddLease, setDdLease] = useState('5m');
+  const [ddPlan, setDdPlan] = useState<any>(null);
+  const [ruleList, setRuleList] = useState<any[]>([]);
+  const [editingId, setEditingId] = useState('');
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [historyId, setHistoryId] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
 
   const load = () => Promise.all([
     api<any>('/api/v1/ebpf/config'),
     api<any>('/api/v1/agents'),
-    api<any>('/api/v1/ebpf/summary'),
     api<any>('/api/v1/ebpf/capabilities'),
     api<any>('/api/v1/ebpf/workloads'),
     api<any>('/api/v1/ebpf/topology?limit=50'),
-  ]).then(([c, a, s, k, w, t]) => {
-    setCfg(c); setAgents(a.items || []); setSummary(s); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setErr('');
+    api<any>('/api/v1/ebpf/shield?limit=1'),
+    api<any>('/api/v1/ebpf/rules'),
+  ]).then(([c, a, k, w, t, sd, rl]) => {
+    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setErr('');
   }).catch(e => setErr(String(e)));
 
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+
+  // Sync the shield form from server state only when the server's config
+  // actually changed (generation bump), not on every 5s poll — otherwise
+  // an in-progress edit would get stomped before the user hits Apply.
+  useEffect(() => {
+    if (!cfg?.shield) return;
+    setShieldMode(cfg.shield.mode || 'off');
+    setShieldProtectAll(!!cfg.shield.protectAll);
+    setShieldSyn(String(cfg.shield.synPps || 0));
+    setShieldUdp(String(cfg.shield.udpPps || 0));
+    setShieldIcmp(String(cfg.shield.icmpPps || 0));
+    setShieldOther(String(cfg.shield.otherPps || 0));
+    setShieldBurst(String(cfg.shield.burstSeconds || 0));
+  }, [cfg?.shield?.generation]);
 
   async function call(path: string, method: string, body?: any) {
     try {
@@ -74,6 +130,135 @@ export default function EBPF() {
     try { setScopePreview(await api('/api/v1/ebpf/scope/preview', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ scopes:[candidateScope()] }) })); setErr(''); } catch (e) { setErr(String(e)); }
   }
 
+  function shieldBody(overrides: any = {}) {
+    return {
+      mode: shieldMode, protectAll: shieldProtectAll, protectedIpv4: cfg?.shield?.protectedIpv4 || [],
+      synPps: Number(shieldSyn) || 0, udpPps: Number(shieldUdp) || 0, icmpPps: Number(shieldIcmp) || 0,
+      otherPps: Number(shieldOther) || 0, burstSeconds: Number(shieldBurst) || 0, ...overrides,
+    };
+  }
+  async function applyShield() {
+    if (shieldMode === 'enforce' && !confirm('Enable Shield enforce mode? This will drop traffic exceeding configured PPS thresholds for protected IPs.')) return;
+    await call('/api/v1/ebpf/shield', 'PUT', shieldBody());
+  }
+  function addShieldIP() {
+    if (!shieldIP.trim()) return;
+    const ips = Array.from(new Set([...(cfg?.shield?.protectedIpv4 || []), shieldIP.trim()]));
+    call('/api/v1/ebpf/shield', 'PUT', shieldBody({ protectedIpv4: ips }));
+    setShieldIP('');
+  }
+  function delShieldIP(x: string) {
+    call('/api/v1/ebpf/shield', 'PUT', shieldBody({ protectedIpv4: (cfg?.shield?.protectedIpv4 || []).filter((y: string) => y !== x) }));
+  }
+  function toggleNetPol() {
+    const next = !cfg?.netPolEnabled;
+    if (next && !confirm('Enabling NetPol enforcement may block previously-allowed traffic for workloads without matching allow rules.')) return;
+    call('/api/v1/ebpf/netpol/config', 'PUT', { enabled: next });
+  }
+
+  function selectorFrom(ns: string, pod: string, label: string) {
+    const sel: any = {};
+    if (ns.trim()) sel.namespace = ns.trim();
+    if (pod.trim()) sel.pod = pod.trim();
+    if (label.trim()) {
+      const [k, ...rest] = label.split('=');
+      if (k && rest.length) sel.labels = { [k.trim()]: rest.join('=').trim() };
+    }
+    return sel;
+  }
+  function toggleNetPolV2() {
+    call('/api/v1/ebpf/netpol/v2/config', 'PUT', { enabled: !cfg?.netPolV2Enabled });
+  }
+  async function addNetPolRule() {
+    try {
+      await api('/api/v1/ebpf/netpol/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selector: selectorFrom(npSelNS, npSelPod, npSelLabel), peerIpv4: npPeer, port: npPort ? Number(npPort) : undefined, protocol: npProto, direction: npDir, action: npAction }),
+      });
+      setNpPeer('');
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  function delNetPolRule(id: string) {
+    call('/api/v1/ebpf/netpol/rules/' + encodeURIComponent(id), 'DELETE');
+  }
+  async function planDefaultDeny(enabled: boolean) {
+    const body: any = { selector: selectorFrom(ddSelNS, ddSelPod, ddSelLabel), enabled };
+    if (enabled) body.lease = ddLease;
+    try {
+      const res = await api<any>('/api/v1/ebpf/netpol/default-deny/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      setDdPlan({ ...res, body });
+      setErr('');
+    } catch (e) { setErr(String(e)); setDdPlan(null); }
+  }
+  async function applyDefaultDeny() {
+    if (!ddPlan) return;
+    if ((ddPlan.risk === 'high' || ddPlan.risk === 'critical') && !confirm(`Preflight risk is ${String(ddPlan.risk).toUpperCase()}. Apply this default-deny change anyway?`)) return;
+    try {
+      // Re-send the exact body object plan hashed — never rebuild it —
+      // since the preflight token is bound to that exact byte sequence.
+      await api('/api/v1/ebpf/netpol/default-deny', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Netra-Plan-Token': ddPlan.receipt?.token, 'X-Netra-Confirm-Risk': ddPlan.risk },
+        body: JSON.stringify(ddPlan.body),
+      });
+      setDdPlan(null);
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  async function deactivateDefaultDeny(selector: any) {
+    if (!confirm('Deactivate default-deny for this selector? Traffic reverts to fail-open immediately.')) return;
+    // Deactivation is always risk "low" and needs no operator confirmation,
+    // but the API still requires a fresh preflight token for every
+    // default-deny mutation — plan then immediately apply with it.
+    const body = { selector, enabled: false };
+    try {
+      const res = await api<any>('/api/v1/ebpf/netpol/default-deny/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      await api('/api/v1/ebpf/netpol/default-deny', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Netra-Plan-Token': res.receipt?.token },
+        body: JSON.stringify(body),
+      });
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+
+  function startEdit(r: any) {
+    setHistoryId('');
+    setEditingId(r.id);
+    setEditForm({
+      ip: r.value || '', name: r.value || '', uid: r.value || '',
+      cidr: r.cidr || '', direction: r.direction || 'egress', protocol: r.protocol || 'TCP',
+      port: r.port ? String(r.port) : '', destination: r.destination || '', pps: r.pps ? String(r.pps) : '',
+    });
+  }
+  function cancelEdit() { setEditingId(''); }
+  async function saveEdit(type: string) {
+    const body: any = {};
+    for (const f of EDIT_FIELDS[type] || []) {
+      body[f] = (f === 'port' || f === 'pps' || f === 'uid') ? Number(editForm[f]) : editForm[f];
+    }
+    try {
+      await api(`/api/v1/ebpf/rules/${encodeURIComponent(editingId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      setEditingId('');
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  async function toggleHistory(id: string) {
+    if (historyId === id) { setHistoryId(''); return; }
+    setEditingId('');
+    setHistoryId(id);
+    try { setHistory((await api<any>(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/history`)).items || []); } catch (e) { setErr(String(e)); }
+  }
+  async function rollback(id: string, revision: number) {
+    if (!confirm('Undo this edit? This restores the value it had before this revision.')) return;
+    try {
+      await api(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/rollback/${revision}`, { method: 'POST' });
+      setHistory((await api<any>(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/history`)).items || []);
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+
   const events = useMemo(() => agents
     .flatMap(a => (a.events || []).map((e: any) => ({ ...e, node: a.node })))
     .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))
@@ -83,28 +268,139 @@ export default function EBPF() {
     .flatMap(a => (a.stats || []).map((s: any) => ({ ...s, node: a.node })))
     .sort((a, b) => (b.packets || 0) - (a.packets || 0)).slice(0, 160), [agents]);
 
+  const rules = useMemo<UnifiedRule[]>(() => {
+    const out: UnifiedRule[] = ruleList.map((r: any) => ({
+      id: r.id, type: r.type, raw: r,
+      value: r.type === 'cidr' ? r.cidr : r.type === 'port' ? `${r.protocol}/${r.port}` : r.type === 'rate' ? r.destination : r.value,
+      detail: r.direction || '', extra: r.type === 'rate' ? `${r.pps}pps` : '',
+      created: r.createdBy ? `${r.createdBy} · ${new Date(r.createdAt).toLocaleString()}` : '',
+      del: () => { if (confirm(`Delete this ${r.type} rule?`)) call('/api/v1/ebpf/rules/' + encodeURIComponent(r.id), 'DELETE'); },
+    }));
+    if (cfg?.shield?.mode && cfg.shield.mode !== 'off') out.push({ type: 'shield', value: cfg.shield.protectAll ? 'all traffic' : `${(cfg.shield.protectedIpv4 || []).length} protected IPs`, detail: cfg.shield.mode, extra: '' });
+    if (cfg?.netPolEnabled) out.push({ type: 'netpol', value: `${(cfg.netPolDenies || []).length} deny entries`, detail: 'enabled', extra: '' });
+    if (cfg?.netPolV2Enabled) out.push({ type: 'netpol-v2', value: `${(cfg.netPolRules || []).length} rules · ${(cfg.netPolDefaultDenies || []).length} default-deny`, detail: 'enabled', extra: '' });
+    return out.sort((a, b) => a.type === b.type ? a.value.localeCompare(b.value) : a.type.localeCompare(b.type));
+  }, [ruleList, cfg?.shield, cfg?.netPolEnabled, cfg?.netPolDenies, cfg?.netPolV2Enabled, cfg?.netPolRules, cfg?.netPolDefaultDenies]);
+
+  function cap(count: number, limit: number | undefined) {
+    if (!limit) return null;
+    return <p className={count / limit > 0.9 ? 'warning' : ''}>{count} / {limit} rules</p>;
+  }
+
   return <div className="grid">
-    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>No Cilium dependency. Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'primary' : ''} onClick={() => mode('observe')}>Observe</button><input value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : ''} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}{err && <p className="warning">{err}</p>}</section>
+    <div className="span3"><TerminalFrame title="all configured rules">
+      <div className="flowhead rules"><span>TYPE</span><span>VALUE</span><span>DETAIL</span><span>CREATED</span><span>ACTIONS</span></div>
+      {rules.length === 0 && <p style={{ padding: '9px 4px' }}>No firewall rules configured.</p>}
+      {rules.map((r, i) => (
+        <div key={r.id || (r.type + r.value + i)}>
+          <div className="flowrow rules">
+            <span>{r.type}</span><span>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
+            <span>
+              {r.id && <button onClick={() => startEdit(r.raw)}>edit</button>}
+              {r.id && <button onClick={() => toggleHistory(r.id!)}>history</button>}
+              {r.del && <button onClick={r.del}>delete</button>}
+            </span>
+          </div>
+          {editingId === r.id && <div className="flowrow rules">
+            <div style={{ gridColumn: '1 / -1' }} className="ruleform">
+              {(EDIT_FIELDS[r.type] || []).map(f => {
+                if (f === 'direction') return <select key={f} value={editForm.direction} onChange={e => setEditForm({ ...editForm, direction: e.target.value })}><option>egress</option><option>ingress</option><option>both</option></select>;
+                if (f === 'protocol') return <select key={f} value={editForm.protocol} onChange={e => setEditForm({ ...editForm, protocol: e.target.value })}><option>TCP</option><option>UDP</option><option>ANY</option></select>;
+                return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} inputMode={(f === 'port' || f === 'pps' || f === 'uid') ? 'numeric' : undefined} />;
+              })}
+              <button className="primary" onClick={() => saveEdit(r.type)}>Save</button>
+              <button onClick={cancelEdit}>Cancel</button>
+            </div>
+          </div>}
+          {historyId === r.id && <div className="flowrow rules">
+            <div style={{ gridColumn: '1 / -1' }}>
+              {history.length === 0 && <p>No edit history for this rule.</p>}
+              {history.map((h: any) => (
+                <div key={h.id} className="agent wide">
+                  <b>{new Date(h.at).toLocaleString()}</b><span>{h.actor}</span>
+                  <small>{JSON.stringify(h.before)} → {JSON.stringify(h.after)}</small>
+                  <button onClick={() => rollback(r.id!, h.id)}>undo this edit</button>
+                </div>
+              ))}
+            </div>
+          </div>}
+        </div>
+      ))}
+    </TerminalFrame></div>
+
+    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'primary' : ''} onClick={() => mode('observe')}>Observe</button><input value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : ''} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}{err && <p className="warning">{err}</p>}</section>
 
     <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'primary' : ''} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : ''} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
 
-    <section className="card"><p className="eyebrow">EXACT IP</p><h3>IPv4 + IPv6 egress deny</h3><div className="toolbar"><input value={ip} onChange={e => setIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/deny', 'POST', { ip })}>Add</button></div><div className="chips">{[...(cfg?.blockedIPv4 || []), ...(cfg?.blockedIPv6 || [])].map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
-    <section className="card"><p className="eyebrow">CIDR</p><h3>Ingress / egress prefixes</h3><div className="ruleform"><input value={cidr} onChange={e => setCIDR(e.target.value)} placeholder="10.0.0.0/8 or 2001:db8::/32"/><select value={cidrDir} onChange={e => setCIDRDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/cidr', 'POST', { cidr, direction: cidrDir })}>Add CIDR</button></div><div className="chips">{(cfg?.blockedCidrs || []).map((x: any) => <button key={x.cidr + x.direction} onClick={() => call('/api/v1/ebpf/cidr/delete', 'POST', x)}>{x.direction} · {x.cidr} ×</button>)}</div></section>
-    <section className="card"><p className="eyebrow">L4</p><h3>Port controls</h3><div className="ruleform"><select value={proto} onChange={e => setProto(e.target.value)}><option>TCP</option><option>UDP</option><option>ANY</option></select><input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric"/><select value={portDir} onChange={e => setPortDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/port', 'POST', { protocol: proto, port: Number(port), direction: portDir })}>Add port</button></div><div className="chips">{(cfg?.blockedPorts || []).map((x: any) => <button key={x.protocol + x.port + x.direction} onClick={() => call('/api/v1/ebpf/port/delete', 'POST', x)}>{x.direction} · {x.protocol}/{x.port} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">EXACT IP</p><h3>IPv4 + IPv6 egress deny</h3>{cap((cfg?.blockedIPv4?.length||0), caps?.limits?.exactIPv4)}<div className="toolbar"><input value={ip} onChange={e => setIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/deny', 'POST', { ip })}>Add</button></div><div className="chips">{[...(cfg?.blockedIPv4 || []), ...(cfg?.blockedIPv6 || [])].map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">CIDR</p><h3>Ingress / egress prefixes</h3>{cap((cfg?.blockedCidrs?.length||0), caps?.limits?.cidr)}<div className="ruleform"><input value={cidr} onChange={e => setCIDR(e.target.value)} placeholder="10.0.0.0/8 or 2001:db8::/32"/><select value={cidrDir} onChange={e => setCIDRDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/cidr', 'POST', { cidr, direction: cidrDir })}>Add CIDR</button></div><div className="chips">{(cfg?.blockedCidrs || []).map((x: any) => <button key={x.cidr + x.direction} onClick={() => call('/api/v1/ebpf/cidr/delete', 'POST', x)}>{x.direction} · {x.cidr} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">L4</p><h3>Port controls</h3>{cap((cfg?.blockedPorts?.length||0), caps?.limits?.ports)}<div className="ruleform"><select value={proto} onChange={e => setProto(e.target.value)}><option>TCP</option><option>UDP</option><option>ANY</option></select><input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric"/><select value={portDir} onChange={e => setPortDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/port', 'POST', { protocol: proto, port: Number(port), direction: portDir })}>Add port</button></div><div className="chips">{(cfg?.blockedPorts || []).map((x: any) => <button key={x.protocol + x.port + x.direction} onClick={() => call('/api/v1/ebpf/port/delete', 'POST', x)}>{x.direction} · {x.protocol}/{x.port} ×</button>)}</div></section>
 
-    <section className="card"><p className="eyebrow">IDENTITY</p><h3>UID socket deny</h3><p>Blocks new TCP connects and UDP sendmsg operations from a Linux UID while enforcement is leased.</p><div className="toolbar"><input value={uid} onChange={e => setUID(e.target.value)} inputMode="numeric" placeholder="1000"/><button className="primary" onClick={() => call('/api/v1/ebpf/uid', 'POST', { uid: Number(uid) })}>Add UID</button></div><div className="chips">{(cfg?.blockedUids || []).map((x: number) => <button key={x} onClick={() => call('/api/v1/ebpf/uid/' + x, 'DELETE')}>uid {x} ×</button>)}</div></section>
-    <section className="card"><p className="eyebrow">PROCESS</p><h3>Linux comm deny</h3><p>Blocks new connect/sendmsg operations by exact process <code>comm</code> (maximum 15 bytes). Existing sockets are not terminated.</p><div className="toolbar"><input value={processName} onChange={e => setProcessName(e.target.value)} placeholder="curl" maxLength={15}/><button className="primary" onClick={() => call('/api/v1/ebpf/process', 'POST', { name: processName })}>Add process</button></div><div className="chips">{(cfg?.blockedProcesses || []).map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/process/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
-    <section className="card"><p className="eyebrow">DNS</p><h3>Exact DNS-name deny</h3><p>Parses and blocks exact cleartext DNS queries over UDP/53. This does not inspect TCP DNS, DoT, or DoH.</p><div className="toolbar"><input value={dns} onChange={e => setDNS(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/dns', 'POST', { name: dns })}>Add DNS</button></div><div className="chips">{(cfg?.blockedDns || []).map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/dns/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">IDENTITY</p><h3>UID socket deny</h3><p>Blocks new TCP connects and UDP sendmsg operations from a Linux UID while enforcement is leased.</p>{cap((cfg?.blockedUids?.length||0), caps?.limits?.uids)}<div className="toolbar"><input value={uid} onChange={e => setUID(e.target.value)} inputMode="numeric" placeholder="1000"/><button className="primary" onClick={() => call('/api/v1/ebpf/uid', 'POST', { uid: Number(uid) })}>Add UID</button></div><div className="chips">{(cfg?.blockedUids || []).map((x: number) => <button key={x} onClick={() => call('/api/v1/ebpf/uid/' + x, 'DELETE')}>uid {x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">PROCESS</p><h3>Linux comm deny</h3><p>Blocks new connect/sendmsg operations by exact process <code>comm</code> (maximum 15 bytes). Existing sockets are not terminated.</p>{cap((cfg?.blockedProcesses?.length||0), caps?.limits?.processes)}<div className="toolbar"><input value={processName} onChange={e => setProcessName(e.target.value)} placeholder="curl" maxLength={15}/><button className="primary" onClick={() => call('/api/v1/ebpf/process', 'POST', { name: processName })}>Add process</button></div><div className="chips">{(cfg?.blockedProcesses || []).map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/process/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">DNS</p><h3>Exact DNS-name deny</h3><p>Parses and blocks exact cleartext DNS queries over UDP/53. This does not inspect TCP DNS, DoT, or DoH.</p>{cap((cfg?.blockedDns?.length||0), caps?.limits?.dns)}<div className="toolbar"><input value={dns} onChange={e => setDNS(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/dns', 'POST', { name: dns })}>Add DNS</button></div><div className="chips">{(cfg?.blockedDns || []).map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/dns/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">SNI</p><h3>Exact TLS SNI deny</h3><p>Blocks connections whose TLS ClientHello Server Name Indication matches exactly. Best-effort parsing only.</p>{cap((cfg?.blockedSni?.length||0), caps?.limits?.sni)}<div className="toolbar"><input value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/sni', 'POST', { name: sni })}>Add SNI</button></div><div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/sni/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
 
-    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p><div className="ruleform"><input value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20"/><input value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
-    <section className="card"><p className="eyebrow">KERNEL PULSE</p><h3>What Netra sees</h3><div className="metrics"><div><b>{summary?.packets ?? 0}</b><span>packets</span></div><div><b>{summary?.blocked ?? 0}</b><span>blocked</span></div><div><b>{summary?.dnsQueries ?? 0}</b><span>DNS</span></div><div><b>{summary?.socketEvents ?? 0}</b><span>socket events</span></div></div><pre className="mini">{JSON.stringify({ hooks: summary?.hooks, reasons: summary?.blockReasons, topDNS: summary?.topDns, topProcesses: summary?.topProcesses, topWorkloads: summary?.topWorkloads, blockedWorkloads: summary?.topBlockedWorkloads }, null, 2)}</pre></section>
-    <section className="card span3"><p className="eyebrow">BPF PROGRAM HEALTH</p><h3>Attach state and run stats</h3><p>Per-node program attach flags plus kernel run counts when BPF stats are enabled. Use this when a hook is missing after upgrade or verifier load failures.</p>{agents.map(a => <div className="agent wide" key={'prog-'+a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : `${(a.programs || []).filter((p:any)=>p.attached).length}/${(a.programs || []).length} attached`}</span><small>{(a.programs || []).length === 0 ? 'no program report yet' : (a.programs || []).map((p:any) => `${p.name}${p.attached ? '' : ' (detached)'}: runs=${p.runCount || 0}`).join(' · ')}</small></div>)}</section>
-    <section className="card span3"><p className="eyebrow">NETWORK HISTOGRAMS</p><h3>Retransmit / RTT / connect buckets</h3><p>Agent-side histograms from existing sockops samples, plus listen overflow and softirq NET_RX counters. Softirq entry→exit latency remains deferred.</p>{agents.map(a => {
-      const h = a.histograms;
-      if (!h) return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>—</span></div>;
-      return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>retrans n={h.tcpRetransmissions?.count || 0} · srtt n={h.tcpSrttUs?.count || 0} · connect n={h.tcpConnectUs?.count || 0}</span><small>listen overflows={h.host?.listenOverflows || 0} · listen drops={h.host?.listenDrops || 0} · softirq NET_RX={h.host?.softirqNetRx || 0}</small></div>;
-    })}</section>
-    <section className="card"><p className="eyebrow">CAPABILITIES</p><h3>No Cilium required</h3><p>{caps?.observability?.length || 0} observability classes and {caps?.enforcement?.length || 0} enforcement classes are exposed by this release.</p><div className="chips">{(caps?.hooks || []).map((x: string) => <span key={x}>{x}</span>)}</div></section>
+    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20"/><input value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
+
+    <section className="card span3"><p className="eyebrow">SHIELD</p><h3>DDoS per-source-class PPS shield</h3><p>Independent XDP-layer token-bucket limiter for SYN/UDP/ICMP/other floods, decoupled from the enforcement lease above. {shieldDiag?.summary && <>Live: {shieldDiag.summary.allowed||0} allowed · {shieldDiag.summary.dropped||0} dropped · {shieldDiag.summary.audited||0} audited.</>}</p><div className="ruleform"><select value={shieldMode} onChange={e => setShieldMode(e.target.value)}><option value="off">off</option><option value="audit">audit</option><option value="enforce">enforce</option></select><label><input type="checkbox" checked={shieldProtectAll} onChange={e => setShieldProtectAll(e.target.checked)}/> protect all</label><input value={shieldSyn} onChange={e => setShieldSyn(e.target.value)} inputMode="numeric" placeholder="SYN pps"/><input value={shieldUdp} onChange={e => setShieldUdp(e.target.value)} inputMode="numeric" placeholder="UDP pps"/><input value={shieldIcmp} onChange={e => setShieldIcmp(e.target.value)} inputMode="numeric" placeholder="ICMP pps"/><input value={shieldOther} onChange={e => setShieldOther(e.target.value)} inputMode="numeric" placeholder="other pps"/><input value={shieldBurst} onChange={e => setShieldBurst(e.target.value)} inputMode="numeric" placeholder="burst s"/><button className="primary" onClick={applyShield}>Apply shield config</button></div>{!shieldProtectAll && <div className="toolbar"><input value={shieldIP} onChange={e => setShieldIP(e.target.value)} placeholder="protected IPv4"/><button onClick={addShieldIP}>Add protected IP</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv4 || []).map((x: string) => <button key={x} onClick={() => delShieldIP(x)}>{x} ×</button>)}</div></section>
+
+    <section className="card span3"><p className="eyebrow">NETPOL</p><h3>Per-workload NetworkPolicy-style deny</h3><p>Legacy per-cgroup peer-deny engine, independent from the rules above and from NetPol v2 below. Rule authoring has no UI — toggle enforcement and review existing entries here.</p><div className="toolbar"><button className={cfg?.netPolEnabled ? 'danger' : 'primary'} onClick={toggleNetPol}>{cfg?.netPolEnabled ? 'Disable NetPol' : 'Enable NetPol'}</button></div><div className="chips">{(cfg?.netPolDenies || []).length === 0 && <span>No NetPol deny entries.</span>}{(cfg?.netPolDenies || []).map((x: any, i: number) => <span key={i}>{x.direction || 'both'} · cgroup {x.cgroupId} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol || ''}</span>)}</div></section>
+
+    <section className="card span3">
+      <p className="eyebrow">NETPOL V2</p><h3>Allow-list / default-deny per workload</h3>
+      <p>An explicit <b>allow</b> rule here can override even the emergency deny-list above for that workload+peer — by design. Activating default-deny for a selector requires a plan step first; a workload with zero covering allow rules is refused.</p>
+      <div className="toolbar"><button className={cfg?.netPolV2Enabled ? 'danger' : 'primary'} onClick={toggleNetPolV2}>{cfg?.netPolV2Enabled ? 'Disable NetPol v2' : 'Enable NetPol v2'}</button></div>
+
+      <p className="eyebrow" style={{ marginTop: 18 }}>ALLOW / DENY RULES</p>
+      {cap((cfg?.netPolRules?.length||0), caps?.limits?.netpolV2Rules)}
+      <div className="ruleform">
+        <input value={npSelNS} onChange={e => setNpSelNS(e.target.value)} placeholder="namespace" />
+        <input value={npSelPod} onChange={e => setNpSelPod(e.target.value)} placeholder="pod (optional)" />
+        <input value={npSelLabel} onChange={e => setNpSelLabel(e.target.value)} placeholder="label key=value (optional)" />
+        <input value={npPeer} onChange={e => setNpPeer(e.target.value)} placeholder="peer IPv4" />
+        <input value={npPort} onChange={e => setNpPort(e.target.value)} inputMode="numeric" placeholder="port (optional)" />
+        <select value={npProto} onChange={e => setNpProto(e.target.value)}><option>TCP</option><option>UDP</option><option>ANY</option></select>
+        <select value={npDir} onChange={e => setNpDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select>
+        <select value={npAction} onChange={e => setNpAction(e.target.value)}><option value="allow">allow</option><option value="deny">deny</option></select>
+        <button className="primary" onClick={addNetPolRule}>Add rule</button>
+      </div>
+      <div className="chips">
+        {(cfg?.netPolRules || []).length === 0 && <span>No v2 rules configured.</span>}
+        {(cfg?.netPolRules || []).map((x: any) => (
+          <button key={x.id} onClick={() => delNetPolRule(x.id)}>
+            {x.action} · {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol} ({x.direction}) ×
+          </button>
+        ))}
+      </div>
+
+      <p className="eyebrow" style={{ marginTop: 18 }}>DEFAULT-DENY ACTIVATION</p>
+      {cap((cfg?.netPolDefaultDenies?.length||0), caps?.limits?.netpolV2DefaultDeny)}
+      <div className="ruleform">
+        <input value={ddSelNS} onChange={e => setDdSelNS(e.target.value)} placeholder="namespace" />
+        <input value={ddSelPod} onChange={e => setDdSelPod(e.target.value)} placeholder="pod (optional)" />
+        <input value={ddSelLabel} onChange={e => setDdSelLabel(e.target.value)} placeholder="label key=value (optional)" />
+        <input value={ddLease} onChange={e => setDdLease(e.target.value)} placeholder="lease, e.g. 5m (1m-60m)" title="1m–60m" />
+        <button onClick={() => planDefaultDeny(true)}>Plan activation</button>
+      </div>
+      {ddPlan && (
+        <div className={ddPlan.risk === 'critical' || ddPlan.risk === 'high' ? 'warning' : ''} style={{ marginTop: 10, padding: 12 }}>
+          <p><b>Risk: {String(ddPlan.risk).toUpperCase()}</b> · {ddPlan.matchedWorkloads} matched workload(s) · {ddPlan.workloadsWithAllowRule} with a covering allow rule</p>
+          <button className="primary" onClick={applyDefaultDeny}>Confirm and activate</button>
+          <button onClick={() => setDdPlan(null)}>Cancel</button>
+        </div>
+      )}
+      <div className="chips">
+        {(cfg?.netPolDefaultDenies || []).length === 0 && <span>No workloads currently in default-deny posture.</span>}
+        {(cfg?.netPolDefaultDenies || []).map((x: any, i: number) => (
+          <button key={i} onClick={() => deactivateDefaultDeny(x.selector)}>
+            {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} · until {x.enabledUntil ? new Date(x.enabledUntil).toLocaleTimeString() : '—'} ×
+          </button>
+        ))}
+      </div>
+    </section>
+
+    <section className="card"><p className="eyebrow">CAPABILITIES</p><h3>Datapath capabilities</h3><p>{caps?.observability?.length || 0} observability classes and {caps?.enforcement?.length || 0} enforcement classes are exposed by this release.</p><div className="chips">{(caps?.hooks || []).map((x: string) => <span key={x}>{x}</span>)}</div></section>
 
     <div className="span3"><TerminalFrame title="standalone eBPF events"><div className="eventtools"><span>Recent flow, DNS, socket and block events</span><select value={eventType} onChange={e => setEventType(e.target.value)}><option value="all">all</option><option value="flow">flow</option><option value="dns">dns</option><option value="connect">connect</option><option value="block">block</option></select></div><div className="flowhead obs"><span>TIME / NODE</span><span>TYPE</span><span>PROCESS</span><span>FLOW / DNS</span><span>ACTION</span></div>{events.map((e: any, i) => <div className="flowrow obs" key={i}><span>{new Date(e.observedAt).toLocaleTimeString()} · {e.node}</span><span>{e.direction} {e.hook} · {e.type}</span><span>{e.namespace || e.pod ? `${e.namespace}/${e.pod} · ${e.comm || 'process?'} pid=${e.pid || 0}` : (e.comm ? `${e.comm} pid=${e.pid} uid=${e.uid}` : '—')}</span><span>{e.dnsQuery || `${e.sourceIp || '—'}:${e.sourcePort || 0} → ${e.destinationIp || '—'}:${e.destinationPort || 0} ${e.protocol}`}</span><span className={e.action === 'blocked' ? 'blocked' : ''}>{e.action}{e.reason ? ` · ${e.reason}` : ''}</span></div>)}</TerminalFrame></div>
     <div className="span3"><TerminalFrame title="exact flow counters"><div className="flowhead obs"><span>NODE / HOOK</span><span>DIR</span><span>FLOW</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>{stats.map((s: any, i) => <div className="flowrow obs" key={i}><span>{s.node} · {s.hook}{s.namespace ? ` · ${s.namespace}/${s.pod}` : ''}</span><span>{s.direction}</span><span>{s.sourceIp || '—'}:{s.sourcePort || 0} → {s.destinationIp}:{s.port}</span><span>{s.protocol}</span><span>{s.packets} / {s.bytes} / {s.blocked}</span></div>)}</TerminalFrame></div>

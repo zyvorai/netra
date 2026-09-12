@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Nav, { Page } from './components/Nav';
 import Overview from './pages/Overview';
 import Path from './pages/Path';
@@ -12,7 +12,9 @@ import Health from './pages/Health';
 import Audit from './pages/Audit';
 import Workloads from './pages/Workloads';
 import PageHero from './components/PageHero';
-import { setToken, token } from './api';
+import Login from './components/Login';
+import { token } from './api';
+import { logout } from './auth';
 import { applyTheme, readStoredTheme, toggleTheme, type Theme } from './theme';
 
 const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: string }>> = {
@@ -29,7 +31,7 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
   health: {
     eyebrow: 'Network Health',
     title: 'TCP and DNS from the kernel.',
-    lede: 'Sockops and packet hooks measure RTT, retransmits, RTOs, resets, and cleartext DNS latency — no Cilium required.',
+    lede: 'Sockops and packet hooks measure RTT, retransmits, RTOs, resets, and cleartext DNS latency.',
   },
   path: {
     eyebrow: 'Path Diagnostics',
@@ -52,9 +54,9 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Baselines, drift, and review-only remediation proposals derived from exact eBPF counters.',
   },
   ebpf: {
-    eyebrow: 'Standalone datapath',
+    eyebrow: 'Firewall',
     title: 'Observe everywhere. Enforce when leased.',
-    lede: 'Program health, network histograms, and emergency controls — Netra owns only /sys/fs/bpf/netra.',
+    lede: 'Every configured rule in one place — deny lists, DDoS shield, and NetPol — plus emergency controls. Netra owns only /sys/fs/bpf/netra.',
   },
   flows: {
     eyebrow: 'Hubble',
@@ -75,12 +77,21 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
 
 export default function App() {
   const [page, setPage] = useState<Page>('overview');
-  const [tok, setTok] = useState(token());
+  const [loggedIn, setLoggedIn] = useState(() => Boolean(token()));
   const [theme, setTheme] = useState<Theme>(() => {
     const t = readStoredTheme();
     applyTheme(t);
     return t;
   });
+
+  useEffect(() => {
+    const onExpired = () => setLoggedIn(false);
+    window.addEventListener('netra-auth-expired', onExpired);
+    return () => window.removeEventListener('netra-auth-expired', onExpired);
+  }, []);
+
+  if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
+
   const body = {
     overview: <Overview />,
     pods: <Workloads kind="pod" />,
@@ -97,20 +108,6 @@ export default function App() {
   }[page];
 
   const hero = pageHero[page];
-  const tokenControl = (
-    <label className="tokenbox">
-      API token
-      <input
-        type="password"
-        value={tok}
-        placeholder="required unless dev mode"
-        onChange={(e) => {
-          setTok(e.target.value);
-          setToken(e.target.value);
-        }}
-      />
-    </label>
-  );
 
   return (
     <>
@@ -119,25 +116,25 @@ export default function App() {
         setPage={setPage}
         theme={theme}
         onToggleTheme={() => setTheme((t) => toggleTheme(t))}
+        onLogout={() => {
+          logout();
+          setLoggedIn(false);
+        }}
       />
       <main>
         {page === 'overview' ? (
           <header className="hero">
             <div>
-              <p className="eyebrow">STANDALONE eBPF · OPTIONAL CILIUM</p>
+              <p className="eyebrow">STANDALONE eBPF DATAPATH</p>
               <h1>See the network. Diagnose it. Contain it.</h1>
               <p>
                 Netra runs its own eBPF datapath for workload flows, TCP health, DNS timing, socket identity, and leased
-                emergency controls. Cilium and Hubble are optional enrichment.
+                emergency controls.
               </p>
             </div>
-            {tokenControl}
           </header>
         ) : (
-          <>
-            {hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} />}
-            <div className="token-rail">{tokenControl}</div>
-          </>
+          hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} />
         )}
         {body}
       </main>

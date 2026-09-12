@@ -196,6 +196,64 @@ func TestPolicyApply_RiskMismatchMapsToIsError(t *testing.T) {
 	}
 }
 
+// TestNetPolDefaultDenyPlanSet_BodyMatchesPlan guards against a real bug
+// found during implementation: the set tool's handler used to reconstruct
+// the request body from typed struct fields, which always included a
+// "lease" key (even empty) regardless of whether the caller had passed one
+// to plan — producing different bytes than plan hashed, so a real
+// preflight token would never actually validate. The fix makes set strip
+// only plan_token/confirm_risk from the raw argument map and re-marshal the
+// rest, mirroring exactly how the plan tool (a plain endpointTool with
+// bodyFields:true) builds its own body. This test calls plan and set with
+// no lease argument at all and asserts the server sees byte-identical
+// bodies for both.
+func TestNetPolDefaultDenyPlanSet_BodyMatchesPlan(t *testing.T) {
+	const planToken = "npdd-token"
+	var planBody, setBody []byte
+	var gotSetToken, gotSetRisk string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := make([]byte, r.ContentLength)
+		r.Body.Read(b)
+		switch r.URL.Path {
+		case "/api/v1/ebpf/netpol/default-deny/plan":
+			planBody = b
+			w.Write([]byte(`{"risk":"medium","matchedWorkloads":1,"receipt":{"token":"` + planToken + `"}}`))
+		case "/api/v1/ebpf/netpol/default-deny":
+			setBody = b
+			gotSetToken = r.Header.Get("X-Netra-Plan-Token")
+			gotSetRisk = r.Header.Get("X-Netra-Confirm-Risk")
+			w.Write([]byte(`{"netPolDefaultDenies":[{}]}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	c := testClient(t, ts)
+	selector := map[string]any{"namespace": "payments"}
+	planResult := callTool(t, c, true, "netra_ebpf_netpol_default_deny_plan", map[string]any{
+		"selector": selector, "enabled": true,
+	})
+	if planResult.IsError {
+		t.Fatalf("plan failed: %+v", planResult)
+	}
+	setResult := callTool(t, c, true, "netra_ebpf_netpol_default_deny_set", map[string]any{
+		"selector": selector, "enabled": true, "plan_token": planToken, "confirm_risk": "medium",
+	})
+	if setResult.IsError {
+		t.Fatalf("set failed: %+v", setResult)
+	}
+	if gotSetToken != planToken {
+		t.Fatalf("expected X-Netra-Plan-Token %q, got %q", planToken, gotSetToken)
+	}
+	if gotSetRisk != "medium" {
+		t.Fatalf("expected X-Netra-Confirm-Risk medium, got %q", gotSetRisk)
+	}
+	if string(planBody) != string(setBody) {
+		t.Fatalf("plan and set bodies must match byte-for-byte (preflight is hash-bound to the body):\nplan: %s\nset:  %s", planBody, setBody)
+	}
+}
+
 func TestMutationGating(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))

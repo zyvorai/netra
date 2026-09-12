@@ -18,7 +18,7 @@ Opt-in per-source PPS protection for dedicated ingress interfaces.
 
 1. List interfaces in `NETRA_XDP_INTERFACES` (never a shared Cilium uplink).
 2. Set `NETRA_XDP_SHIELD=true` so the agent attaches `netra_xdp_shield` instead of the generic early-deny XDP program.
-3. Publish shield config through `EBPFFastPathConfig.shield`:
+3. Publish shield config via `PUT /api/v1/ebpf/shield`, `netractl ebpf shield set`, the `netra_ebpf_shield_set` MCP tool, or the Firewall dashboard page's SHIELD card. All four write the same `EBPFFastPathConfig.shield`:
 
 ```json
 {
