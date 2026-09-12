@@ -26,15 +26,11 @@ export default function Drops() {
   const ds = diag?.summary || {};
   return (
     <div className="grid">
-      <section className="card span3">
-        <p className="eyebrow">DROP DIAGNOSTICS</p>
-        <h2>Find where packets disappear.</h2>
-        <p>
-          Netra combines optional <code>skb:kfree_skb</code> reasons, softnet/interface counters, and policy-aware Drop
-          Detective (exact vs probable) for standalone deny hits.
-        </p>
-        {err && <p className="warning">{err}</p>}
-      </section>
+      {err && (
+        <section className="card span3">
+          <p className="warning">{err}</p>
+        </section>
+      )}
       <section className="card span3">
         <p className="eyebrow">DROP PULSE</p>
         <div className="metrics">

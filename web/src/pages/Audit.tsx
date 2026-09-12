@@ -1,2 +1,32 @@
-import{useEffect,useState}from'react';import{api}from'../api';import TerminalFrame from'../components/TerminalFrame';
-export default function Audit(){const[items,setItems]=useState<any[]>([]);useEffect(()=>{api<any>('/api/v1/audit?limit=200').then(x=>setItems(x.items||[]))},[]);return <TerminalFrame title="Netra control-plane audit"><div className="flowhead audit"><span>TIME</span><span>ACTOR</span><span>ACTION</span><span>TARGET</span></div>{items.map((x,i)=><div className="flowrow audit" key={i}><span>{new Date(x.at).toLocaleString()}</span><span>{x.actor}</span><span>{x.action}</span><span>{x.target||'—'}</span></div>)}</TerminalFrame>}
+import { useEffect, useState } from 'react';
+import { api } from '../api';
+import TerminalFrame from '../components/TerminalFrame';
+
+export default function Audit() {
+  const [items, setItems] = useState<any[]>([]);
+  useEffect(() => {
+    api<any>('/api/v1/audit?limit=200').then((x) => setItems(x.items || []));
+  }, []);
+  return (
+    <div className="grid">
+      <div className="span3">
+        <TerminalFrame title="Netra control-plane audit">
+          <div className="flowhead audit">
+            <span>TIME</span>
+            <span>ACTOR</span>
+            <span>ACTION</span>
+            <span>TARGET</span>
+          </div>
+          {items.map((x, i) => (
+            <div className="flowrow audit" key={i}>
+              <span>{new Date(x.at).toLocaleString()}</span>
+              <span>{x.actor}</span>
+              <span>{x.action}</span>
+              <span>{x.target || '—'}</span>
+            </div>
+          ))}
+        </TerminalFrame>
+      </div>
+    </div>
+  );
+}
