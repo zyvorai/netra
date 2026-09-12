@@ -29,6 +29,8 @@
   --accent-purple-hover: #a246d4;
   --btn-secondary: #6e6e73;
   --btn-secondary-hover: #5a5a5e;
+  --disabled-bg: #dcdce1;
+  --disabled-text: #86868b;
   --warning-bg: #fff6ed;
   --warning-border: #ffd8ba;
   --warning-text: #8b3d00;
@@ -73,8 +75,10 @@
   --accent-amber-hover: #ffb340;
   --accent-purple: #bf5af2;
   --accent-purple-hover: #c767f3;
-  --btn-secondary: #636366;
-  --btn-secondary-hover: #6e6e73;
+  --btn-secondary: #737378;
+  --btn-secondary-hover: #7e7e84;
+  --disabled-bg: #3a3a3d;
+  --disabled-text: #9a9aa0;
   --warning-bg: rgba(255, 159, 10, 0.12);
   --warning-border: rgba(255, 159, 10, 0.35);
   --warning-text: #ffd60a;
@@ -247,15 +251,19 @@ button.btn-diag:hover {
   background: var(--accent-purple-hover) !important;
 }
 
-button.btn-refresh:disabled,
-button.btn-next:disabled,
-button.btn-success:disabled,
-button.btn-warn:disabled,
-button.btn-secondary:disabled,
-button.btn-diag:disabled,
-button.primary:disabled,
-button.danger:disabled {
-  opacity: 0.4;
+/* Disabled buttons get one solid, theme-aware muted look regardless of
+   variant — never a faded/opacity-based tint of the enabled color, which
+   washes vivid fills into near-illegible pastels (especially in light mode:
+   a 40%-opacity --accent-amber or --accent-green over a white card reads as
+   a barely-visible pale blob, not "this button is off"). */
+button:disabled,
+.buttonlike:disabled,
+.buildbutton:disabled,
+.chips button:disabled {
+  background: var(--disabled-bg) !important;
+  color: var(--disabled-text) !important;
+  border-color: transparent !important;
+  opacity: 1;
   cursor: not-allowed;
   filter: none;
   transform: none;
@@ -265,7 +273,7 @@ button.danger:disabled {
 .chips button {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
-  border-color: transparent !important;
+  border-color: var(--danger) !important;
   white-space: normal;
   max-width: 100%;
   text-align: left;
@@ -804,7 +812,7 @@ code {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   padding: 14px 18px;
   border-radius: 14px;
@@ -1025,7 +1033,7 @@ code {
   padding: 6px 12px;
   border-radius: 980px;
   background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
@@ -1051,7 +1059,7 @@ code {
 .chips button {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
-  border-color: transparent !important;
+  border-color: var(--danger) !important;
   white-space: normal;
   max-width: 100%;
   text-align: left;
@@ -1161,7 +1169,7 @@ code {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   padding: 14px 16px;
   border-radius: 14px;
