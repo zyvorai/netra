@@ -48,6 +48,7 @@ type Server struct {
 	agentStaleAfter  time.Duration
 	requirePreflight bool
 	ciliumEnabled    bool
+	consoleEnabled   bool
 	metricsData      *telemetry
 }
 
@@ -60,7 +61,8 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	}
 	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
 	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
-	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, metricsData: &telemetry{}}
+	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
+	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -90,6 +92,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/pods", s.auth(http.HandlerFunc(s.listPods)))
 	mux.Handle("GET /api/v1/vms", s.auth(http.HandlerFunc(s.listVMs)))
 	mux.Handle("GET /api/v1/workloads/{kind}/{namespace}/{name}", s.auth(http.HandlerFunc(s.workloadDetail)))
+	if s.consoleEnabled {
+		mux.Handle("GET /api/v1/pods/{namespace}/{name}/logs", s.auth(http.HandlerFunc(s.streamPodLogs)))
+		mux.Handle("GET /api/v1/pods/{namespace}/{name}/exec", s.auth(http.HandlerFunc(s.proxyPodExec)))
+		mux.Handle("GET /api/v1/vms/{namespace}/{name}/vnc", s.auth(http.HandlerFunc(s.proxyVMVnc)))
+	}
 	mux.Handle("GET /api/v1/flows/stream", s.auth(http.HandlerFunc(s.streamFlows)))
 	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
 	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.explainDrops)))
@@ -214,6 +221,9 @@ func bearer(r *http.Request) string {
 	if strings.HasPrefix(strings.ToLower(v), "bearer ") {
 		return strings.TrimSpace(v[7:])
 	}
+	if t := strings.TrimSpace(r.URL.Query().Get("token")); t != "" {
+		return t
+	}
 	return ""
 }
 
@@ -231,7 +241,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.22.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.22.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}

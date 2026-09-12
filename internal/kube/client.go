@@ -23,6 +23,8 @@ import (
 type Client struct {
 	base, token string
 	http        *http.Client
+	streamHTTP  *http.Client
+	tlsConfig   *tls.Config
 }
 
 func NewFromEnvironment() (*Client, error) {
@@ -44,8 +46,15 @@ func NewFromEnvironment() (*Client, error) {
 	if len(ca) > 0 {
 		pool.AppendCertsFromPEM(ca)
 	}
-	tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
-	return &Client{base: base, token: strings.TrimSpace(string(tokenBytes)), http: &http.Client{Timeout: 15 * time.Second, Transport: tr}}, nil
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
+	tr := &http.Transport{TLSClientConfig: tlsCfg}
+	return &Client{
+		base:       base,
+		token:      strings.TrimSpace(string(tokenBytes)),
+		http:       &http.Client{Timeout: 15 * time.Second, Transport: tr},
+		streamHTTP: &http.Client{Timeout: 0, Transport: tr},
+		tlsConfig:  tlsCfg,
+	}, nil
 }
 
 func (c *Client) do(ctx context.Context, method, p string, body []byte, contentType string) ([]byte, error) {

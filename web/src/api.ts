@@ -9,3 +9,11 @@ function headers(extra:Record<string,string>={}){const h:{[k:string]:string}={..
 export async function api<T=unknown>(path:string, init:RequestInit={}):Promise<T>{const r=await fetch(path,{...init,headers:headers(init.headers as Record<string,string>||{})});if(!r.ok){if(r.status===401){setToken('');window.dispatchEvent(new Event('netra-auth-expired'))}throw new Error((await r.text())||r.statusText)}return r.json()}
 export function streamURL(path:string){return path}
 export function authHeaders(){return headers()}
+/** WebSocket URL with optional ?token= for browser clients that cannot set Authorization. */
+export function wsURL(path:string){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  const u=new URL(path,`${proto}//${location.host}`);
+  const t=token();
+  if(t)u.searchParams.set('token',t);
+  return u.toString();
+}

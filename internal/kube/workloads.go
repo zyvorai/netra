@@ -75,26 +75,35 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 			OwnerReferences []struct{ Kind, Name string } `json:"ownerReferences"`
 		} `json:"metadata"`
 		Spec struct {
-			NodeName string `json:"nodeName"`
+			NodeName          string `json:"nodeName"`
+			Containers        []struct{ Name string } `json:"containers"`
+			InitContainers    []struct{ Name string } `json:"initContainers"`
+			EphemeralContainers []struct{ Name string } `json:"ephemeralContainers"`
 		} `json:"spec"`
 		Status struct {
 			Phase, PodIP      string
 			ContainerStatuses []struct {
-				Ready bool `json:"ready"`
+				Name  string `json:"name"`
+				Ready bool   `json:"ready"`
 			} `json:"containerStatuses"`
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(b, &it); err != nil {
 		return nil, fmt.Errorf("decode pod: %w", err)
 	}
+	readyByName := map[string]bool{}
 	ready := false
 	for _, cs := range it.Status.ContainerStatuses {
+		readyByName[cs.Name] = cs.Ready
 		if cs.Ready {
 			ready = true
-			break
 		}
 	}
-	p := &models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels}
+	containers := make([]models.ContainerInfo, 0, len(it.Spec.Containers))
+	for _, ctn := range it.Spec.Containers {
+		containers = append(containers, models.ContainerInfo{Name: ctn.Name, Ready: readyByName[ctn.Name]})
+	}
+	p := &models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels, Containers: containers}
 	if len(it.Metadata.OwnerReferences) > 0 {
 		p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 		p.OwnerName = it.Metadata.OwnerReferences[0].Name
