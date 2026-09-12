@@ -8,6 +8,8 @@
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
+📖 **[Read the full docs](https://zyvorai.github.io/netra/)** — quickstart, architecture, security model, and a product tour.
+
 Netra does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
@@ -376,7 +378,7 @@ Netra is secure-by-default: the controller requires independent API and agent cr
 
 Controller state is restart-durable when `NETRA_STATE_FILE` is configured. Active/passive HA uses Kubernetes Lease election plus a shared state-file lock. A leader transition or controller restart never resurrects an old eBPF enforcement lease: the datapath returns to observe first.
 
-See `SECURITY.md`, `docs/standalone-ebpf.md`, `docs/workload-scoping.md`, `docs/behavior-insights.md`, `docs/rate-insights.md`, and `docs/high-availability.md` before production deployment. CI (`.github/workflows/ci.yml`) runs the current, living validation checks (Go build/vet/test, web typecheck/test/build, Helm lint/render, and a real `clang` BPF compile check) on every push.
+See the [Security](https://zyvorai.github.io/netra/docs/security) docs page, `docs/standalone-ebpf.md`, `docs/workload-scoping.md`, `docs/behavior-insights.md`, `docs/rate-insights.md`, and `docs/high-availability.md` before production deployment. CI (`.github/workflows/ci.yml`) runs the current, living validation checks (Go build/vet/test, web typecheck/test/build, Helm lint/render, and a real `clang` BPF compile check) on every push.
 
 ## License
 
