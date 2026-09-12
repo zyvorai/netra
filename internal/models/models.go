@@ -70,6 +70,9 @@ type EBPFFastPathConfig struct {
 	ScopeMode        string              `json:"scopeMode,omitempty"` // all or selected
 	WorkloadScopes   []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
 	Workloads        []WorkloadIdentity  `json:"workloads,omitempty"` // ephemeral node inventory, never persisted intentionally
+	Shield           *ShieldConfig       `json:"shield,omitempty"`
+	NetPolEnabled    bool                `json:"netPolEnabled,omitempty"`
+	NetPolDenies     []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
 	Revision         uint64              `json:"revision"`
 	EnforceUntil     *time.Time          `json:"enforceUntil,omitempty"`
 	LeaseSeconds     int64               `json:"leaseSeconds,omitempty"`
@@ -209,11 +212,66 @@ type TCPHealthStat struct {
 	PID                uint32 `json:"pid,omitempty"`
 	UID                uint32 `json:"uid,omitempty"`
 	Comm               string `json:"comm,omitempty"`
-	Namespace          string `json:"namespace,omitempty"`
-	Pod                string `json:"pod,omitempty"`
-	WorkloadKind       string `json:"workloadKind,omitempty"`
-	WorkloadName       string `json:"workloadName,omitempty"`
-	ContainerID        string `json:"containerId,omitempty"`
+	// StartTimeJiffies + Exe are filled when procmeta is enabled and the
+	// socket owner's PID still matches a live process incarnation.
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	// OwnershipStale is set when the eBPF-attributed PID could not be
+	// confirmed in /proc (exited or reused). PID/comm are cleared in that case.
+	OwnershipStale bool   `json:"ownershipStale,omitempty"`
+	Namespace      string `json:"namespace,omitempty"`
+	Pod            string `json:"pod,omitempty"`
+	WorkloadKind   string `json:"workloadKind,omitempty"`
+	WorkloadName   string `json:"workloadName,omitempty"`
+	ContainerID    string `json:"containerId,omitempty"`
+}
+
+// BPFProgramStat is per-program attach + optional kernel run stats from the agent.
+type BPFProgramStat struct {
+	Name             string `json:"name"`
+	Type             string `json:"type,omitempty"`
+	ID               uint32 `json:"id,omitempty"`
+	Attached         bool   `json:"attached"`
+	RunCount         uint64 `json:"runCount,omitempty"`
+	RunTimeNS        uint64 `json:"runTimeNs,omitempty"`
+	RecursionMisses  uint64 `json:"recursionMisses,omitempty"`
+	InfoError        string `json:"infoError,omitempty"`
+}
+
+// CapChangeEvent is an observe-only notice that CapEff changed for a
+// process that currently owns a Netra-tracked socket (procmeta gated).
+type CapChangeEvent struct {
+	PID              uint32 `json:"pid"`
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	PreviousCapEff   uint64 `json:"previousCapEff"`
+	CurrentCapEff    uint64 `json:"currentCapEff"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+}
+
+// NetworkHistogramReport mirrors histograms.Report JSON for AgentReport
+// without importing the histograms package into models.
+type NetworkHistogramReport struct {
+	TCPRetransmissions HistogramSnapshot `json:"tcpRetransmissions"`
+	TCPSRTTUS          HistogramSnapshot `json:"tcpSrttUs"`
+	TCPConnectUS       HistogramSnapshot `json:"tcpConnectUs"`
+	Host               NetworkHostCounters `json:"host"`
+}
+
+type HistogramSnapshot struct {
+	Name             string    `json:"name"`
+	Bounds           []float64 `json:"bounds"`
+	CumulativeCounts []uint64  `json:"cumulativeCounts"`
+	Sum              float64   `json:"sum"`
+	Count            uint64    `json:"count"`
+}
+
+type NetworkHostCounters struct {
+	ListenOverflows uint64 `json:"listenOverflows"`
+	ListenDrops     uint64 `json:"listenDrops"`
+	SoftirqNETRX    uint64 `json:"softirqNetRx"`
 }
 
 type TCPSignalStat struct {
@@ -389,6 +447,77 @@ type DropDiagnosticsResponse struct {
 	Nodes   []NodeDropDiagnostics  `json:"nodes"`
 }
 
+type PolicyDropStat struct {
+	Family    uint8  `json:"family"`
+	Protocol  uint8  `json:"protocol"`
+	Direction uint8  `json:"direction"`
+	Reason    uint8  `json:"reason"`
+	SrcAddr   string `json:"srcAddr,omitempty"`
+	DstAddr   string `json:"dstAddr,omitempty"`
+	SrcPort   uint16 `json:"srcPort,omitempty"`
+	DstPort   uint16 `json:"dstPort,omitempty"`
+	Packets   uint64 `json:"packets"`
+	Bytes     uint64 `json:"bytes"`
+	LastNS    uint64 `json:"lastNs,omitempty"`
+}
+
+type DropDetectiveFinding struct {
+	Node        string `json:"node,omitempty"`
+	Confidence  string `json:"confidence"`
+	Code        string `json:"code"`
+	Stage       string `json:"stage"`
+	Reason      uint8  `json:"reason"`
+	Family      uint8  `json:"family,omitempty"`
+	Protocol    uint8  `json:"protocol,omitempty"`
+	Direction   uint8  `json:"direction,omitempty"`
+	Src         string `json:"src,omitempty"`
+	Dst         string `json:"dst,omitempty"`
+	Packets     uint64 `json:"packets"`
+	Bytes       uint64 `json:"bytes,omitempty"`
+	Explanation string `json:"explanation"`
+	Suggestion  string `json:"suggestion,omitempty"`
+}
+
+type DropDetectiveSummary struct {
+	Text              string `json:"text"`
+	PolicyDropPackets uint64 `json:"policyDropPackets"`
+	PolicyDropFlows   uint64 `json:"policyDropFlows"`
+	ConntrackEntries  uint64 `json:"conntrackEntries"`
+	ExactFindings     int    `json:"exactFindings"`
+	ProbableFindings  int    `json:"probableFindings"`
+}
+
+type DropDetectiveResponse struct {
+	Summary  DropDetectiveSummary   `json:"summary"`
+	Findings []DropDetectiveFinding `json:"findings"`
+}
+
+type ShieldConfig struct {
+	Generation    uint32   `json:"generation"`
+	Mode          string   `json:"mode"` // off|audit|enforce
+	ProtectAll    bool     `json:"protectAll,omitempty"`
+	ProtectedIPv4 []string `json:"protectedIpv4,omitempty"`
+	SynPPS        uint32   `json:"synPps,omitempty"`
+	UDPPPS        uint32   `json:"udpPps,omitempty"`
+	ICMPPPS       uint32   `json:"icmpPps,omitempty"`
+	OtherPPS      uint32   `json:"otherPps,omitempty"`
+	BurstSeconds  uint32   `json:"burstSeconds,omitempty"`
+}
+
+type ShieldStats struct {
+	Allowed uint64 `json:"allowed"`
+	Dropped uint64 `json:"dropped"`
+	Audited uint64 `json:"audited"`
+}
+
+type NetPolPeerDeny struct {
+	CgroupID  uint64 `json:"cgroupId"`
+	PeerIPv4  string `json:"peerIpv4"`
+	Port      uint16 `json:"port,omitempty"`
+	Protocol  string `json:"protocol,omitempty"`  // TCP|UDP|ANY
+	Direction string `json:"direction,omitempty"` // ingress|egress|both
+}
+
 type AgentReport struct {
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
@@ -407,12 +536,49 @@ type AgentReport struct {
 	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
-	Stack              NodeStackStat           `json:"stack,omitempty"`
-	Events             []FastPathEvent         `json:"events"`
-	ObservedAt         time.Time               `json:"observedAt"`
-	Workloads          []WorkloadIdentity      `json:"workloads,omitempty"`
-	ScopeMode          string                  `json:"scopeMode,omitempty"`
-	SelectedCgroups    int                     `json:"selectedCgroups,omitempty"`
+	PolicyDrops        []PolicyDropStat        `json:"policyDrops,omitempty"`
+	ConntrackEntries   int                     `json:"conntrackEntries,omitempty"`
+	Shield             *ShieldStats            `json:"shield,omitempty"`
+	// ProcessMeta is /proc-derived process metadata for PIDs observed in
+	// this report (see TCPHealth[].PID), populated only when the agent
+	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
+	// see the host's /proc, a real expansion of what it can observe.
+	ProcessMeta     []ProcessMetaStat  `json:"processMeta,omitempty"`
+	Programs        []BPFProgramStat   `json:"programs,omitempty"`
+	Histograms      *NetworkHistogramReport `json:"histograms,omitempty"`
+	CapChanges      []CapChangeEvent   `json:"capChanges,omitempty"`
+	Stack           NodeStackStat      `json:"stack,omitempty"`
+	Events          []FastPathEvent    `json:"events"`
+	ObservedAt      time.Time          `json:"observedAt"`
+	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
+	ScopeMode       string             `json:"scopeMode,omitempty"`
+	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
+}
+
+// ProcessMetaStat is /proc-derived metadata for one process observed on the
+// node, keyed by PID+StartTimeJiffies (PID-reuse-safe). It deliberately
+// does not include argv/cmdline content, matching Netra's existing
+// comm-only process-identity boundary elsewhere. See internal/procmeta.
+type ProcessMetaStat struct {
+	PID              uint32   `json:"pid"`
+	StartTimeJiffies uint64   `json:"startTimeJiffies"`
+	Comm             string   `json:"comm,omitempty"`
+	PPID             int      `json:"ppid,omitempty"`
+	EffectiveUID     uint32   `json:"effectiveUid,omitempty"`
+	NoNewPrivs       bool     `json:"noNewPrivs,omitempty"`
+	SeccompMode      int      `json:"seccompMode,omitempty"`
+	LSMLabel         string   `json:"lsmLabel,omitempty"`
+	Exe              string   `json:"exe,omitempty"`
+	CapEff           uint64   `json:"capEff,omitempty"`
+	CapNames         []string `json:"capNames,omitempty"`
+	ContainerPID     int      `json:"containerPid,omitempty"`
+	KernelThread     bool     `json:"kernelThread,omitempty"`
+	ProcessKind      string   `json:"processKind,omitempty"`
+	CgroupPath       string   `json:"cgroupPath,omitempty"`
+	PodUID           string   `json:"podUid,omitempty"`
+	ContainerID      string   `json:"containerId,omitempty"`
+	QoSClass         string   `json:"qosClass,omitempty"`
+	AttributionError string   `json:"attributionError,omitempty"`
 }
 
 type AgentStatus struct {

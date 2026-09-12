@@ -4,7 +4,10 @@ metadata:
   name: {{ .Release.Name }}-netra-workload-metadata
 rules:
 - apiGroups: [""]
-  resources: ["pods","services"]
+  resources: ["pods"]
+  verbs: ["get","list"]
+- apiGroups: [""]
+  resources: ["services"]
   verbs: ["get","list"]
 - apiGroups: ["kubevirt.io"]
   resources: ["virtualmachines","virtualmachineinstances"]

@@ -5,11 +5,16 @@ COPY cmd ./cmd
 COPY internal ./internal
 RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/netra-agent ./cmd/netra-agent
 
-FROM debian:bookworm AS bpf
+# Clang 14 (Debian bookworm) fails on large CT/policy helpers. Ubuntu 24.04 Clang 18
+# matches CI; raise compile-time stack estimate so always_inline helpers can optimize.
+FROM ubuntu:24.04 AS bpf
 RUN apt-get update && apt-get install -y --no-install-recommends clang llvm linux-libc-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY bpf/netra_tc.c .
-RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(uname -m)-linux-gnu -c netra_tc.c -o /out.o
+COPY bpf/ ./
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -mllvm -bpf-stack-size=1024 \
+    -c netra_tc.c -o /out.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent

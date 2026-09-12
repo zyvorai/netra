@@ -6,6 +6,7 @@ package doctor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,8 +36,28 @@ func TestRunHealthyFixture(t *testing.T) {
 	assertStatus(t, r, "bpffs", StatusPass)
 	assertStatus(t, r, "drop-reasons", StatusPass)
 	assertStatus(t, r, "capabilities", StatusPass)
+	assertStatus(t, r, "tetragon", StatusInfo)
 	if !r.GeneratedAt.Equal(time.Unix(1_700_000_000, 0).UTC()) {
 		t.Fatalf("generatedAt=%v", r.GeneratedAt)
+	}
+}
+
+func TestTetragonDetected(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/proc/sys/kernel/osrelease", "6.8.12\n")
+	write(t, root, "/sys/fs/cgroup/cgroup.controllers", "cpu memory\n")
+	write(t, root, "/proc/self/cgroup", "0::/\n")
+	write(t, root, "/proc/self/mountinfo", "36 25 0:32 / /sys/fs/bpf rw - bpf bpf rw\n")
+	write(t, root, "/proc/self/status", "CapEff:\t000000c001201000\n")
+	if err := os.MkdirAll(filepath.Join(root, "sys/fs/bpf/tetragon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := Run(Options{Root: root})
+	assertStatus(t, r, "tetragon", StatusInfo)
+	for _, c := range r.Checks {
+		if c.ID == "tetragon" && !strings.Contains(c.Detail, "tetragon") {
+			t.Fatalf("detail=%q", c.Detail)
+		}
 	}
 }
 

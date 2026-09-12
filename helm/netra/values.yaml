@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.14.0"
+  tag: "0.22.0"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.14.0"
+  tag: "0.22.0"
 replicaCount: 1
 ha:
   enabled: false
@@ -48,9 +48,17 @@ agent:
   cgroupScanInterval: 10s
   interfaces: ""
   xdpInterfaces: ""
+  tcx: auto
+  xdpShield: false
   pinPath: /sys/fs/bpf/netra
   failsafeAfter: 60s
   staleAfter: 45s
+  # Optional /proc-derived process metadata (internal/procmeta). Off by
+  # default: enabling it also enables hostPID on the agent DaemonSet, a
+  # real expansion of what this already-privileged agent can see (every
+  # host process's /proc, not just what eBPF hooks already surface). See
+  # docs/process-metadata.md.
+  procMetaEnabled: false
 persistence:
   enabled: true
   existingClaim: ""

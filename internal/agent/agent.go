@@ -26,6 +26,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
+	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/workload"
 )
@@ -54,6 +55,23 @@ type Agent struct {
 	cgroupScanEvery                    time.Duration
 	scopeMode                          string
 	selectedCgroups                    int
+
+	// procMetaEnabled gates /proc-derived process metadata enrichment
+	// (internal/procmeta). Off by default: resolving a host PID's /proc
+	// entry from inside the agent container requires hostPID or a host
+	// /proc mount, a real expansion of what this already-privileged agent
+	// can see beyond what eBPF hooks already surface. See
+	// docs/process-metadata.md. The actual enrichment lives in
+	// procmeta_linux.go / procmeta_other.go so this file — otherwise
+	// portable — does not have to import a Linux-only package directly.
+	procMetaEnabled bool
+
+	// attachedProgs tracks which loaded BPF programs successfully attached.
+	attachedProgs map[string]bool
+	// progStats holds the EnableStats closer so kernel run-count collection stays on.
+	progStats io.Closer
+	// prevCaps remembers CapEff by pid^startTime for observe-only cap-change watch.
+	prevCaps map[uint64]uint64
 }
 
 func New(log *slog.Logger) *Agent {
@@ -69,6 +87,9 @@ func New(log *slog.Logger) *Agent {
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
+		procMetaEnabled: envBool("NETRA_PROCMETA_ENABLED", false),
+		attachedProgs:   map[string]bool{},
+		prevCaps:        map[uint64]uint64{},
 	}
 }
 
@@ -89,6 +110,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+			sweepProcessMetaCache()
 			if !a.enforceUntil.IsZero() && !time.Now().Before(a.enforceUntil) {
 				if err := a.forceObserve(); err != nil {
 					a.log.Error("enforcement lease local expiry", "error", err)
@@ -114,6 +136,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops",
+	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 }
@@ -138,6 +161,7 @@ func (a *Agent) loadAndAttach() error {
 		return fmt.Errorf("load BPF collection: %w", err)
 	}
 	a.collection = coll
+	a.enableProgStats()
 	for _, name := range mapNames {
 		if m := coll.Maps[name]; m != nil {
 			p := filepath.Join(a.pinPath, name)
@@ -172,6 +196,7 @@ func (a *Agent) loadAndAttach() error {
 			}
 			a.links = append(a.links, lnk)
 			a.hooks = append(a.hooks, h.name)
+			a.markAttached(h.prog)
 		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
@@ -186,6 +211,7 @@ func (a *Agent) loadAndAttach() error {
 			} else {
 				a.links = append(a.links, lnk)
 				a.hooks = append(a.hooks, "raw-tracepoint:kfree_skb")
+				a.markAttached("netra_kfree_skb")
 			}
 		}
 	}
@@ -194,11 +220,17 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	a.interfaces = ifs
+	tcxMode := strings.ToLower(env("NETRA_TCX", "auto")) // auto|off|required
 	for _, name := range ifs {
 		iface, err := net.InterfaceByName(name)
 		if err != nil {
 			return fmt.Errorf("interface %s: %w", name, err)
 		}
+		if tcxMode == "off" {
+			a.log.Info("TCX skipped by NETRA_TCX=off", "iface", name)
+			continue
+		}
+		attached := 0
 		for _, h := range []struct {
 			name   string
 			attach ebpf.AttachType
@@ -210,10 +242,19 @@ func (a *Agent) loadAndAttach() error {
 			}
 			lnk, err := link.AttachTCX(link.TCXOptions{Interface: iface.Index, Program: p, Attach: h.attach})
 			if err != nil {
-				return fmt.Errorf("attach %s to %s: %w", h.name, name, err)
+				if tcxMode == "required" {
+					return fmt.Errorf("attach %s to %s (NETRA_TCX=required): %w", h.name, name, err)
+				}
+				a.log.Warn("TCX attach failed; continuing without this hook", "hook", h.name, "iface", name, "error", err)
+				continue
 			}
 			a.links = append(a.links, lnk)
 			a.hooks = append(a.hooks, h.name+":"+name)
+			a.markAttached(h.prog)
+			attached++
+		}
+		if attached == 0 && tcxMode == "auto" {
+			a.log.Warn("TCX unavailable on interface", "iface", name)
 		}
 	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
@@ -221,21 +262,33 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	a.xdpInterfaces = xifs
+	shieldProg := coll.Programs["netra_xdp_shield"]
+	useShield := envBool("NETRA_XDP_SHIELD", false) && shieldProg != nil
 	for _, name := range xifs {
 		iface, err := net.InterfaceByName(name)
 		if err != nil {
 			return fmt.Errorf("XDP interface %s: %w", name, err)
 		}
-		p := coll.Programs["netra_xdp_ingress"]
-		if p == nil {
-			return fmt.Errorf("BPF program netra_xdp_ingress missing")
+		prog := coll.Programs["netra_xdp_ingress"]
+		hook := "xdp:"
+		if useShield {
+			prog = shieldProg
+			hook = "xdp-shield:"
 		}
-		lnk, err := link.AttachXDP(link.XDPOptions{Program: p, Interface: iface.Index})
+		if prog == nil {
+			return fmt.Errorf("BPF XDP program missing")
+		}
+		lnk, err := link.AttachXDP(link.XDPOptions{Program: prog, Interface: iface.Index})
 		if err != nil {
 			return fmt.Errorf("attach XDP to %s: %w", name, err)
 		}
 		a.links = append(a.links, lnk)
-		a.hooks = append(a.hooks, "xdp:"+name)
+		hookName := "netra_xdp_ingress"
+		if useShield {
+			hookName = "netra_xdp_shield"
+		}
+		a.hooks = append(a.hooks, hook+name)
+		a.markAttached(hookName)
 	}
 	sort.Strings(a.hooks)
 	a.log.Info("Netra standalone datapath attached", "cgroup", a.cgroupEnabled, "cgroupPath", a.cgroupPath, "interfaces", a.interfaces, "xdpInterfaces", a.xdpInterfaces, "hooks", a.hooks)
@@ -285,6 +338,10 @@ func (a *Agent) Close() {
 	for _, l := range a.links {
 		_ = l.Close()
 	}
+	if a.progStats != nil {
+		_ = a.progStats.Close()
+		a.progStats = nil
+	}
 	if a.collection != nil {
 		a.collection.Close()
 	}
@@ -313,6 +370,9 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	processMeta := a.readProcessMeta(pidsFromTCPHealth(tcpHealth))
+	a.enrichSocketOwnership(tcpHealth, processMeta)
+	capChanges := a.watchCapChanges(processMeta)
 	tcpPressure, err := a.readTCPPressure()
 	if err != nil {
 		return err
@@ -345,9 +405,71 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	policyDrops, err := a.readPolicyDrops()
+	if err != nil {
+		return err
+	}
+	ctEntries, err := a.countMap("conntrack")
+	if err != nil {
+		return err
+	}
+	shieldStats, err := a.readShieldStats()
+	if err != nil {
+		return err
+	}
 	stack := a.readNodeStack()
+	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
+	histJSON := models.NetworkHistogramReport{
+		TCPRetransmissions: models.HistogramSnapshot{
+			Name: histReport.TCPRetransmissions.Name, Bounds: histReport.TCPRetransmissions.Bounds,
+			CumulativeCounts: histReport.TCPRetransmissions.CumulativeCounts, Sum: histReport.TCPRetransmissions.Sum, Count: histReport.TCPRetransmissions.Count,
+		},
+		TCPSRTTUS: models.HistogramSnapshot{
+			Name: histReport.TCPSRTTUS.Name, Bounds: histReport.TCPSRTTUS.Bounds,
+			CumulativeCounts: histReport.TCPSRTTUS.CumulativeCounts, Sum: histReport.TCPSRTTUS.Sum, Count: histReport.TCPSRTTUS.Count,
+		},
+		TCPConnectUS: models.HistogramSnapshot{
+			Name: histReport.TCPConnectUS.Name, Bounds: histReport.TCPConnectUS.Bounds,
+			CumulativeCounts: histReport.TCPConnectUS.CumulativeCounts, Sum: histReport.TCPConnectUS.Sum, Count: histReport.TCPConnectUS.Count,
+		},
+		Host: models.NetworkHostCounters{
+			ListenOverflows: histReport.Host.ListenOverflows,
+			ListenDrops:     histReport.Host.ListenDrops,
+			SoftirqNETRX:    histReport.Host.SoftirqNETRX,
+		},
+	}
+	programs := a.readProgramHealth()
 	events := a.drainEvents(500)
-	return a.report(ctx, models.AgentReport{Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces, Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true, Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency, TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta, ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, Stack: stack, Events: events, ObservedAt: time.Now().UTC(), Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups})
+	return a.report(ctx, models.AgentReport{
+		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
+		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
+		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
+		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops,
+		ConntrackEntries: ctEntries, Shield: shieldStats, ProcessMeta: processMeta,
+		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
+		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
+		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
+	})
+}
+
+// pidsFromTCPHealth collects the unique nonzero PIDs observed in the
+// current TCP health snapshot — the richest available source of
+// currently-relevant process identity — for procmeta enrichment.
+func pidsFromTCPHealth(stats []models.TCPHealthStat) []uint32 {
+	seen := map[uint32]struct{}{}
+	var out []uint32
+	for _, t := range stats {
+		if t.PID == 0 {
+			continue
+		}
+		if _, ok := seen[t.PID]; ok {
+			continue
+		}
+		seen[t.PID] = struct{}{}
+		out = append(out, t.PID)
+	}
+	return out
 }
 func (a *Agent) fetchConfig(ctx context.Context) (models.EBPFFastPathConfig, error) {
 	var cfg models.EBPFFastPathConfig
@@ -412,6 +534,12 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.replaceRates(cfg.RateLimits); err != nil {
+		return err
+	}
+	if err := a.applyShield(cfg.Shield); err != nil {
+		return err
+	}
+	if err := a.applyNetPol(cfg); err != nil {
 		return err
 	}
 	return nil
@@ -1233,6 +1361,225 @@ func (a *Agent) readKernelDrops() ([]models.KernelDropStat, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
 	return out, nil
+}
+
+func (a *Agent) countMap(name string) (int, error) {
+	m := a.collection.Maps[name]
+	if m == nil {
+		return 0, nil
+	}
+	var k, v []byte
+	n := 0
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		n++
+		if n >= 1_000_000 {
+			break
+		}
+	}
+	return n, it.Err()
+}
+
+func (a *Agent) readPolicyDrops() ([]models.PolicyDropStat, error) {
+	m := a.collection.Maps["policy_drops"]
+	if m == nil {
+		return nil, nil
+	}
+	type key struct {
+		Family    uint8
+		Protocol  uint8
+		Direction uint8
+		Reason    uint8
+		SrcPort   uint16
+		DstPort   uint16
+		SrcAddr   [16]byte
+		DstAddr   [16]byte
+	}
+	type value struct {
+		Packets uint64
+		Bytes   uint64
+		LastNS  uint64
+	}
+	var k key
+	var v value
+	out := make([]models.PolicyDropStat, 0, 128)
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		src, dst := "", ""
+		if k.Family == 4 {
+			src = net.IP(k.SrcAddr[:4]).String()
+			dst = net.IP(k.DstAddr[:4]).String()
+		} else {
+			src = net.IP(k.SrcAddr[:]).String()
+			dst = net.IP(k.DstAddr[:]).String()
+		}
+		out = append(out, models.PolicyDropStat{
+			Family: k.Family, Protocol: k.Protocol, Direction: k.Direction, Reason: k.Reason,
+			SrcAddr: src, DstAddr: dst, SrcPort: k.SrcPort, DstPort: k.DstPort,
+			Packets: v.Packets, Bytes: v.Bytes, LastNS: v.LastNS,
+		})
+		if len(out) >= 4096 {
+			break
+		}
+	}
+	if err := it.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
+	return out, nil
+}
+
+func (a *Agent) readShieldStats() (*models.ShieldStats, error) {
+	m := a.collection.Maps["shield_stats"]
+	if m == nil {
+		return nil, nil
+	}
+	var zero uint32
+	var v struct {
+		Allowed uint64
+		Dropped uint64
+		Audited uint64
+	}
+	if err := m.Lookup(&zero, &v); err != nil {
+		return nil, nil
+	}
+	return &models.ShieldStats{Allowed: v.Allowed, Dropped: v.Dropped, Audited: v.Audited}, nil
+}
+
+func (a *Agent) applyShield(cfg *models.ShieldConfig) error {
+	m := a.collection.Maps["shield_cfg"]
+	if m == nil {
+		return nil
+	}
+	type raw struct {
+		Generation   uint32
+		Mode         uint32
+		ProtectAll   uint32
+		SynPPS       uint32
+		UDPPPS       uint32
+		ICMPPPS      uint32
+		OtherPPS     uint32
+		BurstSeconds uint32
+	}
+	var r raw
+	if cfg != nil {
+		r.Generation = cfg.Generation
+		if r.Generation == 0 {
+			r.Generation = 1
+		}
+		switch strings.ToLower(cfg.Mode) {
+		case "audit":
+			r.Mode = 1
+		case "enforce":
+			r.Mode = 2
+		}
+		if cfg.ProtectAll {
+			r.ProtectAll = 1
+		}
+		r.SynPPS, r.UDPPPS, r.ICMPPPS, r.OtherPPS = cfg.SynPPS, cfg.UDPPPS, cfg.ICMPPPS, cfg.OtherPPS
+		r.BurstSeconds = cfg.BurstSeconds
+		if r.BurstSeconds == 0 {
+			r.BurstSeconds = 2
+		}
+	}
+	if err := m.Put(uint32(0), r); err != nil {
+		return err
+	}
+	pm := a.collection.Maps["shield_protected4"]
+	if pm == nil || cfg == nil {
+		return nil
+	}
+	var k struct {
+		Generation uint32
+		Addr       uint32
+	}
+	var v uint8
+	var keys []struct {
+		Generation uint32
+		Addr       uint32
+	}
+	it := pm.Iterate()
+	for it.Next(&k, &v) {
+		keys = append(keys, k)
+	}
+	for _, x := range keys {
+		_ = pm.Delete(x)
+	}
+	for _, s := range cfg.ProtectedIPv4 {
+		ip := net.ParseIP(s)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		var q struct {
+			Generation uint32
+			Addr       uint32
+		}
+		q.Generation = r.Generation
+		q.Addr = native.Uint32(ip.To4())
+		if err := pm.Put(q, uint8(1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *Agent) applyNetPol(cfg models.EBPFFastPathConfig) error {
+	en := a.collection.Maps["netpol_enabled"]
+	dm := a.collection.Maps["netpol_deny4"]
+	if en == nil || dm == nil {
+		return nil
+	}
+	on := uint32(0)
+	if cfg.NetPolEnabled {
+		on = 1
+	}
+	if err := en.Put(uint32(0), on); err != nil {
+		return err
+	}
+	type key struct {
+		CgroupID  uint64
+		Peer      uint32
+		Port      uint16
+		Protocol  uint8
+		Direction uint8
+	}
+	var k key
+	var v uint8
+	var keys []key
+	it := dm.Iterate()
+	for it.Next(&k, &v) {
+		keys = append(keys, k)
+	}
+	for _, x := range keys {
+		_ = dm.Delete(x)
+	}
+	for _, d := range cfg.NetPolDenies {
+		ip := net.ParseIP(d.PeerIPv4)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		proto := uint8(0)
+		switch strings.ToUpper(d.Protocol) {
+		case "TCP":
+			proto = 6
+		case "UDP":
+			proto = 17
+		}
+		dirs := []uint8{1, 2}
+		switch strings.ToLower(d.Direction) {
+		case "ingress":
+			dirs = []uint8{1}
+		case "egress":
+			dirs = []uint8{2}
+		}
+		for _, dir := range dirs {
+			q := key{CgroupID: d.CgroupID, Peer: native.Uint32(ip.To4()), Port: d.Port, Protocol: proto, Direction: dir}
+			if err := dm.Put(q, uint8(1)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func parseHexField(s string) uint64 {

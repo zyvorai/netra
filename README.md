@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.14.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.23.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
 
-Netra v0.14 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
+Netra v0.19 does not require Cilium. The node agent owns its own programs and maps below `/sys/fs/bpf/netra`, attaches to Linux cgroup v2 for CNI-independent workload coverage, and can optionally attach TCX/XDP programs to selected interfaces. If Cilium/Hubble exists, Netra can still manage `CiliumNetworkPolicy` and display Hubble flows, but both integrations are opt-in.
 
 Netra is observe-first. All custom enforcement is protected by a time-limited lease and automatically returns to **observe** when the lease expires, the agent cannot refresh controller state, the controller restarts, or HA leadership changes.
 
@@ -74,6 +74,9 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Stale-agent detection and per-node hook coverage in the dashboard.
 - Kernel skb drop-reason counters through an optional raw `kfree_skb` tracepoint, plus Linux softnet and interface drop/error counters.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
+- Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). See `docs/alerting.md`.
+- Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as stdio tools for AI agents (e.g. Hermes Agent). Reads/generators are always available; mutating tools (policy apply/rollback/delete, eBPF rule changes, mode toggle) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`) and reuse Netra's existing auth/preflight/audit machinery unchanged. See `docs/mcp-integration.md`.
 
 ### Emergency enforcement
 
@@ -98,7 +101,7 @@ Netra v0.13 added a dedicated **Path Diagnostics** surface independent of Cilium
 
 ## Drop Diagnostics
 
-Netra v0.14 adds a dedicated **Drop Diagnostics** surface independent of Cilium. When the host exposes a modern `kfree_skb` drop-reason tracepoint, the agent attaches an optional raw tracepoint and counts kernel skb drop reasons. It also reports `/proc/net/softnet_stat` backlog drops/time-squeeze events and per-interface receive/transmit drop/error/missed/no-handler counters. Drop-reason counters are intentionally node-level because the kernel tracepoint does not provide a trustworthy Kubernetes workload identity. See `docs/drop-diagnostics.md`.
+Netra v0.19 adds a dedicated **Drop Diagnostics** surface independent of Cilium. When the host exposes a modern `kfree_skb` drop-reason tracepoint, the agent attaches an optional raw tracepoint and counts kernel skb drop reasons. It also reports `/proc/net/softnet_stat` backlog drops/time-squeeze events and per-interface receive/transmit drop/error/missed/no-handler counters. Drop-reason counters are intentionally node-level because the kernel tracepoint does not provide a trustworthy Kubernetes workload identity. See `docs/drop-diagnostics.md`.
 
 ## Behavior and Rate Insights
 
@@ -194,6 +197,7 @@ cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
+cmd/netra-mcp/          MCP server: controller API as stdio tools for AI agents
 internal/agent/          BPF loading, hook attachment and reporting
 internal/doctor/         host readiness checks used by netra-doctor
 internal/observability/  standalone eBPF summaries and workload topology
@@ -219,6 +223,13 @@ docs/behavior-insights.md dependency/inventory-baseline/drift/recommendation run
 docs/rate-insights.md     time-window rate baseline, exposure and remediation runbook
 docs/high-availability.md HA runbook
 docs/host-readiness.md    netra-doctor host readiness runbook
+docs/drop-detective.md    conntrack + policy Drop Detective
+docs/tcx-and-shield.md    TCX modes + XDP Shield
+docs/native-netpol.md     optional native deny-list NetPol maps
+docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
+docs/alerting.md          webhook alert dispatcher + poller runbook
+docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
+docs/mcp-integration.md   MCP server for AI agents (Hermes Agent, etc.), gated mutations
 ```
 
 ## Prerequisites

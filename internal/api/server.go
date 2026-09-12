@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zyvorai/netra/internal/detective"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/flowstats"
 	"github.com/zyvorai/netra/internal/health"
@@ -63,13 +64,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.14.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.22.0"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.14.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.22.0"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.14.0"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.22.0"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -116,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/drops", s.auth(http.HandlerFunc(s.ebpfDropDiagnostics)))
+	mux.Handle("GET /api/v1/ebpf/diagnose", s.auth(http.HandlerFunc(s.ebpfDropDetective)))
 	mux.Handle("GET /api/v1/ebpf/l7", s.auth(http.HandlerFunc(s.ebpfL7)))
 	mux.Handle("GET /api/v1/ebpf/capabilities", s.auth(http.HandlerFunc(s.ebpfCapabilities)))
 	mux.Handle("GET /api/v1/insights/summary", s.auth(http.HandlerFunc(s.insightsSummary)))
@@ -211,7 +213,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.14.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.22.0", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -1171,6 +1173,17 @@ func (s *Server) ebpfPathDiagnostics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, pathdiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
+
+func (s *Server) ebpfDropDetective(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, 200, detective.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), s.store.Config(), limit))
+}
+
 func (s *Server) ebpfDropDiagnostics(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
@@ -1190,7 +1203,7 @@ func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

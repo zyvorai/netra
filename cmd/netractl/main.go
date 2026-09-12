@@ -341,6 +341,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/path", nil)
 	case "drops":
 		return request("GET", "/api/v1/ebpf/drops", nil)
+	case "diagnose":
+		return request("GET", "/api/v1/ebpf/diagnose", nil)
 	case "l7":
 		return request("GET", "/api/v1/ebpf/l7", nil)
 	case "capabilities":

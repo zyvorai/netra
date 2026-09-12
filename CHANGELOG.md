@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.23.0 — 2026-09-12
+
+- Added `netra-mcp`, a Model Context Protocol (MCP) server exposing the controller's HTTP API as stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. See `docs/mcp-integration.md`.
+- ~35 read/generate tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, policy list/history/build/lockdown-preview) are always available; ~27 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in via `NETRA_MCP_ALLOW_MUTATIONS` and are off by default.
+- Every mutating tool reuses Netra's existing safety machinery unchanged: bearer-token auth, the single-use content-hash-bound preflight token for policy apply, the self-reverting lease on enforce mode, and the existing audit log — mutations from this server are tagged with a distinct actor label (`NETRA_MCP_ACTOR`, default `mcp:hermes`) so they're distinguishable from human `netractl` use.
+- Implemented stdlib-only (hand-rolled JSON-RPC 2.0 over newline-delimited stdio in the new `internal/mcpserver` package), matching this repo's existing dependency-averse convention for its CLI tools.
+
+## 0.22.0 — 2026-09-12
+
+- Borrowed observe-only patterns from Cloudflare ebpf_exporter and Cilium Tetragon (no vendoring, no TracingPolicy engine). See `docs/exporter-tetragon-borrow-backlog.md`.
+- Added agent-side network histograms (TCP retransmissions, SRTT, connect latency) plus host listen-overflow / softirq NET_RX counters; exported as Prometheus histograms/gauges on `/metrics`.
+- Added per-program BPF attach + optional kernel run stats on `AgentReport.programs` and `netra_ebpf_program_*` metrics; eBPF UI shows attach/run health.
+- Hardened process↔socket ownership when `NETRA_PROCMETA_ENABLED`: confirm `pid+startTimeJiffies`, clear stale PID attribution, surface `exe` on TCP health rows.
+- Added observe-only capability-change watch for socket-owning processes (`capChanges`) and a `netra-doctor` Tetragon coexistence info check.
+
+## 0.21.0 — 2026-09-12
+
+- Added `internal/procmeta`, an optional, off-by-default `/proc`-derived process metadata reader (Linux-only): capabilities, seccomp/`NoNewPrivs`, LSM label, executable path, cgroup-derived pod/container/QoS attribution, and a kernel-thread/host/container/VM classification heuristic. PID-reuse-safe via `{PID, StartTime}` identity.
+- Deliberately does not collect argv/cmdline content, matching this project's existing comm-only process-identity boundary elsewhere.
+- Wired agent-side only (`internal/agent`, gated by `NETRA_PROCMETA_ENABLED`) — the controller aggregates reports from potentially many remote nodes and has no relationship to any specific node's `/proc`, so enrichment happens where the PID was actually observed. A no-op stub keeps the agent buildable on non-Linux development machines.
+- Enabling `agent.procMetaEnabled` in the Helm chart also adds `hostPID: true` to the agent DaemonSet, a real expansion of what the agent can see; off by default. See `docs/process-metadata.md`.
+- Added `AgentReport.ProcessMeta`, keyed by PID+StartTimeJiffies, populated from the PIDs seen in each sync cycle's TCP health snapshot.
+
+## 0.20.0 — 2026-09-12
+
+- Added `internal/webhook`, a delivery package for pushing structured alert events to configured HTTP endpoints: HMAC-SHA256 body signing, per-sink severity filtering, bounded per-sink retry with exponential backoff, and concurrent per-sink fan-out so one unreachable sink can't delay delivery to the others.
+- Added `internal/alert`, a controller-side poller that periodically evaluates the existing `health`/`pathdiag`/`dropdiag` anomaly sources (previously only computed on demand, per HTTP request, with no background aggregation point) and publishes new/escalated findings through the dispatcher, with severity-escalation-aware cooldown deduplication.
+- Alerting is off by default (`NETRA_ALERT_WEBHOOKS` unset) and, when HA is enabled, runs only on the active leader replica, tied to the same store open/close lifecycle already used for the HTTP handler.
+- Added `docs/alerting.md`.
+- Did not add: new anomaly-detection thresholds, dedup-state persistence across restarts/failover, or exactly-once delivery guarantees.
+
+## 0.19.0 — 2026-09-12
+
+- Added optional cgroup-keyed `netpol_deny4` / `netpol_enabled` maps for native deny-list NetworkPolicy-shaped enforcement (off by default).
+- Bundles the v0.17 conntrack/Drop Detective and v0.18 TCX/XDP Shield borrow waves from FluxVM.
+
+## 0.18.0 — 2026-09-12
+
+- Added `NETRA_TCX=auto|off|required` attach semantics for optional interface TCX hooks.
+- Added optional XDP Shield (`NETRA_XDP_SHIELD`) with generation-published protected IPv4 and per-source SYN/UDP/ICMP/other PPS token buckets.
+
+## 0.17.0 — 2026-09-12
+
+- Added LRU `conntrack` map with established-flow learn/hit (SYN always re-evaluates policy).
+- Added `policy_drops` map and `GET /api/v1/ebpf/diagnose` Drop Detective (exact vs probable) from FluxVM’s correlation model.
+- Wired detective findings into the Drop Diagnostics UI and `netractl ebpf diagnose`.
+
 ## 0.15.0 — 2026-09-11
 
 - Added `netra-doctor`, a read-only host readiness preflight for cgroup v2, bpffs, BTF, tracefs, kernel baseline, capabilities, lockdown and memlock.
