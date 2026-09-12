@@ -51,3 +51,46 @@ The aggregate `allowed`/`dropped`/`audited` counters Shield always exposed don't
 - **Per-source hit counts** — how many times each source address has been denied, recorded identically whether Shield is in `audit` or `enforce` mode. This lets an operator see who Shield *would* drop before ever flipping it to `enforce`.
 
 Exposed via `GET /api/v1/ebpf/shield`, `netractl ebpf shield`, and the `netra_ebpf_shield` MCP tool. Anomalies: `shield-class-drop-rate` (a class's drop rate is at or above 10%/50%) and `shield-source-flood` (a single source has 10,000+ denied hits). Both are purely observational — they don't change Shield's own mode or thresholds.
+
+## Deploying interface config with `deploy-remote.sh`
+
+`scripts/deploy-remote.sh` exposes two opt-in env vars, resolved locally before SSH (same reasoning as `NETRA_API_KEY`/`NETRA_AGENT_KEY`: the remote heredoc can't see the invoker's shell environment, so these must be captured on the local side or every deploy silently reverts to empty):
+
+```bash
+NETRA_AGENT_INTERFACES=eno8303 NETRA_AGENT_XDP_INTERFACES=eno8303 \
+NETRA_API_KEY=<existing key> NETRA_AGENT_KEY=<existing key> \
+NETRA_AGENT_ENABLED=true NETRA_WORKLOAD_CONSOLE_ENABLED=true \
+./scripts/deploy-remote.sh user@host --quick
+```
+
+They map straight to `--set agent.interfaces=...`/`--set agent.xdpInterfaces=...`, which land in `NETRA_INTERFACES`/`NETRA_XDP_INTERFACES` on the DaemonSet (see the top of this doc). Passing the *existing* `auth.apiKey`/`auth.agentKey` (from `helm get values netra -n <ns>`) is required on any redeploy that isn't meant to rotate credentials — `API_KEY_LOCAL`/`AGENT_KEY_LOCAL` mint a fresh random key whenever `NETRA_API_KEY`/`NETRA_AGENT_KEY` aren't supplied, and `helm upgrade` will happily push that over the live secret.
+
+## Verification
+
+On the host:
+
+```bash
+sudo kubectl -n netra-system get ds netra-agent -o jsonpath='{.spec.template.spec.containers[0].env}'
+sudo kubectl -n netra-system logs ds/netra-agent --tail=80
+```
+
+The env output should show the interface name in both `NETRA_INTERFACES` and `NETRA_XDP_INTERFACES`, and the agent's startup log line (`"msg":"Netra standalone datapath attached"`) should list `tcx-egress:<iface>`, `tcx-ingress:<iface>`, and `xdp:<iface>` in its `hooks` array.
+
+Against the API (`Authorization: Bearer <api key>`, not `X-API-Key`):
+
+```bash
+curl -sk -H "Authorization: Bearer <key>" https://<host>:30870/api/v1/status   # fastPath.mode
+curl -sk -H "Authorization: Bearer <key>" https://<host>:30870/api/v1/ebpf/shield
+```
+
+Confirm `fastPath.mode` is still `"observe"` and Shield still shows zero drops before and after — enabling TCX/XDP attach is independent of enforcement; neither this doc's `NETRA_TCX`/`NETRA_XDP_SHIELD` gate nor the global lease change just by attaching the hooks.
+
+In the deployed console (not just the API — the UI is a separate rendering path and can drift from what the backend reports), walk each page that surfaces this state rather than trusting the API alone:
+
+- **Health** → BPF Program Health: shows `N/12 attached` per node and per-hook kernel run counters. `netra_xdp_ingress`'s run count climbing across repeated loads is the strongest signal — it means the program is processing live traffic, not just nominally loaded. `netra_kfree_skb` and `netra_xdp_shield` correctly show `(detached)` when the drop-reason tracepoint is unavailable or Shield is off, respectively.
+- **Firewall**: mode toggle reflects `observe`/`enforce` live; Shield card's allowed/dropped/audited counters match the API.
+- **Overview**: capabilities panel's `"mode"` field and node-agent packet counters.
+- **Hubble**: live flow stream still connects and reports non-zero forwarded flows — confirms Cilium/Hubble weren't disrupted by the redeploy.
+- **L7** (if the host is affected by the verifier rejection above): every L7-specific counter should read 0 with no page error, while unrelated counters (e.g. socket attempts) stay populated — that combination is the documented graceful degradation, not a new failure.
+
+A caveat from the one time this was checked end-to-end: the BPF Program Health panel's TCX-hook run counters read 0 even though the agent's startup log confirmed `tcx-egress`/`tcx-ingress` attached. XDP's non-zero, climbing counter is unambiguous; TCX's attach is confirmed by the log line but wasn't independently confirmed by a matching non-zero run counter in that pass. Worth re-checking with a longer observation window or explicit egress/ingress test traffic before treating TCX itself as proven live end-to-end.
