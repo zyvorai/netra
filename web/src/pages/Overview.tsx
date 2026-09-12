@@ -93,7 +93,7 @@ export default function Overview() {
         </pre>
       </TerminalFrame>
 
-      <section className="card span2">
+      <section className="card span3">
         <p className="eyebrow">NETWORK HEALTH</p>
         <h3>TCP / DNS score</h3>
         <div className="metrics">
@@ -121,7 +121,7 @@ export default function Overview() {
         ))}
       </section>
 
-      <section className="card span2">
+      <section className="card span3">
         <p className="eyebrow">L7 METADATA</p>
         <h3>TLS SNI · HTTP Host</h3>
         <div className="metrics">
@@ -144,7 +144,7 @@ export default function Overview() {
         </div>
       </section>
 
-      <section className="card span2">
+      <section className="card span3">
         <p className="eyebrow">PATH DIAGNOSTICS</p>
         <h3>TCP connect · pressure</h3>
         <div className="metrics">
@@ -168,7 +168,7 @@ export default function Overview() {
         <p>Full tables live on Path Diagnostics — observe-only sockops path health.</p>
       </section>
 
-      <section className="card span2">
+      <section className="card span3">
         <p className="eyebrow">DROP DIAGNOSTICS</p>
         <h3>Kernel · softnet · iface</h3>
         <div className="metrics">
@@ -192,7 +192,7 @@ export default function Overview() {
         <p>Node-level drop reasons live on Drop Diagnostics — optional kfree_skb + stack counters.</p>
       </section>
 
-      <section className="card span2">
+      <section className="card span3">
         <p className="eyebrow">BEHAVIOR INSIGHTS</p>
         <h3>Dependencies · drift · exposure</h3>
         <div className="metrics">
