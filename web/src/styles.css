@@ -2,9 +2,21 @@
   color-scheme: light;
   --bg-page: #f5f5f7;
   --bg-elevated: #ffffff;
+  /* Sub-card/toolbar-input fill, nested inside a --bg-elevated .card — in
+     light mode this is the same value as --bg-page, which is fine (and not
+     mergeable with it): the two are never adjacent to each other, so what
+     matters is contrast against --bg-elevated, which this has. */
   --bg-elevated-2: #f5f5f7;
   --bg-glass: rgba(251, 251, 253, 0.8);
   --text-primary: #1d1d1f;
+  /* --text-secondary/--text-tertiary/--btn-secondary look like three near-
+     duplicate grays but serve three different jobs that happen to share a
+     value in light mode and deliberately diverge in dark mode: secondary
+     copy (readable but de-emphasized text), tertiary copy (the dimmest
+     legible label/caption tier), and a button FILL color (needs enough
+     contrast against --bg-elevated as a solid pill, a stricter bar than
+     either text color needs) — see --btn-secondary below. Not merged on
+     purpose; keep them distinct rather than collapsing to one token. */
   --text-secondary: #6e6e73;
   --text-tertiary: #86868b;
   --border: #d2d2d7;
@@ -27,6 +39,8 @@
   --accent-amber-hover: #f09400;
   --accent-purple: #af52de;
   --accent-purple-hover: #a246d4;
+  /* Same value as --text-secondary in light mode, diverges in dark mode —
+     see the note on --text-secondary above for why this stays separate. */
   --btn-secondary: #6e6e73;
   --btn-secondary-hover: #5a5a5e;
   --disabled-bg: #dcdce1;
@@ -42,6 +56,20 @@
   --hero-glow-a: rgba(0, 113, 227, 0.14);
   --hero-glow-b: rgba(50, 173, 230, 0.12);
   --theme-color: #f5f5f7;
+  /* Border-radius scale — theme-independent (not a color), defined once
+     here rather than repeated in [data-theme="dark"]. Every radius value
+     used anywhere in this file is one of these steps, plus the 50%/0
+     one-offs (circular icon buttons, square nav links) that aren't part
+     of a "rounded corner" scale at all. */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-base: 14px;
+  --radius-lg: 16px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-3xl: 28px;
+  --radius-pill: 980px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
   color: var(--text-primary);
   background: var(--bg-page);
@@ -93,6 +121,11 @@
 }
 
 * { box-sizing: border-box; }
+/* The hidden attribute must always win — otherwise a more specific rule
+   like ".toolbar input { display: block }" can defeat it and expose a
+   native control meant to stay behind a styled label (e.g. Policies'
+   hidden file input for "Import history"). */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg-page);
@@ -109,7 +142,7 @@ button,
   font-weight: 400;
   letter-spacing: -0.022em;
   line-height: 1.17648;
-  border-radius: 980px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
   padding: 12px 22px;
   min-height: 44px;
@@ -343,7 +376,7 @@ button:disabled,
 .brand-mark {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   display: block;
 }
 .navlinks {
@@ -512,7 +545,7 @@ main {
 .login-logo {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   margin-bottom: 18px;
   display: block;
 }
@@ -574,7 +607,7 @@ main {
   margin-top: 6px;
   padding: 11px 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
@@ -626,7 +659,7 @@ main {
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 28px;
+  border-radius: var(--radius-3xl);
   padding: 28px;
   box-shadow: var(--card-shadow);
   position: relative;
@@ -680,7 +713,7 @@ main {
 .metrics div {
   background: var(--bg-elevated-2);
   padding: 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--border);
   border-top: 2px solid rgba(0, 113, 227, 0.45);
   min-width: 0;
@@ -708,13 +741,13 @@ main {
   background: var(--warning-bg) !important;
   border: 1px solid var(--warning-border);
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   color: var(--warning-text) !important;
 }
 
 .terminal {
   background: var(--terminal-bg);
-  border-radius: 24px;
+  border-radius: var(--radius-2xl);
   overflow: hidden;
   border: 1px solid var(--border);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
@@ -767,7 +800,7 @@ main {
   min-height: 360px;
   height: 420px;
   background: var(--terminal-bg);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -781,7 +814,7 @@ main {
   background: var(--bg-elevated-2);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 16px;
   outline: 0;
   resize: vertical;
@@ -798,7 +831,7 @@ main {
 }
 .toolbar select {
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-elevated-2);
   color: var(--text-primary);
@@ -839,7 +872,7 @@ code {
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   padding: 14px 18px;
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   text-align: left;
   font-size: 15px;
   min-height: 0;
@@ -956,7 +989,7 @@ code {
   color: var(--text-primary);
 }
 .datahead span { color: var(--text-tertiary); }
-.datarow:hover { background: var(--hover-fill); border-radius: 10px; }
+.datarow:hover { background: var(--hover-fill); border-radius: var(--radius-sm); }
 .datarow:last-child { border-bottom: 0; }
 .datahead.ebpf,
 .datarow.ebpf,
@@ -1009,7 +1042,7 @@ code {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 980px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1055,7 +1088,7 @@ code {
   display: inline-flex;
   align-items: center;
   padding: 6px 12px;
-  border-radius: 980px;
+  border-radius: var(--radius-pill);
   background: var(--bg-elevated-2);
   border: 1px solid var(--border-strong);
   color: var(--text-secondary);
@@ -1074,7 +1107,7 @@ code {
 .datarow.rules button {
   border: 1px solid var(--border-strong);
   background: transparent;
-  border-radius: 980px;
+  border-radius: var(--radius-pill);
   padding: 8px 16px;
   font-size: 14px;
   min-height: 36px;
@@ -1130,7 +1163,7 @@ code {
   gap: 12px;
   align-items: center;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   margin: 12px 0;
   background: var(--bg-elevated-2);
   border: 1px solid var(--border);
@@ -1196,7 +1229,7 @@ code {
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   text-align: left;
   font-size: 15px;
   min-height: 0;
@@ -1219,7 +1252,7 @@ code {
   border: 1px solid var(--border);
   background: var(--bg-elevated-2);
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--radius-base);
 }
 .revisionrow span,
 .revisionrow b {
@@ -1237,7 +1270,7 @@ code {
   grid-template-columns: minmax(140px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   padding: 12px;
   background: var(--bg-elevated-2);
   color: var(--text-primary);
@@ -1281,7 +1314,7 @@ code {
 .recommendations { display: grid; gap: 10px; }
 .recommendation {
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 14px;
   background: var(--bg-elevated-2);
   color: var(--text-primary);
@@ -1306,7 +1339,7 @@ code {
   overflow: auto;
   background: var(--terminal-bg);
   color: var(--terminal-text);
-  border-radius: 14px;
+  border-radius: var(--radius-base);
   padding: 14px;
   font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
@@ -1325,7 +1358,7 @@ code {
   min-width: 140px;
   padding: 11px 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg-elevated-2);
   color: var(--text-primary);
   font-size: 15px;
@@ -1341,7 +1374,7 @@ code {
 }
 .eventtools select {
   padding: 8px 12px;
-  border-radius: 980px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   color: var(--text-primary);

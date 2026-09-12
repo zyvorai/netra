@@ -12,6 +12,15 @@ type Filter = {
   destination: string;
 };
 
+const FILTER_LABELS: Record<keyof Filter, string> = {
+  direction: 'Direction',
+  verdict: 'Verdict',
+  protocol: 'Protocol',
+  namespace: 'Namespace',
+  pod: 'Pod',
+  destination: 'Destination',
+};
+
 export default function Flows() {
   const [flows, setFlows] = useState<any[]>([]);
   const [drops, setDrops] = useState<any[]>([]);
@@ -114,7 +123,7 @@ export default function Flows() {
         <div className="filters">
           {Object.entries(filter).map(([k, v]) => (
             <label key={k}>
-              {k}
+              {FILTER_LABELS[k as keyof Filter] || k}
               <input
                 value={v}
                 placeholder={k === 'direction' ? 'EGRESS' : ''}
