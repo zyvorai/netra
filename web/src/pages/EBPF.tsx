@@ -353,6 +353,7 @@ export default function EBPF() {
       <div className="toolbar"><button className={cfg?.netPolV2Enabled ? 'danger' : 'primary'} onClick={toggleNetPolV2}>{cfg?.netPolV2Enabled ? 'Disable NetPol v2' : 'Enable NetPol v2'}</button></div>
 
       <p className="eyebrow" style={{ marginTop: 18 }}>ALLOW / DENY RULES</p>
+      {cap((cfg?.netPolRules?.length||0), caps?.limits?.netpolV2Rules)}
       <div className="ruleform">
         <input value={npSelNS} onChange={e => setNpSelNS(e.target.value)} placeholder="namespace" />
         <input value={npSelPod} onChange={e => setNpSelPod(e.target.value)} placeholder="pod (optional)" />
@@ -374,6 +375,7 @@ export default function EBPF() {
       </div>
 
       <p className="eyebrow" style={{ marginTop: 18 }}>DEFAULT-DENY ACTIVATION</p>
+      {cap((cfg?.netPolDefaultDenies?.length||0), caps?.limits?.netpolV2DefaultDeny)}
       <div className="ruleform">
         <input value={ddSelNS} onChange={e => setDdSelNS(e.target.value)} placeholder="namespace" />
         <input value={ddSelPod} onChange={e => setDdSelPod(e.target.value)} placeholder="pod (optional)" />

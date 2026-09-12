@@ -41,10 +41,12 @@ fabricated actor/timestamp.
 
 Every rule-type card shows a live `count / limit` line. The limits are the
 real, hardcoded BPF map sizes compiled into `bpf/netra_tc.c` (4096 entries
-for most rule types, 8192 for CIDR's LPM tries, 65536 for the NetPol deny
-map) — see `ebpfRuleLimits` in `internal/api/server.go`, also returned as
-`limits` on `GET /api/v1/ebpf/capabilities`. These are compile-time
-constants; raising one requires a source change and a program rebuild, not a
+for most rule types, 8192 for CIDR's LPM tries, 65536 for the legacy NetPol
+deny map, 65536 for NetPol v2 allow/deny rules, 16384 for NetPol v2
+default-deny postures) — see `ebpfRuleLimits` in `internal/api/server.go`,
+also returned as `limits` on `GET /api/v1/ebpf/capabilities`. These are
+compile-time constants; raising one requires a source change and a program
+rebuild, not a
 runtime setting.
 
 ## Shield and NetPol

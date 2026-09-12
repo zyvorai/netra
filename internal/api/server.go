@@ -1753,16 +1753,18 @@ func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
 // bpf/netra_tc.c — these are compile-time constants, not runtime-tunable,
 // so raising any of them requires a source change and program reload.
 var ebpfRuleLimits = map[string]int{
-	"exactIPv4": 4096,  // blocked_v4
-	"exactIPv6": 4096,  // blocked_v6
-	"cidr":      8192,  // blocked_cidr_v4 + blocked_cidr_v6 (each)
-	"ports":     4096,  // blocked_ports
-	"uids":      4096,  // blocked_uids
-	"dns":       4096,  // blocked_dns
-	"sni":       4096,  // blocked_sni
-	"processes": 4096,  // blocked_comms
-	"rate":      4096,  // rate_v4
-	"netpol":    65536, // netpol_deny4
+	"exactIPv4":           4096,  // blocked_v4
+	"exactIPv6":           4096,  // blocked_v6
+	"cidr":                8192,  // blocked_cidr_v4 + blocked_cidr_v6 (each)
+	"ports":               4096,  // blocked_ports
+	"uids":                4096,  // blocked_uids
+	"dns":                 4096,  // blocked_dns
+	"sni":                 4096,  // blocked_sni
+	"processes":           4096,  // blocked_comms
+	"rate":                4096,  // rate_v4
+	"netpol":              65536, // netpol_deny4
+	"netpolV2Rules":       65536, // netpol_rules4
+	"netpolV2DefaultDeny": 16384, // netpol_default4
 }
 
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
