@@ -15,12 +15,7 @@ export default function Health() {
   const resetRows = useMemo(() => (data?.signals || []).filter((x:any) => x.rst > 0).sort((a:any,b:any)=>b.rst-a.rst).slice(0,50), [data]);
 
   return <div className="grid">
-    <section className="card span3">
-      <p className="eyebrow">STANDALONE NETWORK HEALTH</p>
-      <h2>TCP and DNS health from the kernel.</h2>
-      <p>Netra uses cgroup sockops plus packet hooks to measure connection establishment, smoothed RTT, retransmits, RTOs, TCP resets and cleartext UDP/53 response latency. No Cilium or Hubble is required.</p>
-      {err && <p className="warning">{err}</p>}
-    </section>
+    {err && <section className="card span3"><p className="warning">{err}</p></section>}
 
     <section className="card span3">
       <p className="eyebrow">TCP PULSE</p>

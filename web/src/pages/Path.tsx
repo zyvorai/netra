@@ -12,7 +12,7 @@ export default function Path(){
   const s=data?.summary||{}; const anomalies=s.anomalies||[];
   const pressure=useMemo(()=>data?.pressure||[],[data]); const connect=useMemo(()=>data?.connect||[],[data]);
   return <div className="grid">
-    <section className="card span3"><p className="eyebrow">KERNEL PATH DIAGNOSTICS</p><h2>See TCP pressure before it becomes an outage.</h2><p>Netra reads sockops transport state directly: connect-establishment latency, congestion-window occupancy, outstanding retransmits, kernel loss markers, delivery-rate samples and TCP state. These are TCP transport signals, not generic skb drop-reason tracing.</p>{err&&<p className="warning">{err}</p>}</section>
+    {err&&<section className="card span3"><p className="warning">{err}</p></section>}
     <section className="card span3"><p className="eyebrow">PATH PULSE</p><div className="metrics">
       <div><b>{s.connectionsMeasured||0}</b><span>connects timed</span></div>
       <div><b>{ms(s.averageConnectUs)} ms</b><span>avg connect</span></div>

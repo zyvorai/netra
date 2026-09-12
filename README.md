@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.23.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.24.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -76,7 +76,9 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Prometheus control-plane/aggregate metrics at `/metrics`.
 - Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). See `docs/alerting.md`.
 - Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
-- `netra-mcp`, a Model Context Protocol server exposing the controller API as stdio tools for AI agents (e.g. Hermes Agent). Reads/generators are always available; mutating tools (policy apply/rollback/delete, eBPF rule changes, mode toggle) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`) and reuse Netra's existing auth/preflight/audit machinery unchanged. See `docs/mcp-integration.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as ~62 stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. ~34 read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, policy list/history/build/lockdown-preview) are always available; ~28 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`.
+- Cgroup-side TLS SNI / cleartext HTTP / DNS query-name observability runs in its own dedicated eBPF program (`NETRA_L7=auto|off|required`, attach-with-fallback), isolated from the conntrack/NetworkPolicy-deny program's verifier budget so the two can evolve independently. See `docs/l7-metadata.md`.
+- IPv6 extension-header and fragmentation diagnostics (`docs/ipv6-diagnostics.md`), per-interface flow attribution for TC/TCX-attached NICs (`docs/interface-flow-attribution.md`), and XDP Shield per-class/per-source breakdowns (`docs/tcx-and-shield.md`) — all additive counters over data the eBPF datapath already computed internally.
 
 ### Emergency enforcement
 
@@ -229,7 +231,9 @@ docs/native-netpol.md     optional native deny-list NetPol maps
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
-docs/mcp-integration.md   MCP server for AI agents (Hermes Agent, etc.), gated mutations
+docs/mcp-integration.md   MCP server runbook: tool reference, security, plan/apply flow, troubleshooting
+docs/ipv6-diagnostics.md  IPv6 extension-header/fragmentation counters and anomalies
+docs/interface-flow-attribution.md per-interface flow counters (TC/TCX hooks only)
 ```
 
 ## Prerequisites

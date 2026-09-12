@@ -62,9 +62,8 @@ export default function Insights() {
 
   return <div className="grid">
     <section className="card span3">
-      <p className="eyebrow">BEHAVIOR + RATE INTELLIGENCE</p>
-      <h2>Dependencies, drift, exposure, and guarded response drafts.</h2>
-      <p>Netra combines exact eBPF dependency inventory with time-window deltas. Rate analytics warm up from fresh reports after controller restart or HA failover and never auto-apply containment.</p>
+      <p className="eyebrow">CONTROLS</p>
+      <h3>Rate window and baselines</h3>
       <div className="toolbar"><label>Rate window <select value={window} onChange={e => setWindow(e.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option></select></label><button className="primary" onClick={refresh}>Refresh</button></div>
       {msg && <p className="warning">{msg}</p>}
       {summary?.rateWarming && <p className="warning">Rate engine is warming up. At least two fresh agent reports are required before rate drift is evaluated.</p>}

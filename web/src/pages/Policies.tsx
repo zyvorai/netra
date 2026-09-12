@@ -224,8 +224,8 @@ export default function Policies() {
   return (
     <div className="grid">
       <section className="card span2">
-        <p className="eyebrow">OPTIONAL CILIUM INTEGRATION</p>
-        <h2>Cilium policy workbench</h2><p>Netra standalone eBPF controls work without Cilium. Use this surface only when the cluster has CiliumNetworkPolicy CRDs installed.</p>
+        <p className="eyebrow">WORKBENCH</p>
+        <h3>Plan, dry-run, apply</h3>
         <p className="warning">Selecting an endpoint with egress policy can place it into egress default-deny. Preflight compares the live policy, runs Kubernetes dry-run, then issues a five-minute one-shot receipt bound to the exact candidate.</p>
         <div className="toolbar">
           <input value={ns} onChange={(e) => setNs(e.target.value)} />

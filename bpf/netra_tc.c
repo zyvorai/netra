@@ -21,6 +21,7 @@
 
 #define NETRA_BPF 1
 #include "netra_ipv6.h"
+#include "netra_l7.h"
 
 /* Force full inlining — clang BPF rejects non-inlined helpers with >5 args. */
 #undef __always_inline
@@ -54,6 +55,7 @@
 #define REASON_DNS   6
 #define REASON_PROCESS 7
 #define REASON_SNI 8
+#define REASON_NETPOL 9
 #define FAMILY_V4    4
 #define FAMILY_V6    6
 
@@ -123,6 +125,27 @@ struct {
     __type(key, struct workload_flow_key);
     __type(value, struct flow_value);
 } workload_flow_stats SEC(".maps");
+
+// Per-interface flow attribution — same pattern as workload_flow_key
+// above: wraps flow_key verbatim instead of resizing it, so the existing
+// flow_stats/workload_flow_stats pinned ABIs remain untouched. Populated
+// only from the two HOOK_TC branches of handle_v4/handle_v6 (tc/egress,
+// tc/ingress, TCX): that's the only place skb->ifindex reflects a
+// specific, Netra-attached NIC. cgroup_skb hooks run at a pre-routing/
+// socket-layer point where ifindex isn't a trustworthy "which NIC"
+// signal, and the early-deny XDP program only ever calls update_flow on
+// its blocked path, which would make this counter inconsistently
+// blocked-only if included — so both are deliberately excluded.
+struct iface_flow_key {
+    __u32 ifindex;
+    struct flow_key flow;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct iface_flow_key);
+    __type(value, struct flow_value);
+} iface_flow_stats SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -437,6 +460,36 @@ struct {
     __type(value, struct kernel_drop_value);
 } kernel_drops SEC(".maps");
 
+// Node-level IPv6 extension-header/fragmentation metrics. The
+// netra_ipv6_walk() helper already computes ext_headers/fragmented/
+// nonfirst_fragment/more_fragments/chain_truncated for every IPv6 packet
+// purely to decide whether L4 parsing is safe; this map is the first place
+// any of that is counted rather than discarded. Keyed by (direction, hook)
+// only — cgroup identity is not reliably available at all three call sites
+// (handle_v6's HOOK_TC branch and netra_xdp_ingress have none), so this
+// stays node-level for a consistent, comparable signal, matching the same
+// reasoning kernel_drops already uses for the kfree_skb tracepoint.
+struct ipv6_ext_key {
+    __u8 direction;
+    __u8 hook;
+    __u16 pad;
+};
+struct ipv6_ext_value {
+    __u64 packets;
+    __u64 ext_header_packets;
+    __u64 total_ext_headers;
+    __u64 fragmented;
+    __u64 nonfirst_fragments;
+    __u64 more_fragments;
+    __u64 chain_truncated;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 16);
+    __type(key, struct ipv6_ext_key);
+    __type(value, struct ipv6_ext_value);
+} ipv6_ext_stats SEC(".maps");
+
 struct obs_event {
     __u64 ts_ns;
     __u64 cgroup_id;
@@ -558,6 +611,27 @@ struct {
     __type(value, struct shield_stat_value);
 } shield_stats SEC(".maps");
 
+// Per-class breakdown of shield_stats (never resize shield_stats itself —
+// it's an already-pinned map; index 0 is unused, 1=syn 2=udp 3=icmp 4=other,
+// matching netra_xdp_shield's existing class_id values).
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 5);
+    __type(key, __u32);
+    __type(value, struct shield_stat_value);
+} shield_class_stats SEC(".maps");
+
+// Per-source "would-be-denied" hit counter, reusing shield_src_key verbatim
+// so an operator can preview which sources Shield would drop before
+// switching from audit to enforce mode. Recorded identically in both modes.
+struct shield_source_hit_value { __u64 denied; __u64 last_ns; };
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
+    __type(key, struct shield_src_key);
+    __type(value, struct shield_source_hit_value);
+} shield_source_hits SEC(".maps");
+
 // Optional NetworkPolicy-shaped deny maps (v0.19) — identity = cgroup_id hash bucket.
 struct netpol_peer4_key {
     __u64 cgroup_id;
@@ -597,6 +671,7 @@ struct netra_pkt_scratch {
     struct flow_key flowk;
     struct flow_value flowv;
     struct workload_flow_key wflowk;
+    struct iface_flow_key ifk;
     struct tls_meta_key tlsk;
     struct tls_meta_value tlsv;
     struct http_meta_key httpk;
@@ -697,6 +772,40 @@ static __always_inline int netpol_denies4(__u64 cgroup_id, __u8 direction, __u32
     return bpf_map_lookup_elem(&netpol_deny4, &k) != 0;
 }
 
+static __always_inline void track_ipv6_ext(__u8 direction, __u8 hook, const struct netra_ipv6_l4 *w)
+{
+    struct ipv6_ext_key k = {.direction = direction, .hook = hook};
+    struct ipv6_ext_value zero = {};
+    struct ipv6_ext_value *v = bpf_map_lookup_elem(&ipv6_ext_stats, &k);
+    if (!v) {
+        bpf_map_update_elem(&ipv6_ext_stats, &k, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&ipv6_ext_stats, &k);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->packets, 1);
+    if (w->ext_headers) {
+        __sync_fetch_and_add(&v->ext_header_packets, 1);
+        __sync_fetch_and_add(&v->total_ext_headers, w->ext_headers);
+    }
+    if (w->fragmented) __sync_fetch_and_add(&v->fragmented, 1);
+    if (w->nonfirst_fragment) __sync_fetch_and_add(&v->nonfirst_fragments, 1);
+    if (w->more_fragments) __sync_fetch_and_add(&v->more_fragments, 1);
+    if (w->chain_truncated) __sync_fetch_and_add(&v->chain_truncated, 1);
+}
+
+static __always_inline void track_shield_source_hit(const struct shield_src_key *k)
+{
+    struct shield_source_hit_value zero = {};
+    struct shield_source_hit_value *v = bpf_map_lookup_elem(&shield_source_hits, k);
+    if (!v) {
+        bpf_map_update_elem(&shield_source_hits, k, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&shield_source_hits, k);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->denied, 1);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
 static __always_inline int shield_rate_ok(__u8 family, __u8 class_id, const __u8 addr[16], __u32 pps, __u32 burst)
 {
     if (!pps) return 1;
@@ -720,7 +829,10 @@ static __always_inline int shield_rate_ok(__u8 family, __u8 class_id, const __u8
             st->last_refill_ns = now;
         }
     }
-    if (st->tokens == 0) return 0;
+    if (st->tokens == 0) {
+        track_shield_source_hit(&k);
+        return 0;
+    }
     st->tokens -= 1;
     return 1;
 }
@@ -840,6 +952,32 @@ static __always_inline void update_flow(__u8 family, __u8 direction, __u8 hook, 
     }
 }
 
+static __always_inline void update_iface_flow(__u32 ifindex, __u8 family, __u8 direction, __u8 hook, __u8 proto,
+                                              __u16 sport, __u16 dport, const __u8 src[16], const __u8 dst[16],
+                                              __u32 len, int blocked)
+{
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return;
+    __builtin_memset(&sc->ifk, 0, sizeof(sc->ifk));
+    sc->ifk.ifindex = ifindex;
+    sc->ifk.flow.family=family; sc->ifk.flow.direction=direction; sc->ifk.flow.hook=hook; sc->ifk.flow.protocol=proto;
+    sc->ifk.flow.src_port=sport; sc->ifk.flow.dst_port=dport;
+    __builtin_memcpy(sc->ifk.flow.src_addr, src, 16);
+    __builtin_memcpy(sc->ifk.flow.dst_addr, dst, 16);
+    __builtin_memset(&sc->flowv, 0, sizeof(sc->flowv));
+    struct flow_value *v = bpf_map_lookup_elem(&iface_flow_stats, &sc->ifk);
+    if (!v) {
+        bpf_map_update_elem(&iface_flow_stats, &sc->ifk, &sc->flowv, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&iface_flow_stats, &sc->ifk);
+    }
+    if (v) {
+        __sync_fetch_and_add(&v->packets, 1);
+        __sync_fetch_and_add(&v->bytes, len);
+        if (blocked) __sync_fetch_and_add(&v->blocked, 1);
+        v->last_ns = bpf_ktime_get_ns();
+    }
+}
+
 static __always_inline struct obs_event *new_event(__u8 family, __u8 direction, __u8 hook, __u8 proto,
                                                     __u8 action, __u8 type, __u8 reason)
 {
@@ -903,113 +1041,11 @@ static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 pro
     return 0;
 }
 
-static __always_inline int __attribute__((unused)) dns_qname(void *payload, void *data_end, char out[96])
-{
-    unsigned char *p = payload;
-    if ((void *)(p+12) > data_end) return 0;
-    p += 12;
-    int oi=0, remaining=0;
-    #pragma unroll
-    for (int i=0;i<96;i++) {
-        if ((void *)(p+1)>data_end || oi>=95) break;
-        unsigned char c=*p++;
-        if (remaining==0) {
-            if (c==0) break;
-            if ((c&0xc0)!=0 || c>63) break;
-            if (oi>0) out[oi++]='.';
-            remaining=c;
-        } else {
-            if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
-            out[oi++]=(char)c;
-            remaining--;
-        }
-    }
-    if (oi<96) out[oi]=0;
-    return oi;
-}
+// dns_qname/tls_sni/http_method/http_host/lower_ascii/hostname_char live in
+// bpf/netra_l7.h (included above) so they're natively unit-testable
+// (bpf/tests/l7_parse_test.c) independent of the BPF toolchain.
 
-
-static __always_inline unsigned char lower_ascii(unsigned char c)
-{
-    if (c >= 'A' && c <= 'Z') return c + ('a' - 'A');
-    return c;
-}
-
-static __always_inline int hostname_char(unsigned char c)
-{
-    c = lower_ascii(c);
-    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
-}
-
-// Best-effort TLS ClientHello SNI parser. It intentionally does not reassemble
-// TCP streams and therefore only reports an SNI present in this skb.
-static __always_inline int __attribute__((unused)) tls_sni(void *payload, void *data_end, char out[96])
-{
-    unsigned char *p = payload;
-    if ((void *)(p + 9) > data_end || p[0] != 0x16 || p[5] != 0x01) return 0;
-    for (int i = 43; i < 512; i++) {
-        /* Need header bytes i..i+8 and up to 95 name bytes starting at i+9. */
-        if ((void *)(p + i + 9 + 95) > data_end) break;
-        if (p[i] != 0 || p[i + 1] != 0 || p[i + 6] != 0) continue;
-        __u16 ext_len = ((__u16)p[i + 2] << 8) | p[i + 3];
-        __u16 list_len = ((__u16)p[i + 4] << 8) | p[i + 5];
-        __u16 name_len = ((__u16)p[i + 7] << 8) | p[i + 8];
-        if (!name_len || name_len > 95 || ext_len < (__u16)(5 + name_len) || list_len < (__u16)(3 + name_len)) continue;
-        int ok = 1;
-        for (int j = 0; j < 95; j++) {
-            if (j >= name_len) break;
-            unsigned char c = p[i + 9 + j];
-            if (!hostname_char(c)) { ok = 0; break; }
-            out[j] = (char)lower_ascii(c);
-        }
-        if (!ok) { __builtin_memset(out, 0, 96); continue; }
-        out[name_len] = 0;
-        return name_len;
-    }
-    return 0;
-}
-
-static __always_inline int __attribute__((unused)) http_method(void *payload, void *data_end, char out[8])
-{
-    unsigned char *p = payload;
-    if ((void *)(p + 8) > data_end) return 0;
-    if (p[0]=='G'&&p[1]=='E'&&p[2]=='T'&&p[3]==' ') { __builtin_memcpy(out,"GET",4); return 3; }
-    if (p[0]=='P'&&p[1]=='O'&&p[2]=='S'&&p[3]=='T'&&p[4]==' ') { __builtin_memcpy(out,"POST",5); return 4; }
-    if (p[0]=='P'&&p[1]=='U'&&p[2]=='T'&&p[3]==' ') { __builtin_memcpy(out,"PUT",4); return 3; }
-    if (p[0]=='H'&&p[1]=='E'&&p[2]=='A'&&p[3]=='D'&&p[4]==' ') { __builtin_memcpy(out,"HEAD",5); return 4; }
-    if (p[0]=='P'&&p[1]=='A'&&p[2]=='T'&&p[3]=='C'&&p[4]=='H'&&p[5]==' ') { __builtin_memcpy(out,"PATCH",6); return 5; }
-    if (p[0]=='D'&&p[1]=='E'&&p[2]=='L'&&p[3]=='E'&&p[4]=='T'&&p[5]=='E'&&p[6]==' ') { __builtin_memcpy(out,"DELETE",7); return 6; }
-    if (p[0]=='O'&&p[1]=='P'&&p[2]=='T'&&p[3]=='I'&&p[4]=='O'&&p[5]=='N'&&p[6]=='S'&&p[7]==' ') { __builtin_memcpy(out,"OPTIONS",8); return 7; }
-    return 0;
-}
-
-static __always_inline int __attribute__((unused)) http_host(void *payload, void *data_end, char out[96])
-{
-    unsigned char *p = payload;
-    for (int i = 0; i < 512; i++) {
-        if ((void *)(p + i + 6) > data_end) break;
-        if (i > 0 && p[i - 1] != '\n') continue;
-        if (lower_ascii(p[i])!='h'||lower_ascii(p[i+1])!='o'||lower_ascii(p[i+2])!='s'||lower_ascii(p[i+3])!='t'||p[i+4]!=':') continue;
-        int pos = i + 5;
-        for (int s = 0; s < 8; s++) {
-            if ((void *)(p + pos + 1) > data_end) return 0;
-            if (p[pos] != ' ' && p[pos] != '\t') break;
-            pos++;
-        }
-        int oi = 0;
-        for (int j = 0; j < 95; j++) {
-            if ((void *)(p + pos + 1) > data_end) break;
-            unsigned char c = p[pos++];
-            if (c == '\r' || c == '\n') break;
-            if (c < 0x21 || c > 0x7e) return 0;
-            out[oi++] = (char)lower_ascii(c);
-        }
-        if (oi > 0) { out[oi] = 0; return oi; }
-    }
-    return 0;
-}
-
-static __always_inline void __attribute__((unused)) track_tls(__u64 cgroup_id, const char sni[96], int blocked)
+static __always_inline void track_tls(__u64 cgroup_id, const char sni[96], int blocked)
 {
     if (!cgroup_id || !sni[0]) return;
     struct netra_pkt_scratch *sc = netra_scratch();
@@ -1026,7 +1062,7 @@ static __always_inline void __attribute__((unused)) track_tls(__u64 cgroup_id, c
     v->last_ns = bpf_ktime_get_ns();
 }
 
-static __always_inline void __attribute__((unused)) track_http(__u64 cgroup_id, const char method[8], const char host[96])
+static __always_inline void track_http(__u64 cgroup_id, const char method[8], const char host[96])
 {
     if (!cgroup_id || !method[0] || !host[0]) return;
     struct netra_pkt_scratch *sc = netra_scratch();
@@ -1079,7 +1115,7 @@ static __always_inline void track_tcp_signal(__u64 cgroup_id, __u8 flags)
     if (flags & 0x04) __sync_fetch_and_add(&v->rst, 1);
 }
 
-static __always_inline void __attribute__((unused)) dns_query_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
+static __always_inline void dns_query_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
                                              __u16 client_port, __u16 txid,
                                              const char name[96], int name_len)
 {
@@ -1111,7 +1147,7 @@ static __always_inline void __attribute__((unused)) dns_query_track(__u64 cgroup
     }
 }
 
-static __always_inline void __attribute__((unused)) dns_response_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
+static __always_inline void dns_response_track(__u64 cgroup_id, __u8 family, const __u8 server[16],
                                                 __u16 client_port, void *payload, void *data_end,
                                                 __u32 ifindex, __u32 len,
                                                 const __u8 src[16], const __u8 dst[16])
@@ -1209,6 +1245,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
             blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id);
         }
         update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
+        update_iface_flow(ifindex,FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
             record_policy_drop(FAMILY_V4,proto,direction,reason,sport,dport,sc->src,sc->dst,len);
             submit_packet_event(FAMILY_V4,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,sc->src,sc->dst,sport,dport,flags,0,0,cgroup_id);
@@ -1219,7 +1256,10 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
         return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
     }
 
-    /* Cgroup L7/DNS parsers deferred — CT + policy must stay under verifier limits. */
+    /* L7/DNS (SNI/HTTP/DNS-qname) is handled by netra_l7_cgroup_egress/ingress,
+     * a separate program with its own verifier budget — do not fold it back
+     * in here; that's what silently disconnected it before (see CHANGELOG.md
+     * and docs/l7-metadata.md). This function stays CT + policy only. */
     __u64 cgroup_id = hook==HOOK_CGROUP ? bpf_get_current_cgroup_id() : 0;
     if (proto==IPPROTO_TCP) track_tcp_signal(cgroup_id, flags);
     int syn_new = (proto==IPPROTO_TCP && (flags & 0x02) && !(flags & 0x10));
@@ -1228,7 +1268,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
     __u8 reason=0; int blocked=0;
     if (!established) {
         blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id);
-        if (!blocked && netpol_denies4(cgroup_id,direction,peer,proto,policy_port)) { blocked=1; reason=REASON_CIDR; }
+        if (!blocked && netpol_denies4(cgroup_id,direction,peer,proto,policy_port)) { blocked=1; reason=REASON_NETPOL; }
     }
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (direction==DIR_EGRESS) {
@@ -1266,6 +1306,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
 
     struct netra_ipv6_l4 walk;
     netra_ipv6_walk((unsigned char *)(ip6 + 1), data_end, ip6->nexthdr, &walk);
+    track_ipv6_ext(direction, hook, &walk);
     void *l4=walk.l4; __u8 proto=walk.proto; __u16 sport=0,dport=0; __u8 flags=0; void *payload=0;
     int l4_ok=0;
     if (walk.l4_parseable && !walk.nonfirst_fragment && proto==IPPROTO_TCP) {
@@ -1294,6 +1335,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         __u8 reason=0; int blocked=0;
         if (!established) blocked=decide6(direction,peer,proto,dport,&reason,cgroup_id);
         update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
+        update_iface_flow(ifindex,FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
             record_policy_drop(FAMILY_V6,proto,direction,reason,sport,dport,sc->src,sc->dst,len);
             submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,sc->src,sc->dst,sport,dport,flags,0,0,cgroup_id);
@@ -1304,7 +1346,8 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         return blocked ? (allow_value==TC_ACT_OK ? TC_ACT_SHOT : 0) : allow_value;
     }
 
-    /* Cgroup L7/DNS deferred — keep CT + policy under verifier limits. */
+    /* L7/DNS is handled by netra_l7_cgroup_egress/ingress (its own program,
+     * own verifier budget) — see the matching comment in handle_v4. */
     (void)payload; (void)data; (void)data_end; (void)walk;
     const __u8 *peer = direction==DIR_EGRESS ? sc->dst : sc->src;
     __u16 policy_port=dport;
@@ -1349,6 +1392,205 @@ SEC("tc/egress") int netra_egress(struct __sk_buff *skb){ return handle_l2(skb,D
 SEC("tc/ingress") int netra_ingress(struct __sk_buff *skb){ return handle_l2(skb,DIR_INGRESS); }
 SEC("cgroup_skb/egress") int netra_cgroup_egress(struct __sk_buff *skb){ return handle_l3(skb,DIR_EGRESS); }
 SEC("cgroup_skb/ingress") int netra_cgroup_ingress(struct __sk_buff *skb){ return handle_l3(skb,DIR_INGRESS); }
+
+/* ---------------------------------------------------------------------
+ * Restored cgroup-side L7/DNS observability (SNI/HTTP/DNS-qname), split
+ * into its own dedicated cgroup_skb programs rather than folded back into
+ * handle_v4/handle_v6. The CT+NetworkPolicy-shaped-deny logic added to
+ * those functions already sits at the edge of the 512-byte BPF stack
+ * budget for a single force-inlined program frame; adding the L7 scan
+ * buffers back into that same frame is what silently disconnected this
+ * feature previously (see CHANGELOG.md and docs/l7-metadata.md). Giving
+ * L7 parsing its own program gives it its own, independent budget.
+ *
+ * These programs deliberately do NOT call ct_hit/decide4/decide6/
+ * netpol_denies4/update_flow/ct_learn_pair — all conntrack, IP/CIDR/
+ * port/rate enforcement, and flow accounting remain exclusively owned by
+ * handle_v4/handle_v6 via netra_cgroup_egress/netra_cgroup_ingress. A
+ * SNI/DNS deny here returns 0 independently of that program's own
+ * verdict for the same skb (the kernel ANDs multiple cgroup_skb
+ * programs' verdicts at the same attach point), so the packet is
+ * genuinely blocked either way. Known, accepted nuance: flow_stats/
+ * workload_flow_stats.blocked will not reflect an SNI/DNS-specific deny
+ * (only IP/CIDR/port/rate denies do) — a cosmetic stats-attribution gap,
+ * not a correctness bug; Drop Detective still sees the block via
+ * policy_drops/REASON_SNI/REASON_DNS from this program's own
+ * record_policy_drop call.
+ */
+
+static __always_inline int l7_handle_v4(struct __sk_buff *skb, __u8 direction)
+{
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return 1;
+    void *data = (void *)(long)skb->data;
+    void *data_end = (void *)(long)skb->data_end;
+    __u32 ifindex = skb->ifindex;
+    __u32 len = skb->len;
+    struct iphdr *ip = data;
+    if ((void *)(ip + 1) > data_end || ip->version != 4 || ip->ihl < 5) return 1;
+    void *l4 = (void *)ip + ip->ihl * 4;
+    if (l4 > data_end) return 1;
+    __u8 proto = ip->protocol;
+    __u16 sport = 0, dport = 0; void *payload = 0;
+    if (proto == IPPROTO_TCP) {
+        struct tcphdr *tcp = l4;
+        if ((void *)(tcp + 1) > data_end || tcp->doff < 5) return 1;
+        sport = tcp->source; dport = tcp->dest;
+        payload = (void *)tcp + ((__u32)tcp->doff * 4);
+        if (payload > data_end) payload = 0;
+    } else if (proto == IPPROTO_UDP) {
+        struct udphdr *udp = l4;
+        if ((void *)(udp + 1) > data_end) return 1;
+        sport = udp->source; dport = udp->dest; payload = (void *)(udp + 1);
+    } else {
+        return 1;
+    }
+    copy4(sc->src, ip->saddr); copy4(sc->dst, ip->daddr);
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    if (!cgroup_id) return 1;
+
+    if (direction == DIR_INGRESS) {
+        if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
+            dns_response_track(cgroup_id, FAMILY_V4, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
+        return 1;
+    }
+
+    int blocked = 0; __u8 reason = 0; int dns_len = 0;
+
+    if (proto == IPPROTO_UDP && dport == __builtin_bswap16(53) && payload) {
+        dns_len = netra_l7_dns_qname(payload, data_end, sc->dns_name);
+        if (dns_len > 0) {
+            if (enforcing() && scope_allows(cgroup_id)) {
+                __builtin_memset(&sc->name_key, 0, sizeof(sc->name_key));
+                __builtin_memcpy(sc->name_key.name, sc->dns_name, 96);
+                if (bpf_map_lookup_elem(&blocked_dns, &sc->name_key)) { blocked = 1; reason = REASON_DNS; }
+            }
+            __u16 txid = 0;
+            unsigned char *p = payload;
+            if ((void *)(p + 2) <= data_end) txid = ((__u16)p[0] << 8) | p[1];
+            dns_query_track(cgroup_id, FAMILY_V4, sc->dst, sport, txid, sc->dns_name, dns_len);
+        }
+    }
+
+    if (proto == IPPROTO_TCP && payload) {
+        int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
+        if (sni_len > 0) {
+            if (!blocked && enforcing() && scope_allows(cgroup_id)) {
+                __builtin_memset(&sc->name_key, 0, sizeof(sc->name_key));
+                __builtin_memcpy(sc->name_key.name, sc->sni, 96);
+                if (bpf_map_lookup_elem(&blocked_sni, &sc->name_key)) { blocked = 1; reason = REASON_SNI; }
+            }
+            track_tls(cgroup_id, sc->sni, blocked && reason == REASON_SNI);
+        }
+        if (netra_l7_http_method(payload, data_end, sc->http_m) > 0 && netra_l7_http_host(payload, data_end, sc->http_h) > 0)
+            track_http(cgroup_id, sc->http_m, sc->http_h);
+    }
+
+    if (blocked) {
+        record_policy_drop(FAMILY_V4, proto, direction, reason, sport, dport, sc->src, sc->dst, len);
+        submit_packet_event(FAMILY_V4, direction, HOOK_CGROUP, proto, ACT_BLOCK, EVT_BLOCK, reason, ifindex, len,
+                             sc->src, sc->dst, sport, dport, 0, dns_len > 0 ? sc->dns_name : 0, dns_len, cgroup_id);
+        return 0;
+    }
+    if (dns_len > 0) {
+        submit_packet_event(FAMILY_V4, direction, HOOK_CGROUP, proto, ACT_ALLOW, EVT_DNS, 0, ifindex, len,
+                             sc->src, sc->dst, sport, dport, 0, sc->dns_name, dns_len, cgroup_id);
+    }
+    return 1;
+}
+
+static __always_inline int l7_handle_v6(struct __sk_buff *skb, __u8 direction)
+{
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return 1;
+    void *data = (void *)(long)skb->data;
+    void *data_end = (void *)(long)skb->data_end;
+    __u32 ifindex = skb->ifindex;
+    __u32 len = skb->len;
+    struct ipv6hdr *ip6 = data;
+    if ((void *)(ip6 + 1) > data_end) return 1;
+
+    struct netra_ipv6_l4 walk;
+    netra_ipv6_walk((unsigned char *)(ip6 + 1), data_end, ip6->nexthdr, &walk);
+    void *l4 = walk.l4; __u8 proto = walk.proto; __u16 sport = 0, dport = 0; void *payload = 0;
+    int l4_ok = 0;
+    if (walk.l4_parseable && !walk.nonfirst_fragment && proto == IPPROTO_TCP) {
+        struct tcphdr *tcp = l4;
+        if ((void *)(tcp + 1) <= data_end && tcp->doff >= 5) {
+            void *tcp_end = (void *)tcp + ((__u32)tcp->doff * 4);
+            if (tcp_end <= data_end) { sport = tcp->source; dport = tcp->dest; payload = tcp_end; l4_ok = 1; }
+        }
+    } else if (walk.l4_parseable && !walk.nonfirst_fragment && proto == IPPROTO_UDP) {
+        struct udphdr *udp = l4;
+        if ((void *)(udp + 1) <= data_end) { sport = udp->source; dport = udp->dest; payload = (void *)(udp + 1); l4_ok = 1; }
+    }
+    if (!l4_ok) return 1;
+    copy16(sc->src, &ip6->saddr); copy16(sc->dst, &ip6->daddr);
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    if (!cgroup_id) return 1;
+
+    if (direction == DIR_INGRESS) {
+        if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
+            dns_response_track(cgroup_id, FAMILY_V6, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
+        return 1;
+    }
+
+    int blocked = 0; __u8 reason = 0; int dns_len = 0;
+
+    if (proto == IPPROTO_UDP && dport == __builtin_bswap16(53) && payload) {
+        dns_len = netra_l7_dns_qname(payload, data_end, sc->dns_name);
+        if (dns_len > 0) {
+            if (enforcing() && scope_allows(cgroup_id)) {
+                __builtin_memset(&sc->name_key, 0, sizeof(sc->name_key));
+                __builtin_memcpy(sc->name_key.name, sc->dns_name, 96);
+                if (bpf_map_lookup_elem(&blocked_dns, &sc->name_key)) { blocked = 1; reason = REASON_DNS; }
+            }
+            __u16 txid = 0;
+            unsigned char *p = payload;
+            if ((void *)(p + 2) <= data_end) txid = ((__u16)p[0] << 8) | p[1];
+            dns_query_track(cgroup_id, FAMILY_V6, sc->dst, sport, txid, sc->dns_name, dns_len);
+        }
+    }
+
+    if (proto == IPPROTO_TCP && payload) {
+        int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
+        if (sni_len > 0) {
+            if (!blocked && enforcing() && scope_allows(cgroup_id)) {
+                __builtin_memset(&sc->name_key, 0, sizeof(sc->name_key));
+                __builtin_memcpy(sc->name_key.name, sc->sni, 96);
+                if (bpf_map_lookup_elem(&blocked_sni, &sc->name_key)) { blocked = 1; reason = REASON_SNI; }
+            }
+            track_tls(cgroup_id, sc->sni, blocked && reason == REASON_SNI);
+        }
+        if (netra_l7_http_method(payload, data_end, sc->http_m) > 0 && netra_l7_http_host(payload, data_end, sc->http_h) > 0)
+            track_http(cgroup_id, sc->http_m, sc->http_h);
+    }
+
+    if (blocked) {
+        record_policy_drop(FAMILY_V6, proto, direction, reason, sport, dport, sc->src, sc->dst, len);
+        submit_packet_event(FAMILY_V6, direction, HOOK_CGROUP, proto, ACT_BLOCK, EVT_BLOCK, reason, ifindex, len,
+                             sc->src, sc->dst, sport, dport, 0, dns_len > 0 ? sc->dns_name : 0, dns_len, cgroup_id);
+        return 0;
+    }
+    if (dns_len > 0) {
+        submit_packet_event(FAMILY_V6, direction, HOOK_CGROUP, proto, ACT_ALLOW, EVT_DNS, 0, ifindex, len,
+                             sc->src, sc->dst, sport, dport, 0, sc->dns_name, dns_len, cgroup_id);
+    }
+    return 1;
+}
+
+static __always_inline int l7_handle(struct __sk_buff *skb, __u8 direction)
+{
+    void *data = (void *)(long)skb->data, *end = (void *)(long)skb->data_end;
+    if ((void *)((__u8 *)data + 1) > end) return 1;
+    __u8 version = (*(__u8 *)data) >> 4;
+    if (version == 4) return l7_handle_v4(skb, direction);
+    if (version == 6) return l7_handle_v6(skb, direction);
+    return 1;
+}
+
+SEC("cgroup_skb/egress") int netra_l7_cgroup_egress(struct __sk_buff *skb) { return l7_handle(skb, DIR_EGRESS); }
+SEC("cgroup_skb/ingress") int netra_l7_cgroup_ingress(struct __sk_buff *skb) { return l7_handle(skb, DIR_INGRESS); }
 
 static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 {
@@ -1521,6 +1763,7 @@ SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
         if((void *)(ip6+1)>end)return XDP_PASS;
         struct netra_ipv6_l4 walk;
         netra_ipv6_walk((unsigned char *)(ip6+1),end,ip6->nexthdr,&walk);
+        track_ipv6_ext(DIR_INGRESS, HOOK_XDP, &walk);
         void*l4=walk.l4;__u16 sport=0,dport=0;
         if(walk.l4_parseable&&!walk.nonfirst_fragment&&walk.proto==IPPROTO_TCP){
             struct tcphdr*t=l4;
@@ -1589,15 +1832,20 @@ int netra_xdp_shield(struct xdp_md *ctx)
     else if (class_id == 3) pps = cfg->icmp_pps;
     int ok = shield_rate_ok(family, class_id, src, pps, cfg->burst_seconds ? cfg->burst_seconds : 2);
     struct shield_stat_value *st = bpf_map_lookup_elem(&shield_stats, &z);
+    __u32 class_key = (__u32)class_id;
+    struct shield_stat_value *cst = bpf_map_lookup_elem(&shield_class_stats, &class_key);
     if (ok) {
         if (st) __sync_fetch_and_add(&st->allowed, 1);
+        if (cst) __sync_fetch_and_add(&cst->allowed, 1);
         return XDP_PASS;
     }
     if (cfg->mode == 1) {
         if (st) __sync_fetch_and_add(&st->audited, 1);
+        if (cst) __sync_fetch_and_add(&cst->audited, 1);
         return XDP_PASS;
     }
     if (st) __sync_fetch_and_add(&st->dropped, 1);
+    if (cst) __sync_fetch_and_add(&cst->dropped, 1);
     return XDP_DROP;
 }
 

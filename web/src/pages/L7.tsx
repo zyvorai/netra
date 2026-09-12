@@ -27,12 +27,7 @@ export default function L7() {
   const connections = useMemo(() => (data?.connections || []).slice(0, 200), [data]);
 
   return <div className="grid">
-    <section className="card span3">
-      <p className="eyebrow">METADATA-ONLY L7</p>
-      <h2>TLS identity and cleartext HTTP context from eBPF.</h2>
-      <p>Netra extracts ordinary TLS ClientHello SNI and HTTP/1 method + Host metadata when they are present in a single egress skb. It does not copy request bodies, reconstruct TCP streams, decrypt TLS, inspect ECH, or decode QUIC/HTTP/2.</p>
-      {err && <p className="warning">{err}</p>}
-    </section>
+    {err && <section className="card span3"><p className="warning">{err}</p></section>}
 
     <section className="card span3">
       <p className="eyebrow">L7 PULSE</p>

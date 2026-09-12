@@ -1,3 +1,86 @@
-import {Box,Server,Shield,Activity,Network,TerminalSquare,History,HeartPulse,Globe2,Lightbulb,Gauge,TriangleAlert} from 'lucide-react';
-export type Page='overview'|'pods'|'vms'|'health'|'path'|'drops'|'l7'|'insights'|'policies'|'flows'|'ebpf'|'audit';
-export default function Nav({page,setPage}:{page:Page,setPage:(p:Page)=>void}){const items:[Page,React.ReactNode,string][]=[['overview',<Activity size={17}/>,'Overview'],['pods',<Box size={17}/>,'Pods'],['vms',<Server size={17}/>,'VMs'],['health',<HeartPulse size={17}/>,'Network Health'],['path',<Gauge size={17}/>,'Path Diagnostics'],['drops',<TriangleAlert size={17}/>,'Drop Diagnostics'],['l7',<Globe2 size={17}/>,'L7 Metadata'],['insights',<Lightbulb size={17}/>,'Insights'],['ebpf',<TerminalSquare size={17}/>,'eBPF'],['flows',<Network size={17}/>,'Hubble'],['policies',<Shield size={17}/>,'Policies'],['audit',<History size={17}/>,'Audit']];return <nav className="nav"><div className="brand"><span className="dot"/>NETRA <small>by Zyvor</small></div><div className="navlinks">{items.map(([id,icon,label])=><button key={id} className={page===id?'active':''} onClick={()=>setPage(id)}>{icon}{label}</button>)}</div></nav>}
+import type { Theme } from '../theme';
+
+export type Page =
+  | 'overview'
+  | 'pods'
+  | 'vms'
+  | 'health'
+  | 'path'
+  | 'drops'
+  | 'l7'
+  | 'insights'
+  | 'policies'
+  | 'flows'
+  | 'ebpf'
+  | 'audit';
+
+const items: [Page, string][] = [
+  ['overview', 'Overview'],
+  ['pods', 'Pods'],
+  ['vms', 'VMs'],
+  ['health', 'Health'],
+  ['path', 'Path'],
+  ['drops', 'Drops'],
+  ['l7', 'L7'],
+  ['insights', 'Insights'],
+  ['ebpf', 'eBPF'],
+  ['flows', 'Hubble'],
+  ['policies', 'Policies'],
+  ['audit', 'Audit'],
+];
+
+export default function Nav({
+  page,
+  setPage,
+  theme,
+  onToggleTheme,
+}: {
+  page: Page;
+  setPage: (p: Page) => void;
+  theme: Theme;
+  onToggleTheme: () => void;
+}) {
+  return (
+    <nav className="nav" aria-label="Global">
+      <div className="nav-inner">
+        <button type="button" className="brand" onClick={() => setPage('overview')} aria-label="Netra home">
+          <span className="dot" aria-hidden />
+          Netra
+        </button>
+        <div className="navlinks">
+          {items.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={page === id ? 'active' : ''}
+              aria-current={page === id ? 'page' : undefined}
+              onClick={() => setPage(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="nav-actions">
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={onToggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={theme === 'dark' ? 'Light' : 'Dark'}
+          >
+            {theme === 'dark' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+                <path d="M21 14.5A8.5 8.5 0 1 1 11.5 3a7 7 0 0 0 9.5 11.5z" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+}

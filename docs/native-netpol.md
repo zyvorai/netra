@@ -43,3 +43,7 @@ When disabled (default), the BPF helper returns allow immediately.
 - Maglev / Service VIP rewrite
 
 Insights CNP drafts remain the review-only path toward CiliumNetworkPolicy.
+
+## Drop attribution
+
+NetPol-emulation denies (`netpol_denies4` hits) report their own reason code (`netpol-deny`, numeric `9`) in Drop Detective (`GET /api/v1/ebpf/diagnose`) and in `FastPathEvent.Reason`/`netra_audit`-style event streams — distinct from a manually staged CIDR deny (`cidr-deny`, numeric `2`), even though both ultimately match on peer address/port. This lets an operator tell "blocked by your NetworkPolicy emulation" apart from "blocked by an ad hoc CIDR rule" when reading drop findings.

@@ -6,29 +6,59 @@ Netra ships a Model Context Protocol (MCP) server, `netra-mcp`, that exposes a r
 
 Hermes Agent (and MCP clients generally) connect to external capabilities exclusively through MCP servers — stdio child processes speaking JSON-RPC 2.0. Netra already has a rich, audited HTTP control plane (`internal/api`); `netra-mcp` is a thin, stdlib-only translation layer between that API and the MCP wire protocol. It adds no new capability of its own — every read and every mutation it exposes is something `netractl` could already do, with the same auth, the same lease/preflight safety machinery, and the same audit trail.
 
+## Architecture
+
+```
+MCP client (Hermes Agent, Claude Desktop, ...)
+   │  JSON-RPC 2.0, one message per line, over stdin/stdout
+   ▼
+netra-mcp  (cmd/netra-mcp)
+   │  internal/mcpserver: generic, Netra-agnostic protocol engine + tool registry
+   │  tools_read.go / tools_mutate.go: one MCP tool per controller endpoint
+   │  client.go: plain net/http, mirrors cmd/netractl's auth/env conventions
+   ▼  HTTPS + Bearer token
+Netra controller  (cmd/netrad, internal/api)
+```
+
+`netra-mcp` is a single, long-lived stdio process per MCP client session. It holds no state of its own beyond the HTTP client configuration read from its environment at startup — every tool call is a fresh HTTP request to the controller, and every response is relayed back essentially verbatim (see [Response shape](#response-shape)). There is no caching, batching, or local policy evaluation in `netra-mcp` itself.
+
 ## Build and run
 
 ```bash
 go build -o bin/netra-mcp ./cmd/netra-mcp
 ```
 
-`netra-mcp` is a stdio process, not a daemon: an MCP client launches it, owns its lifecycle, and talks to it over its stdin/stdout. It never listens on a port. Run it manually only to smoke-test:
+`netra-mcp` is a stdio process, not a daemon: an MCP client launches it, owns its lifecycle, and talks to it over its stdin/stdout. It never listens on a port, and it exits when its stdin is closed (the client disconnects).
+
+To smoke-test it manually before wiring up a real MCP client, run it directly and paste JSON-RPC lines by hand:
 
 ```bash
 NETRA_URL=https://127.0.0.1:30870 NETRA_API_KEY=... ./bin/netra-mcp
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"netra_status","arguments":{}}}
 ```
 
-then paste a JSON-RPC line like `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` and press enter.
+Each line you type after startup should produce one corresponding JSON-RPC response line (the `notifications/initialized` message, if you send it, produces none — see [Response shape](#response-shape)). Press Ctrl-D to close stdin and let the process exit.
 
 ## Environment variables
 
 | Var | Default | Notes |
 |---|---|---|
 | `NETRA_URL` | `https://127.0.0.1:30870` | Base URL of the Netra controller, same convention as `netractl` |
-| `NETRA_API_KEY` | unset | Bearer token; must match the controller's `NETRA_API_KEY` |
-| `NETRA_TLS_INSECURE` | `false` | Set `true` to skip TLS verification against a local/self-signed controller |
-| `NETRA_MCP_ACTOR` | `mcp:hermes` | Recorded as `X-Netra-Actor` on every call, so mutations show up distinctly from human `netractl` use in `netra_audit` |
-| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered. Set `true` to also register every mutating tool (policy apply/rollback/delete, all `ebpf` rule add/delete tools, mode toggle, baseline capture/clear). |
+| `NETRA_API_KEY` | unset | Bearer token; must match the controller's `NETRA_API_KEY`. If the controller has no API key configured, leave this unset too |
+| `NETRA_TLS_INSECURE` | `false` | Set `true` to skip TLS verification against a local/self-signed controller. Never set this against a controller reachable over an untrusted network |
+| `NETRA_MCP_ACTOR` | `mcp:hermes` | Recorded as `X-Netra-Actor` on every call, so mutations show up distinctly from human `netractl` use in `netra_audit`. Set a more specific value (e.g. `mcp:hermes:oncall-bot`) if you run several agent identities against the same controller |
+| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 28 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
+
+Example:
+
+```bash
+export NETRA_URL=https://netra.prod.internal:30870
+export NETRA_API_KEY=$(cat /run/secrets/netra-api-key)
+export NETRA_MCP_ACTOR=mcp:hermes:prod
+export NETRA_MCP_ALLOW_MUTATIONS=false   # explicit, even though it's the default
+```
 
 ## Hermes Agent configuration
 
@@ -44,7 +74,15 @@ mcp_servers:
       NETRA_API_KEY: "..."
 ```
 
-Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly. A conservative read-only-by-convention setup, useful even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
+Then, from a Hermes session:
+
+```
+hermes mcp test netra
+```
+
+should report a successful handshake and list the ~34 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+
+Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
 ```yaml
 mcp_servers:
@@ -71,30 +109,155 @@ mcp_servers:
         - netra_audit
 ```
 
-`NETRA_MCP_ALLOW_MUTATIONS` is the real gate — mutating tool names don't exist in the process at all when it's unset, so a mismatched or missing `tools.include` can't accidentally expose one. `tools.include` is defense-in-depth on the Hermes side, worth setting regardless.
+`NETRA_MCP_ALLOW_MUTATIONS` is the real gate — mutating tool names don't exist in the process at all when it's unset, so a mismatched or missing `tools.include` can't accidentally expose one. `tools.include` is defense-in-depth on the Hermes side, worth setting regardless of the env var, since it also limits which *read* tools an agent persona can see (useful if an agent should only ever look at, say, one namespace's worth of concerns via `netra_workload_detail` and never touch cluster-wide policy listings).
 
-## Tool catalog
+## Security considerations
 
-All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controller endpoint (see `internal/api/server.go`), so behavior, validation, and error responses are identical to calling that endpoint directly.
+- **One API key, one privilege level.** Netra's controller has a single `NETRA_API_KEY` bearer token with no scoping — `netra-mcp` inherits whatever that token can do. There is no way to hand an MCP client a token that can read but not mutate; the *only* mutation gate is `NETRA_MCP_ALLOW_MUTATIONS` on the `netra-mcp` process itself. Run a dedicated `netra-mcp` process (with mutations enabled) separately from any process serving human dashboards or other integrations, so a compromised or misbehaving agent's blast radius is limited to what this specific process was allowed to do.
+- **Every mutation is attributed and audited.** All 28 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
+- **Policy apply is the highest-consequence tool, and it's the most guarded.** `netra_policy_apply` requires a fresh `plan_token` from `netra_policy_plan` (single-use, content-hash-bound, 5-minute expiry) and, for high/critical-risk changes, an explicit `confirm_risk` echo. An agent cannot apply a policy it hasn't just planned, and cannot silently escalate past a risk warning — the confirmation string must appear as a literal argument value, which means the calling model has to have "read" the risk level and intentionally repeated it back, not just retried blindly.
+- **Enforce mode is time-bounded by design.** `netra_ebpf_mode` can flip the whole fast path from observe to enforce, but every enforce period requires a lease (1m-24h, default 15m) and the controller auto-reverts to observe on expiry (`store.SetMode`'s fail-open behavior) — an agent cannot leave the cluster in enforce mode indefinitely by mistake; the lease must be actively renewed.
+- **Baseline/rate-baseline clears require a literal confirmation value**, sent automatically by `netra-mcp` itself (`X-Netra-Confirm-Baseline-Clear: clear`) — this exists to stop an accidental clear via a generic scripted client, not to add friction for `netra-mcp`'s own calls; treat `netra_insights_baseline_clear`/`netra_insights_rate_baseline_clear` as fully live once mutations are enabled.
+- **No credential management in `netra-mcp` itself.** It reads `NETRA_API_KEY` from its own process environment once at startup; it does not fetch, rotate, cache to disk, or log the key. Rotate the controller's API key the same way you would for any other client (update the env var, restart `netra-mcp`).
+- **`flows/stream` and raw cluster secrets are out of reach.** The tool set is a strict subset of the controller's HTTP API (see [Not included](#not-included)); there is no path from any tool to raw Kubernetes Secret contents or arbitrary cluster API access — everything goes through Netra's own handlers, which only ever touch CiliumNetworkPolicies, its own eBPF fast-path config, and read-only workload/pod/VM listings.
 
-**Status & inventory** (always available): `netra_status`, `netra_agents`, `netra_pods`, `netra_vms`, `netra_workload_detail`, `netra_ebpf_config`, `netra_ebpf_workloads`, `netra_ebpf_topology`, `netra_ebpf_capabilities`, `netra_audit`.
+## Response shape
 
-**Flows & drops** (always available): `netra_flow_summary`, `netra_drops_explain`, `netra_ebpf_health`, `netra_ebpf_path`, `netra_ebpf_drops`, `netra_ebpf_diagnose`, `netra_ebpf_l7`, `netra_ebpf_summary`.
+Every tool call returns an MCP `tools/call` result of the form:
 
-**Insights** (always available): `netra_insights_summary`, `netra_insights_dependencies`, `netra_insights_baseline_get`, `netra_insights_drift`, `netra_insights_recommendations`, `netra_insights_rates`, `netra_insights_rate_baseline_get`, `netra_insights_rate_drift`, `netra_insights_exposure`, `netra_insights_remediations`.
+```json
+{"content": [{"type": "text", "text": "<JSON body>"}], "isError": false}
+```
 
-**Policies — read & generate** (always available): `netra_policies_list`, `netra_policies_history`, `netra_policies_history_export`, `netra_policy_build` (generates a manifest, does not apply), `netra_policy_lockdown` (generates a deny-all manifest, does not apply), `netra_ebpf_scope_preview` (dry match, no store write).
+`text` is the controller's JSON response, pretty-printed. On a non-2xx HTTP status, `isError` is `true` and `text` contains `{"status": <code>, "body": <parsed or raw body>}`. On a transport failure (DNS, connection refused, TLS handshake failure, timeout), `isError` is also `true` and `text` is the Go error string (e.g. `dial tcp ...: connect: connection refused`). A tool call is **never** a JSON-RPC protocol-level error — only a genuinely malformed request (bad JSON, unknown method, unknown tool name) is; see `internal/mcpserver`'s doc comments for the exact rationale.
 
-**Policies — mutating** (`NETRA_MCP_ALLOW_MUTATIONS=true`): `netra_policy_plan` and `netra_policy_apply` (the two-step plan-then-apply flow: plan dry-runs and issues a single-use, 5-minute `plan_token`; apply requires that token and, for high/critical-risk changes, an explicit `confirm_risk` echo), `netra_policy_rollback`, `netra_policy_delete`, `netra_policy_unlock`, `netra_policy_history_import`.
+## Complete tool reference
 
-**eBPF fast path — mutating** (`NETRA_MCP_ALLOW_MUTATIONS=true`): `netra_ebpf_mode` (observe/enforce toggle — self-limiting: an enforce lease auto-reverts to observe on expiry), `netra_ebpf_scope_set`, and add/delete pairs for `deny`, `cidr`, `port`, `uid`, `dns`, `process`, `sni`, plus `netra_ebpf_rate_set`/`netra_ebpf_rate_delete`.
+All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controller endpoint (`internal/api/server.go`), so behavior, validation, and error responses are identical to calling that endpoint directly with `netractl` or `curl`. Parameters listed as **(path)** are required and substituted directly into the URL; everything else is optional unless marked **required**.
 
-**Insights — mutating** (`NETRA_MCP_ALLOW_MUTATIONS=true`): `netra_insights_baseline_capture`, `netra_insights_baseline_clear`, `netra_insights_rate_baseline_capture`, `netra_insights_rate_baseline_clear`.
+### Status & inventory (always available)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |
+| `netra_agents` | `GET /api/v1/agents` | — | One entry per reporting node agent |
+| `netra_audit` | `GET /api/v1/audit` | `limit` (1-500, default 100) | Every mutating action recorded by the controller, including this MCP server's own |
+| `netra_pods` | `GET /api/v1/pods` | `namespace` | Lockdown status included per pod |
+| `netra_vms` | `GET /api/v1/vms` | `namespace` | Result's `available` field indicates whether KubeVirt is installed |
+| `netra_workload_detail` | `GET /api/v1/workloads/{kind}/{namespace}/{name}` | `kind` **(path, required, `pod`\|`vm`)**, `namespace` **(path, required)**, `name` **(path, required)** | Phase, node, IP, labels, recommended selector, matching policies |
+| `netra_ebpf_config` | `GET /api/v1/ebpf/config` | `node` | Live fast-path config; passing `node` also includes that node's workload inventory |
+| `netra_ebpf_workloads` | `GET /api/v1/ebpf/workloads` | `node` | Workload identity list (pod/cgroup/container attribution) |
+| `netra_ebpf_topology` | `GET /api/v1/ebpf/topology` | `limit` (1-1000, default 100) | Derived service/workload topology |
+| `netra_ebpf_capabilities` | `GET /api/v1/ebpf/capabilities` | — | Static manifest of hooks/observability/enforcement capabilities |
+
+### Flows & drops (always available)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_flow_summary` | `GET /api/v1/flows/summary` | `number` (1-5000, default 500), `verdict` (`FORWARDED`\|`DROPPED`\|`ERROR`\|`AUDIT`\|`REDIRECTED`\|`TRACED`\|`TRANSLATED`), `namespace`, `pod`, `direction` (`EGRESS`\|`INGRESS`), `protocol`, `destination` | Bounded point-in-time aggregate; the tool-shaped equivalent of the `flows/stream` SSE endpoint, which is not exposed (see [Not included](#not-included)) |
+| `netra_drops_explain` | `GET /api/v1/drops/explain` | `limit` (1-100, default 20), `namespace`, `pod` | Plain-English summary + remediation suggestions per dropped flow |
+| `netra_ebpf_summary` | `GET /api/v1/ebpf/summary` | — | High-level rollup of fast-path activity across agents |
+| `netra_ebpf_health` | `GET /api/v1/ebpf/health` | `limit` (1-200, default 20) | TCP health/retransmit/connect-latency anomalies |
+| `netra_ebpf_path` | `GET /api/v1/ebpf/path` | `limit` (1-500, default 50) | Per-hop/per-hook path diagnostics |
+| `netra_ebpf_drops` | `GET /api/v1/ebpf/drops` | `limit` (1-500, default 50) | Kernel skb drop-reason counters aggregated across agents |
+| `netra_ebpf_diagnose` | `GET /api/v1/ebpf/diagnose` | `limit` (default 50) | Drop-detective root-cause findings correlated with current fast-path config |
+| `netra_ebpf_l7` | `GET /api/v1/ebpf/l7` | `limit` (1-1000, default 100) | Best-effort TLS SNI / cleartext HTTP metadata |
+
+### Insights (always available)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_insights_summary` | `GET /api/v1/insights/summary` | — | Rollup counts across all insight categories |
+| `netra_insights_dependencies` | `GET /api/v1/insights/dependencies` | `limit` (1-5000, default 500) | Inferred service dependency graph, including external destinations |
+| `netra_insights_baseline_get` | `GET /api/v1/insights/baseline` | — | Currently captured behavior baseline, if any |
+| `netra_insights_drift` | `GET /api/v1/insights/drift` | — | How current traffic differs from the captured baseline |
+| `netra_insights_recommendations` | `GET /api/v1/insights/recommendations` | `limit` (1-200, default 50), `namespace`, `workload` | Suggested policy changes; result always carries `applyRequiresReview: true` |
+| `netra_insights_rates` | `GET /api/v1/insights/rates` | `window` (duration string, 30s-2h, default 5m) | Current traffic-rate window |
+| `netra_insights_rate_baseline_get` | `GET /api/v1/insights/rate-baseline` | — | Currently captured rate baseline, if any |
+| `netra_insights_rate_drift` | `GET /api/v1/insights/rate-drift` | `window` | How current rates differ from the rate baseline |
+| `netra_insights_exposure` | `GET /api/v1/insights/exposure` | `window` | Dependency graph combined with behavior + rate drift |
+| `netra_insights_remediations` | `GET /api/v1/insights/remediations` | `limit` (1-200, default 50), `window` | Proposed remediations; result always carries `reviewRequired: true`, `autoApply: false` |
+
+### Policies — read & generate (always available)
+
+None of these mutate the cluster or Netra's store, and none record an audit event.
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_policies_list` | `GET /api/v1/policies` | `namespace` (default `default`) | Raw CiliumNetworkPolicy list; requires Cilium integration enabled on the controller |
+| `netra_policies_history` | `GET /api/v1/policies/history` | `namespace`, `name`, `limit` (1-200, default 50) | Recorded revisions: checkpoints, applies, rollbacks, deletes |
+| `netra_policies_history_export` | `GET /api/v1/policies/history/export` | — | Full revision archive as JSON, for backup or `netra_policy_history_import` on another controller |
+| `netra_policy_build` | `POST /api/v1/policies/build` | body: `name` **(required)**, `namespace` **(required)**, `selector` (object), `kind`, `to` (array of CIDR/FQDN/entity strings), `port`, `protocol`, `includeDns` (bool) | Generates a manifest only — feed the result to `netra_policy_plan` |
+| `netra_policy_lockdown` | `POST /api/v1/policies/lockdown` | body: `name` **(required)**, `namespace` (default `default`), `kind` (`pod`\|`vm`, default `pod`), `selector` (auto-detected if omitted) | Generates a deny-all manifest only — feed the result to `netra_policy_plan`, or use `netra_policy_unlock` to remove an already-applied one |
+| `netra_ebpf_scope_preview` | `POST /api/v1/ebpf/scope/preview` | body: `scopes` **(required, array of objects)** | Dry match against live pods; does not change the active scope |
+
+### Policies — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_policy_plan` | `POST /api/v1/policies/plan` | `manifest` **(required)** | Server-side dry-run + risk assessment; returns `receipt.token` (single-use, 5-minute expiry) |
+| `netra_policy_apply` | `POST /api/v1/policies/apply` | `manifest` **(required)**, `plan_token` **(required)**, `confirm_risk` (required only if the plan's risk was `high`/`critical`) | See [The plan → apply flow](#the-plan--apply-flow) below |
+| `netra_policy_rollback` | `POST /api/v1/policies/{namespace}/{name}/rollback/{revision}` | `namespace` **(path)**, `name` **(path)**, `revision` **(path)**, `dryRun` (bool), `confirmRisk` (required if risk is high/critical) | Pass `dryRun: true` first to preview; repeat with `confirmRisk` matching the previewed risk to actually apply |
+| `netra_policy_delete` | `DELETE /api/v1/policies/{namespace}/{name}` | `namespace` **(path)**, `name` **(path)** | Records a checkpoint of the deleted manifest before deleting |
+| `netra_policy_unlock` | `DELETE /api/v1/policies/lockdown/{namespace}/{name}` | `namespace` **(path)**, `name` **(path, workload name)** | Deletes the lockdown policy for a workload, restoring normal access |
+| `netra_policy_history_import` | `POST /api/v1/policies/history/import` | `archive` **(required, object from `netra_policies_history_export`)**, `mode` (`merge`\|`replace`, default `merge`), `confirm_replace` (bool, required when `mode=replace`) | Discards existing history first when `mode=replace` |
+
+### eBPF fast path — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_ebpf_mode` | `PUT /api/v1/ebpf/mode` | `mode` **(required, `observe`\|`enforce`)**, `lease` (duration, 1m-24h, default 15m) | Self-limiting: enforce auto-reverts to observe when the lease expires |
+| `netra_ebpf_scope_set` | `PUT /api/v1/ebpf/scope` | `mode` **(required, `all`\|`selected`)**, `scopes` (array, required when `mode=selected`) | Preview matches first with `netra_ebpf_scope_preview` |
+| `netra_ebpf_deny_add` / `netra_ebpf_deny_delete` | `POST /api/v1/ebpf/deny` / `DELETE .../deny/{ip}` | `ip` **(required)** | Exact IPv4 or IPv6 address |
+| `netra_ebpf_cidr_add` / `netra_ebpf_cidr_delete` | `POST /api/v1/ebpf/cidr` / `POST .../cidr/delete` | `cidr` **(required)**, `direction` (`egress`\|`ingress`\|`both`, default `egress`) | |
+| `netra_ebpf_port_add` / `netra_ebpf_port_delete` | `POST /api/v1/ebpf/port` / `POST .../port/delete` | `port` **(required, 1-65535)**, `protocol` (`TCP`\|`UDP`\|`ANY`, default `ANY`), `direction` (default `egress`) | |
+| `netra_ebpf_uid_add` / `netra_ebpf_uid_delete` | `POST /api/v1/ebpf/uid` / `DELETE .../uid/{uid}` | `uid` **(required)** | Linux UID |
+| `netra_ebpf_dns_add` / `netra_ebpf_dns_delete` | `POST /api/v1/ebpf/dns` / `POST .../dns/delete` | `name` **(required)** | Exact plain-DNS query name over UDP/53; no wildcards |
+| `netra_ebpf_process_add` / `netra_ebpf_process_delete` | `POST /api/v1/ebpf/process` / `POST .../process/delete` | `name` **(required)** | Linux `comm`, up to 15 bytes |
+| `netra_ebpf_sni_add` / `netra_ebpf_sni_delete` | `POST /api/v1/ebpf/sni` / `POST .../sni/delete` | `name` **(required)** | Exact TLS SNI, best-effort (requires ClientHello parsing); no wildcards |
+| `netra_ebpf_rate_set` / `netra_ebpf_rate_delete` | `PUT /api/v1/ebpf/rate` / `DELETE .../rate/{ip}` | `destination` **(required, exact IPv4)**, `pps` **(required, 1-10000000, set only)** | |
+
+Every eBPF mutating tool returns the full updated `EBPFFastPathConfig` on success.
+
+### Insights — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)
+
+| Tool | Endpoint | Parameters | Notes |
+|---|---|---|---|
+| `netra_insights_baseline_capture` | `POST /api/v1/insights/baseline` | — | Replaces any existing behavior baseline with a fresh snapshot |
+| `netra_insights_baseline_clear` | `DELETE /api/v1/insights/baseline` | — | `netra-mcp` sends the required confirmation header automatically |
+| `netra_insights_rate_baseline_capture` | `POST /api/v1/insights/rate-baseline` | `window` (duration, 30s-2h, default 5m) | Replaces any existing rate baseline |
+| `netra_insights_rate_baseline_clear` | `DELETE /api/v1/insights/rate-baseline` | — | `netra-mcp` sends the required confirmation header automatically |
+
+## The plan → apply flow
+
+`netra_policy_apply` never accepts a manifest on its own — it requires proof that the exact same manifest was just dry-run planned. This is the one place where the calling agent has to carry state between two tool calls:
+
+1. Call `netra_policy_plan` with `manifest`. The result includes `plan.risk` (`low`/`medium`/`high`/`critical`) and `receipt.token`.
+2. If `plan.risk` is `low` or `medium`, call `netra_policy_apply` with the same `manifest` and `plan_token` set to `receipt.token`.
+3. If `plan.risk` is `high` or `critical`, call `netra_policy_apply` with the same `manifest`, `plan_token`, **and** `confirm_risk` set to that exact risk string. Omitting it, or getting the string wrong, is rejected with a 409 (surfaced as an `isError: true` tool result, not a crash).
+4. The token is single-use and expires after 5 minutes — a stale or reused token, or a manifest that doesn't byte-for-byte match what was planned, is rejected with a 412/428 (also surfaced as `isError: true`).
+
+`netra_policy_rollback` has the same two-step shape folded into one tool via `dryRun`/`confirmRisk` query parameters instead of a separate token, since a rollback target is already an exact, previously-recorded manifest rather than new arbitrary input.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Every tool call returns `isError: true` with `dial tcp ...: connect: connection refused` | `NETRA_URL` doesn't point at a reachable controller | Verify the controller is running and the URL/port are correct |
+| `isError: true`, body `{"error":"invalid API token"}`, status 401 | `NETRA_API_KEY` missing or wrong | Match it to the controller's own `NETRA_API_KEY` |
+| TLS handshake errors against a local controller | Self-signed certificate | Set `NETRA_TLS_INSECURE=true` (local/dev only) |
+| `netra_policy_apply` returns status 428 `"a fresh preflight receipt is required"` | Called apply without planning first, or the token expired | Call `netra_policy_plan` again immediately before applying |
+| `netra_policy_apply` returns status 409 `"preflight risk is high; ... apply with X-Netra-Confirm-Risk: high"` | Risk is high/critical and `confirm_risk` was omitted or didn't match | Pass `confirm_risk` equal to the risk string from the plan result |
+| `netra_policy_apply` / `netra_policy_rollback` return status 412 `"preflight receipt is expired, already used, or does not match this exact policy body"` | Token reused, expired, or the manifest changed since planning | Re-plan the exact manifest you intend to apply |
+| A mutating tool name doesn't appear in `tools/list` at all | `NETRA_MCP_ALLOW_MUTATIONS` isn't `true` on the `netra-mcp` process | Set it and restart `netra-mcp` (Hermes will relaunch the child process) |
+| Any write returns status 507 `"could not persist ..."` | Controller's durable state backend is failing to write | Check the controller's own logs/storage; this is not specific to MCP |
+| `hermes mcp test netra` fails outright | Binary path wrong, not executable, or crashes on startup | Run `netra-mcp` manually per [Build and run](#build-and-run) and check stderr |
 
 ## Not included
 
 - **No `flows/stream` tool.** `GET /api/v1/flows/stream` is a Server-Sent-Events stream; it doesn't fit a request/response MCP `tools/call`. `netra_flow_summary` covers the same underlying data as a bounded, point-in-time aggregate.
 - **Tools only — no MCP resources or prompts.** Every capability is exposed as a callable tool; there is no resource-subscription or prompt-template surface.
 - **No additional rate limiting.** `netra-mcp` adds no throttling of its own beyond whatever the controller's own API already enforces.
-- **Mutating tools require explicit opt-in** (`NETRA_MCP_ALLOW_MUTATIONS=true`) and are audited exactly like any other API mutation — check `netra_audit` (or `GET /api/v1/audit`) for a distinct actor label (default `mcp:hermes`) to see what an agent has actually done.
+- **No per-tool credential scoping.** See [Security considerations](#security-considerations) — one API key covers everything `netra-mcp` is allowed to do; the mutation gate is process-wide, not per-tool.
 - **No credential management.** `netra-mcp` reads `NETRA_API_KEY` from its own process environment; it does not fetch, rotate, or store credentials itself.
+- **No batching or transactions.** Each tool call is one independent HTTP request; there is no way to apply several eBPF rule changes atomically.

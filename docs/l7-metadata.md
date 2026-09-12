@@ -50,3 +50,11 @@ Dashboard: **L7 Metadata**.
 API: `GET /api/v1/ebpf/l7`.
 
 Prometheus metrics are aggregate/low-cardinality. Hostnames and destination addresses are intentionally not emitted as metric labels.
+
+## Implementation note: why this runs in its own program
+
+SNI/HTTP/DNS-qname parsing runs in dedicated `netra_l7_cgroup_egress`/`netra_l7_cgroup_ingress` programs (`bpf/netra_tc.c`), separate from `netra_cgroup_egress`/`netra_cgroup_ingress` (the conntrack + IP/CIDR/port/rate/NetworkPolicy-deny program). This is deliberate, not incidental: a `cgroup_skb` BPF program is force-inlined into one function frame, so the verifier must account for the union of every helper's locals against the kernel's hard 512-byte stack limit. Once conntrack and NetworkPolicy-shaped deny were added to the CT/policy program, that frame was already at its limit — folding the L7 scan buffers back into the same function is exactly what silently disconnected this feature for a time (the parser functions were still defined but never called; see `CHANGELOG.md`). Keeping L7 parsing in its own program gives it its own, independent verifier budget. If you're modifying either program, do not merge them back into one — reintroduce that same failure mode.
+
+The two programs run independently of the CT/policy program's own verdict for the same packet (the kernel ANDs multiple `cgroup_skb` programs' verdicts at the same attach point): an SNI/DNS deny here returns a block on its own. One accepted, documented consequence: `flow_stats`/`workload_flow_stats`'s `blocked` counter only reflects IP/CIDR/port/rate/NetworkPolicy denies from the CT/policy program, not SNI/DNS denies from this one — the packet is still genuinely dropped either way; Drop Detective sees the SNI/DNS-specific block via `policy_drops`/`REASON_SNI`/`REASON_DNS` regardless.
+
+Gated by `NETRA_L7=auto|off|required` (default `auto`), mirroring `NETRA_TCX`'s attach-with-fallback convention: on attach failure the agent logs a warning and continues without L7 observability rather than failing startup, since these programs' un-unrolled SNI/HTTP scan loops are a genuine open question against real kernel verifiers that can vary across supported kernel versions.

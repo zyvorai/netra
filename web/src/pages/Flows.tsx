@@ -105,8 +105,8 @@ export default function Flows() {
   return (
     <div className="grid">
       <section className="card span2">
-        <p className="eyebrow">HUBBLE RELAY</p>
-        <h2>Live flows</h2>
+        <p className="eyebrow">LIVE STREAM</p>
+        <h3>Filters</h3>
         <p>
           Optional Cilium/Hubble enrichment. When Hubble is disabled, use <b>eBPF</b>, <b>Network Health</b>, and{' '}
           <b>L7 Metadata</b> for Netra-native telemetry.

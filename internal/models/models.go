@@ -228,14 +228,14 @@ type TCPHealthStat struct {
 
 // BPFProgramStat is per-program attach + optional kernel run stats from the agent.
 type BPFProgramStat struct {
-	Name             string `json:"name"`
-	Type             string `json:"type,omitempty"`
-	ID               uint32 `json:"id,omitempty"`
-	Attached         bool   `json:"attached"`
-	RunCount         uint64 `json:"runCount,omitempty"`
-	RunTimeNS        uint64 `json:"runTimeNs,omitempty"`
-	RecursionMisses  uint64 `json:"recursionMisses,omitempty"`
-	InfoError        string `json:"infoError,omitempty"`
+	Name            string `json:"name"`
+	Type            string `json:"type,omitempty"`
+	ID              uint32 `json:"id,omitempty"`
+	Attached        bool   `json:"attached"`
+	RunCount        uint64 `json:"runCount,omitempty"`
+	RunTimeNS       uint64 `json:"runTimeNs,omitempty"`
+	RecursionMisses uint64 `json:"recursionMisses,omitempty"`
+	InfoError       string `json:"infoError,omitempty"`
 }
 
 // CapChangeEvent is an observe-only notice that CapEff changed for a
@@ -254,9 +254,9 @@ type CapChangeEvent struct {
 // NetworkHistogramReport mirrors histograms.Report JSON for AgentReport
 // without importing the histograms package into models.
 type NetworkHistogramReport struct {
-	TCPRetransmissions HistogramSnapshot `json:"tcpRetransmissions"`
-	TCPSRTTUS          HistogramSnapshot `json:"tcpSrttUs"`
-	TCPConnectUS       HistogramSnapshot `json:"tcpConnectUs"`
+	TCPRetransmissions HistogramSnapshot   `json:"tcpRetransmissions"`
+	TCPSRTTUS          HistogramSnapshot   `json:"tcpSrttUs"`
+	TCPConnectUS       HistogramSnapshot   `json:"tcpConnectUs"`
 	Host               NetworkHostCounters `json:"host"`
 }
 
@@ -447,6 +447,119 @@ type DropDiagnosticsResponse struct {
 	Nodes   []NodeDropDiagnostics  `json:"nodes"`
 }
 
+// IPv6ExtHeaderStat is a node-level counter of IPv6 extension-header/
+// fragmentation walk outcomes for one (direction, hook) pair. It is
+// node-level, not per-workload: cgroup identity is only reliably
+// available at one of the walk's call sites, so a consistent signal
+// across all of them beats a partially-attributed one.
+type IPv6ExtHeaderStat struct {
+	Direction         string `json:"direction"`
+	Hook              string `json:"hook"`
+	Packets           uint64 `json:"packets"`
+	ExtHeaderPackets  uint64 `json:"extHeaderPackets"`
+	TotalExtHeaders   uint64 `json:"totalExtHeaders"`
+	Fragmented        uint64 `json:"fragmented"`
+	NonFirstFragments uint64 `json:"nonFirstFragments"`
+	MoreFragments     uint64 `json:"moreFragments"`
+	ChainTruncated    uint64 `json:"chainTruncated"`
+}
+
+type IPv6DiagnosticsSummary struct {
+	Packets           uint64                 `json:"packets"`
+	ExtHeaderPackets  uint64                 `json:"extHeaderPackets"`
+	Fragmented        uint64                 `json:"fragmented"`
+	NonFirstFragments uint64                 `json:"nonFirstFragments"`
+	ChainTruncated    uint64                 `json:"chainTruncated"`
+	Anomalies         []NetworkHealthAnomaly `json:"anomalies,omitempty"`
+}
+
+type NodeIPv6Diagnostics struct {
+	Node       string              `json:"node"`
+	ExtHeaders []IPv6ExtHeaderStat `json:"extHeaders,omitempty"`
+}
+
+type IPv6DiagnosticsResponse struct {
+	Summary IPv6DiagnosticsSummary `json:"summary"`
+	Nodes   []NodeIPv6Diagnostics  `json:"nodes"`
+}
+
+// ShieldClassStat is the XDP Shield's allowed/dropped/audited breakdown
+// for one traffic class, reusing the same counters shield_stats already
+// tracks in aggregate.
+type ShieldClassStat struct {
+	Class   string `json:"class"` // syn, udp, icmp, other
+	Allowed uint64 `json:"allowed"`
+	Dropped uint64 `json:"dropped"`
+	Audited uint64 `json:"audited"`
+}
+
+// ShieldSourceStat is a per-source "would-be-denied" hit count, recorded
+// identically whether Shield is in audit or enforce mode, so operators
+// can preview who Shield would drop before enabling enforcement.
+type ShieldSourceStat struct {
+	Family     string `json:"family"`
+	Class      string `json:"class"`
+	Address    string `json:"address"`
+	Denied     uint64 `json:"denied"`
+	LastSeenNS uint64 `json:"lastSeenNs"`
+}
+
+type ShieldDiagnosticsSummary struct {
+	Allowed   uint64                 `json:"allowed"`
+	Dropped   uint64                 `json:"dropped"`
+	Audited   uint64                 `json:"audited"`
+	Anomalies []NetworkHealthAnomaly `json:"anomalies,omitempty"`
+}
+
+type NodeShieldDiagnostics struct {
+	Node    string            `json:"node"`
+	Classes []ShieldClassStat `json:"classes,omitempty"`
+}
+
+type ShieldDiagnosticsResponse struct {
+	Summary    ShieldDiagnosticsSummary `json:"summary"`
+	Nodes      []NodeShieldDiagnostics  `json:"nodes"`
+	TopSources []ShieldSourceStat       `json:"topSources,omitempty"`
+}
+
+// InterfaceFlowStat is a per-(interface, flow) counter, populated only
+// from Netra's TC/TCX-attached hooks (tc/egress, tc/ingress) — the only
+// place skb->ifindex reflects a specific, trustworthy NIC. cgroup_skb
+// hooks and the early-deny XDP program do not contribute to this signal;
+// see bpf/netra_tc.c's iface_flow_stats map comment for why.
+type InterfaceFlowStat struct {
+	IfIndex         uint32 `json:"ifIndex"`
+	Interface       string `json:"interface,omitempty"`
+	Family          string `json:"family"`
+	Direction       string `json:"direction"`
+	Protocol        string `json:"protocol"`
+	SourceIP        string `json:"sourceIp,omitempty"`
+	DestinationIP   string `json:"destinationIp"`
+	SourcePort      uint16 `json:"sourcePort,omitempty"`
+	DestinationPort uint16 `json:"destinationPort"`
+	Packets         uint64 `json:"packets"`
+	Bytes           uint64 `json:"bytes"`
+	Blocked         uint64 `json:"blocked"`
+	LastSeenNS      uint64 `json:"lastSeenNs"`
+}
+
+type InterfaceSummary struct {
+	Interface string       `json:"interface"`
+	Packets   uint64       `json:"packets"`
+	Bytes     uint64       `json:"bytes"`
+	Blocked   uint64       `json:"blocked"`
+	TopDests  []NamedCount `json:"topDestinations,omitempty"`
+}
+
+type NodeInterfaceFlows struct {
+	Node       string             `json:"node"`
+	Interfaces []InterfaceSummary `json:"interfaces,omitempty"`
+}
+
+type InterfaceFlowResponse struct {
+	Nodes []NodeInterfaceFlows `json:"nodes"`
+}
+
 type PolicyDropStat struct {
 	Family    uint8  `json:"family"`
 	Protocol  uint8  `json:"protocol"`
@@ -537,22 +650,26 @@ type AgentReport struct {
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
 	PolicyDrops        []PolicyDropStat        `json:"policyDrops,omitempty"`
+	IPv6ExtHeaders     []IPv6ExtHeaderStat     `json:"ipv6ExtHeaders,omitempty"`
 	ConntrackEntries   int                     `json:"conntrackEntries,omitempty"`
 	Shield             *ShieldStats            `json:"shield,omitempty"`
+	ShieldClasses      []ShieldClassStat       `json:"shieldClasses,omitempty"`
+	ShieldSources      []ShieldSourceStat      `json:"shieldSources,omitempty"`
+	InterfaceFlows     []InterfaceFlowStat     `json:"interfaceFlows,omitempty"`
 	// ProcessMeta is /proc-derived process metadata for PIDs observed in
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
 	// see the host's /proc, a real expansion of what it can observe.
-	ProcessMeta     []ProcessMetaStat  `json:"processMeta,omitempty"`
-	Programs        []BPFProgramStat   `json:"programs,omitempty"`
+	ProcessMeta     []ProcessMetaStat       `json:"processMeta,omitempty"`
+	Programs        []BPFProgramStat        `json:"programs,omitempty"`
 	Histograms      *NetworkHistogramReport `json:"histograms,omitempty"`
-	CapChanges      []CapChangeEvent   `json:"capChanges,omitempty"`
-	Stack           NodeStackStat      `json:"stack,omitempty"`
-	Events          []FastPathEvent    `json:"events"`
-	ObservedAt      time.Time          `json:"observedAt"`
-	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
-	ScopeMode       string             `json:"scopeMode,omitempty"`
-	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
+	CapChanges      []CapChangeEvent        `json:"capChanges,omitempty"`
+	Stack           NodeStackStat           `json:"stack,omitempty"`
+	Events          []FastPathEvent         `json:"events"`
+	ObservedAt      time.Time               `json:"observedAt"`
+	Workloads       []WorkloadIdentity      `json:"workloads,omitempty"`
+	ScopeMode       string                  `json:"scopeMode,omitempty"`
+	SelectedCgroups int                     `json:"selectedCgroups,omitempty"`
 }
 
 // ProcessMetaStat is /proc-derived metadata for one process observed on the
