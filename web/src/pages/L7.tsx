@@ -48,7 +48,7 @@ export default function L7() {
         <input value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com" />
         <button className="primary" onClick={() => mutate('/api/v1/ebpf/sni', sni)} disabled={!sni.trim()}>Add SNI</button>
       </div>
-      <div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} onClick={() => mutate('/api/v1/ebpf/sni/delete', x)}>{x} ×</button>)}</div>
+      <div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => mutate('/api/v1/ebpf/sni/delete', x)}>{x} ×</button>)}</div>
     </section>
 
     <section className="card span3">
