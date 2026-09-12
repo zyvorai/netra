@@ -73,6 +73,14 @@ if [[ -z "${TARGET}" ]]; then
 fi
 
 ALLOW_UNAUTH_LOCAL="${NETRA_ALLOW_UNAUTHENTICATED:-false}"
+# Resolved locally (not on the remote host) so a caller-supplied
+# NETRA_API_KEY/NETRA_AGENT_KEY actually takes effect: SSH does not forward
+# the invoking shell's environment, so referencing ${NETRA_API_KEY:-...}
+# inside the remote script (evaluated over on the remote host) would always
+# see it unset and mint a fresh random key on every single deploy, silently
+# rotating credentials out from under whatever the operator had configured.
+API_KEY_LOCAL="${NETRA_API_KEY:-$(openssl rand -hex 32)}"
+AGENT_KEY_LOCAL="${NETRA_AGENT_KEY:-$(openssl rand -hex 32)}"
 
 ssh_host() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 REMOTE_HOME="$(ssh_host 'printf %s "$HOME"')"
@@ -125,8 +133,8 @@ fi
 bash scripts/lib/ensure-hubble-relay.sh
 
 ALLOW_UNAUTH="${ALLOW_UNAUTH_LOCAL}"
-API_KEY="\${NETRA_API_KEY:-\$(openssl rand -hex 32)}"
-AGENT_KEY="\${NETRA_AGENT_KEY:-\$(openssl rand -hex 32)}"
+API_KEY="${API_KEY_LOCAL}"
+AGENT_KEY="${AGENT_KEY_LOCAL}"
 mkdir -p "\$HOME/.netra"
 printf '%s\n' "\$API_KEY" > "\$HOME/.netra/api-key"
 printf '%s\n' "\$AGENT_KEY" > "\$HOME/.netra/agent-key"
@@ -196,6 +204,16 @@ helm upgrade --install netra ./helm/netra \
   --set hubble.enabled=true \
   --wait --timeout 300s
 
+# image.tag is a fixed value ("0.22.0"), not a per-build digest/tag, so the
+# Deployment's pod template never actually changes between runs even though
+# the image content underneath that tag does (a fresh image was just built
+# and imported above). With imagePullPolicy=IfNotPresent, Kubernetes has no
+# signal to replace the already-running pod in that case — "helm upgrade"
+# and "rollout status" both report success trivially because there is no
+# diff to roll out, and the old pod keeps serving the old image indefinitely.
+# Force a real restart every run so the freshly imported image is always
+# what ends up running, not just what's sitting in the local image store.
+kubectl -n netra-system rollout restart deployment/netra
 kubectl -n netra-system rollout status deploy/netra --timeout=180s
 echo "API_KEY=\$API_KEY"
 echo "NETRA_URL=https://\$(hostname -I | awk '{print \$1}'):30870"
