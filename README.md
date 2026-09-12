@@ -38,6 +38,10 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 ## Dashboard gallery
 
+Live walkthrough — Overview, the Firewall page's unified rules table and NetPol v2 allow-list, then a real in-browser VNC console connected to a running KubeVirt VM — captured against a live lab deployment, not a mockup:
+
+![Netra live demo — Overview, Firewall/NetPol v2, in-browser VNC console](docs/ux/netra-live-demo.gif)
+
 Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockdown appear above and under Cilium integration; the rest of the console:
 
 ![Sign in](docs/ux/07-login.png)
