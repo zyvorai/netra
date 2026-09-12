@@ -117,6 +117,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
 	mux.Handle("PUT /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldSet)))
 	mux.Handle("PUT /api/v1/ebpf/netpol/config", s.auth(http.HandlerFunc(s.ebpfNetPolConfigSet)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/v2/config", s.auth(http.HandlerFunc(s.ebpfNetPolV2ConfigSet)))
+	mux.Handle("POST /api/v1/ebpf/netpol/rules", s.auth(http.HandlerFunc(s.ebpfNetPolRuleAdd)))
+	mux.Handle("DELETE /api/v1/ebpf/netpol/rules/{id}", s.auth(http.HandlerFunc(s.ebpfNetPolRuleDelete)))
+	mux.Handle("POST /api/v1/ebpf/netpol/default-deny/plan", s.auth(http.HandlerFunc(s.ebpfNetPolDefaultDenyPlan)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/default-deny", s.auth(http.HandlerFunc(s.ebpfNetPolDefaultDenySet)))
 	mux.Handle("GET /api/v1/ebpf/rules", s.auth(http.HandlerFunc(s.ebpfRulesList)))
 	mux.Handle("GET /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRuleGet)))
 	mux.Handle("PATCH /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRulePatch)))
@@ -1216,6 +1221,248 @@ func (s *Server) ebpfNetPolConfigSet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
 		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+// validateWorkloadScope trims and validates a workload selector in place —
+// factored out of ebpfScope so the NetPol v2 endpoints (which also target
+// workloads via EBPFWorkloadScope) validate identically rather than
+// duplicating the checks with a chance to drift.
+func validateWorkloadScope(sc *models.EBPFWorkloadScope) error {
+	sc.Namespace, sc.Pod = strings.TrimSpace(sc.Namespace), strings.TrimSpace(sc.Pod)
+	sc.WorkloadKind, sc.WorkloadName = strings.TrimSpace(sc.WorkloadKind), strings.TrimSpace(sc.WorkloadName)
+	clean := map[string]string{}
+	for k, v := range sc.Labels {
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k == "" {
+			return fmt.Errorf("scope label key cannot be empty")
+		}
+		clean[k] = v
+	}
+	sc.Labels = clean
+	if sc.CgroupID == 0 && sc.Namespace == "" && sc.Pod == "" && sc.WorkloadKind == "" && sc.WorkloadName == "" && len(sc.Labels) == 0 {
+		return fmt.Errorf("empty workload scope is not allowed")
+	}
+	return nil
+}
+
+func (s *Server) ebpfNetPolV2ConfigSet(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	cfg, err := s.store.SetNetPolV2Enabled(x.Enabled, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol v2 config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolRuleAdd(w http.ResponseWriter, r *http.Request) {
+	var x models.NetPolRule
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	a, err := netip.ParseAddr(strings.TrimSpace(x.PeerIPv4))
+	if err != nil || !a.Is4() {
+		errorJSON(w, 400, "peerIpv4 must be an exact IPv4 address")
+		return
+	}
+	x.PeerIPv4 = a.String()
+	var ok bool
+	x.Protocol, ok = normalizeProtocol(x.Protocol)
+	if !ok {
+		errorJSON(w, 400, "protocol must be TCP, UDP, or ANY")
+		return
+	}
+	x.Direction, ok = normalizeDirection(x.Direction)
+	if !ok {
+		errorJSON(w, 400, "direction must be ingress, egress, or both")
+		return
+	}
+	x.Action = strings.ToLower(strings.TrimSpace(x.Action))
+	if x.Action != "allow" && x.Action != "deny" {
+		errorJSON(w, 400, "action must be allow or deny")
+		return
+	}
+	cfg, err := s.store.AddNetPolRule(x, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist netpol rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolRuleDelete(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.store.DelNetPolRule(r.PathValue("id"), actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+type netPolDefaultDenyRequest struct {
+	Selector models.EBPFWorkloadScope `json:"selector"`
+	Enabled  bool                     `json:"enabled"`
+	Lease    string                   `json:"lease,omitempty"`
+}
+
+// ebpfNetPolDefaultDenyPlan is the mandatory first step of activating
+// default-deny for a workload selector: it never mutates state, only
+// assesses risk and issues a preflight token (the same
+// IssuePreflight/ConsumePreflight mechanism the CiliumNetworkPolicy
+// plan/apply flow already uses, hash-bound to this exact request body).
+// Deactivating (enabled=false) is always risk "low" — turning default-deny
+// off is the fail-open direction and needs no risk gate.
+func (s *Server) ebpfNetPolDefaultDenyPlan(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var x netPolDefaultDenyRequest
+	if err := json.Unmarshal(b, &x); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	risk := "low"
+	matched, allowCovered := 0, 0
+	if x.Enabled {
+		if s.kube == nil {
+			errorJSON(w, http.StatusServiceUnavailable, "Kubernetes client unavailable")
+			return
+		}
+		items, err := s.kube.ListWorkloads(r.Context(), "")
+		if err != nil {
+			errorJSON(w, 502, err.Error())
+			return
+		}
+		cfg := s.store.Config()
+		for _, pod := range items {
+			if !workload.Match(x.Selector, pod) {
+				continue
+			}
+			matched++
+			for _, rule := range cfg.NetPolRules {
+				if strings.EqualFold(rule.Action, "allow") && workload.Match(rule.Selector, pod) {
+					allowCovered++
+					break
+				}
+			}
+		}
+		if matched == 0 {
+			errorJSON(w, 400, "no workloads match this selector")
+			return
+		}
+		// Deliberately just the unambiguous binary check for now: zero
+		// covering allow rules anywhere is a certain-outage config.
+		// Partial-coverage ("some but not all matched workloads have an
+		// allow rule") is a real "high" tier the design considered, but
+		// needs a traffic-coverage heuristic beyond simple rule presence —
+		// deferred rather than shipped as a guess.
+		if allowCovered == 0 {
+			risk = "critical"
+		} else {
+			risk = "medium"
+		}
+	}
+	if risk == "critical" && r.URL.Query().Get("allowNoRules") != "true" {
+		errorJSON(w, 409, fmt.Sprintf("%d matched workload(s) have zero allow rules covering them — this would certainly cut off their traffic; add allow rules first, or repeat with ?allowNoRules=true to override", matched))
+		return
+	}
+	rcpt, err := s.store.IssuePreflight(b, risk, actor(r), 5*time.Minute)
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+		} else {
+			errorJSON(w, 500, "could not issue preflight receipt")
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"risk": risk, "matchedWorkloads": matched, "workloadsWithAllowRule": allowCovered, "receipt": rcpt})
+}
+
+// ebpfNetPolDefaultDenySet is the second, gated step: unlike every other
+// /ebpf/* mutation (and unlike even the general CiliumNetworkPolicy apply
+// flow, which only requires preflight when s.requirePreflight is set), a
+// fresh preflight token is unconditionally required here — this is the
+// single highest-blast-radius mutation in the firewall feature.
+func (s *Server) ebpfNetPolDefaultDenySet(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var x netPolDefaultDenyRequest
+	if err := json.Unmarshal(b, &x); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if err := validateWorkloadScope(&x.Selector); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Netra-Plan-Token"))
+	if token == "" {
+		s.metricsData.preflightRejects.Add(1)
+		errorJSON(w, http.StatusPreconditionRequired, "a fresh preflight receipt is required; run /api/v1/ebpf/netpol/default-deny/plan first")
+		return
+	}
+	risk, ok, consumeErr := s.store.ConsumePreflight(token, b)
+	if consumeErr != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist preflight consumption: "+consumeErr.Error())
+		return
+	}
+	if !ok {
+		s.metricsData.preflightRejects.Add(1)
+		errorJSON(w, http.StatusPreconditionFailed, "preflight receipt is expired, already used, or does not match this exact request body")
+		return
+	}
+	if risk == "high" || risk == "critical" {
+		if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Netra-Confirm-Risk")), risk) {
+			s.metricsData.preflightRejects.Add(1)
+			errorJSON(w, 409, "preflight risk is "+risk+"; repeat plan and apply with X-Netra-Confirm-Risk: "+risk)
+			return
+		}
+	}
+	lease := 5 * time.Minute
+	if x.Enabled && x.Lease != "" {
+		d, err := time.ParseDuration(x.Lease)
+		if err != nil || d < time.Minute || d > time.Hour {
+			errorJSON(w, 400, "lease must be a duration between 1m and 60m")
+			return
+		}
+		lease = d
+	}
+	cfg, err := s.store.SetNetPolDefaultDeny(x.Selector, x.Enabled, lease, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist default-deny state: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, cfg)

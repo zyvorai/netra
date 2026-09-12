@@ -73,9 +73,19 @@ type EBPFFastPathConfig struct {
 	Shield           *ShieldConfig       `json:"shield,omitempty"`
 	NetPolEnabled    bool                `json:"netPolEnabled,omitempty"`
 	NetPolDenies     []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
-	Revision         uint64              `json:"revision"`
-	EnforceUntil     *time.Time          `json:"enforceUntil,omitempty"`
-	LeaseSeconds     int64               `json:"leaseSeconds,omitempty"`
+	// v2: allow-list / default-deny per-workload engine (Phase 3), additive
+	// and independent of NetPolEnabled/NetPolDenies above — see
+	// docs/native-netpol.md. An explicit NetPolRules allow entry can
+	// override even the flat global deny-lists (BlockedIPv4/CIDRs/etc.), by
+	// design; NetPolDefaultDenies is deliberately its own list (not a field
+	// on NetPolRule) since "is this workload in default-deny posture" and
+	// "what does this one rule say" are independent axes.
+	NetPolV2Enabled     bool                `json:"netPolV2Enabled,omitempty"`
+	NetPolRules         []NetPolRule        `json:"netPolRules,omitempty"`
+	NetPolDefaultDenies []NetPolDefaultDeny `json:"netPolDefaultDenies,omitempty"`
+	Revision            uint64              `json:"revision"`
+	EnforceUntil        *time.Time          `json:"enforceUntil,omitempty"`
+	LeaseSeconds        int64               `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
@@ -629,6 +639,37 @@ type NetPolPeerDeny struct {
 	Port      uint16 `json:"port,omitempty"`
 	Protocol  string `json:"protocol,omitempty"`  // TCP|UDP|ANY
 	Direction string `json:"direction,omitempty"` // ingress|egress|both
+}
+
+// NetPolRule is a v2 allow/deny entry, workload-targeted via Selector
+// (resolved to cgroup IDs agent-side, per node — see workload.Resolve)
+// rather than a raw CgroupID like the legacy NetPolPeerDeny above. Exact
+// peer IPv4 only in this phase; CIDR-shaped peers and IPv6 are explicit
+// follow-ups (see docs/native-netpol.md).
+type NetPolRule struct {
+	ID        string            `json:"id"`
+	Selector  EBPFWorkloadScope `json:"selector"`
+	PeerIPv4  string            `json:"peerIpv4"`
+	Port      uint16            `json:"port,omitempty"`
+	Protocol  string            `json:"protocol,omitempty"`  // TCP|UDP|ANY
+	Direction string            `json:"direction,omitempty"` // ingress|egress|both
+	Action    string            `json:"action"`              // allow|deny
+	CreatedAt time.Time         `json:"createdAt"`
+	CreatedBy string            `json:"createdBy,omitempty"`
+}
+
+// NetPolDefaultDeny activates default-deny posture for every workload
+// matching Selector: absent from this list means fail-open (default-allow)
+// for that workload, mirroring real Kubernetes NetworkPolicy semantics.
+// Always has a bounded lease (EnabledUntil) — activation goes through a
+// mandatory plan/confirm step precisely because this is the highest
+// blast-radius mutation in the whole firewall feature; see
+// PUT /api/v1/ebpf/netpol/default-deny and its /plan companion.
+type NetPolDefaultDeny struct {
+	Selector     EBPFWorkloadScope `json:"selector"`
+	EnabledUntil *time.Time        `json:"enabledUntil,omitempty"`
+	LeaseSeconds int64             `json:"leaseSeconds,omitempty"`
+	Actor        string            `json:"actor,omitempty"`
 }
 
 type AgentReport struct {

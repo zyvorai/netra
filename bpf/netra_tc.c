@@ -56,6 +56,8 @@
 #define REASON_PROCESS 7
 #define REASON_SNI 8
 #define REASON_NETPOL 9
+#define REASON_NETPOL_RULE 10         /* explicit netpol_rules4 deny match (v2) */
+#define REASON_NETPOL_DEFAULT_DENY 11 /* v2 default-deny posture, no matching allow rule */
 #define FAMILY_V4    4
 #define FAMILY_V6    6
 
@@ -653,6 +655,30 @@ struct {
     __type(value, __u32); /* 0=off 1=on */
 } netpol_enabled SEC(".maps");
 
+// v2: allow-list / default-deny per-workload engine (Phase 3). Additive —
+// netpol_deny4/netpol_enabled above are untouched, so the legacy deny-only
+// engine keeps working unmodified for existing users. Independent of
+// config_map (the global observe/enforce flag), following the same
+// decoupled-mode precedent as netra_xdp_shield's shield_cfg.mode.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct netpol_peer4_key);
+    __type(value, __u8); /* 0=allow 1=deny */
+} netpol_rules4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 16384);
+    __type(key, __u64); /* cgroup_id */
+    __type(value, __u8); /* 0=default-allow(fail-open, absent==same) 1=default-deny-this-workload */
+} netpol_default4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32); /* 0=off 1=on */
+} netpol_v2_enabled SEC(".maps");
+
 /* Per-CPU scratch keeps large buffers off the 512-byte BPF stack. */
 struct netra_pkt_scratch {
     char dns_name[96];
@@ -770,6 +796,42 @@ static __always_inline int netpol_denies4(__u64 cgroup_id, __u8 direction, __u32
     if (bpf_map_lookup_elem(&netpol_deny4, &k)) return 1;
     k.port = 0; /* any-port deny */
     return bpf_map_lookup_elem(&netpol_deny4, &k) != 0;
+}
+
+// netpol_v2_lookup4: explicit allow/deny lookup for the v2 engine. Returns 1
+// and sets *verdict (0=allow 1=deny) if an explicit rule matches; returns 0
+// (no opinion) if v2 is off, this isn't a cgroup context, or no rule
+// matches — callers must fall through to the flat deny-list/legacy/default
+// posture checks in that case. An explicit allow here is deliberately able
+// to override every check below it, including the flat global emergency
+// deny-list — see docs/native-netpol.md for the safety tradeoff this
+// represents; it is not a bug that a v2 allow can un-block an address an
+// operator staged in the flat deny-list.
+static __always_inline int netpol_v2_lookup4(__u64 cgroup_id, __u8 direction, __u32 peer, __u8 proto, __u16 dport, __u8 *verdict)
+{
+    __u32 z = 0; __u32 *en = bpf_map_lookup_elem(&netpol_v2_enabled, &z);
+    if (!en || !*en || !cgroup_id) return 0;
+    struct netpol_peer4_key k = {.cgroup_id=cgroup_id,.peer=peer,.port=dport,.protocol=proto,.direction=direction};
+    __u8 *v = bpf_map_lookup_elem(&netpol_rules4, &k);
+    if (!v) {
+        k.port = 0; /* any-port rule */
+        v = bpf_map_lookup_elem(&netpol_rules4, &k);
+        if (!v) return 0;
+    }
+    *verdict = *v;
+    return 1;
+}
+
+// netpol_v2_default_deny4: is this cgroup in default-deny posture? Absence
+// of an entry means fail-open (default-allow) — a workload is only ever
+// subject to default-deny once the control plane explicitly puts it there
+// (see PUT /api/v1/ebpf/netpol/default-deny), mirroring real Kubernetes
+// NetworkPolicy semantics and every other fail-open boundary in this file.
+static __always_inline int netpol_v2_default_deny4(__u64 cgroup_id)
+{
+    if (!cgroup_id) return 0;
+    __u8 *posture = bpf_map_lookup_elem(&netpol_default4, &cgroup_id);
+    return posture && *posture;
 }
 
 static __always_inline void track_ipv6_ext(__u8 direction, __u8 hook, const struct netra_ipv6_l4 *w)
@@ -1267,8 +1329,17 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
     int established = (!syn_new && ct_hit(&sc->ct));
     __u8 reason=0; int blocked=0;
     if (!established) {
-        blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id);
-        if (!blocked && netpol_denies4(cgroup_id,direction,peer,proto,policy_port)) { blocked=1; reason=REASON_NETPOL; }
+        __u8 v2_verdict=0;
+        if (netpol_v2_lookup4(cgroup_id,direction,peer,proto,policy_port,&v2_verdict)) {
+            /* Explicit v2 rule found: deny blocks immediately; allow passes
+             * immediately, skipping every check below including the flat
+             * deny-list (see netpol_v2_lookup4's doc comment). */
+            if (v2_verdict) { blocked=1; reason=REASON_NETPOL_RULE; }
+        } else {
+            blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id);
+            if (!blocked && netpol_denies4(cgroup_id,direction,peer,proto,policy_port)) { blocked=1; reason=REASON_NETPOL; }
+            if (!blocked && netpol_v2_default_deny4(cgroup_id)) { blocked=1; reason=REASON_NETPOL_DEFAULT_DENY; }
+        }
     }
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (direction==DIR_EGRESS) {

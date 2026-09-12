@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -109,6 +111,13 @@ func (s *Store) load() error {
 	d.Config.Mode = "observe"
 	d.Config.EnforceUntil = nil
 	d.Config.LeaseSeconds = 0
+	// Same invariant for NetPol v2 default-deny: it is the single
+	// highest-blast-radius mutation in the firewall feature (a workload
+	// only accepts explicitly allowed traffic), so a crashed/restarted
+	// controller must never silently resume it — re-activation requires a
+	// fresh, explicit plan/confirm from an operator.
+	wasNetPolDefaultDenying := len(d.Config.NetPolDefaultDenies) > 0
+	d.Config.NetPolDefaultDenies = nil
 	d.Config = cloneConfig(d.Config)
 	sort.Strings(d.Config.BlockedIPv4)
 	sort.Strings(d.Config.BlockedIPv6)
@@ -150,6 +159,13 @@ func (s *Store) load() error {
 			s.nextFirewallRevID = r.ID
 		}
 	}
+	for _, r := range s.config.NetPolRules {
+		if n, ok := strings.CutPrefix(r.ID, "netpolrule-"); ok {
+			if v, err := strconv.ParseUint(n, 10, 64); err == nil && v > s.nextNetPolRuleSeq {
+				s.nextNetPolRuleSeq = v
+			}
+		}
+	}
 	now := time.Now().UTC()
 	for token, item := range d.Preflights {
 		if token == "" || len(item.Hash) != 32 || !now.Before(item.ExpiresAt) {
@@ -164,9 +180,14 @@ func (s *Store) load() error {
 			s.nextRevisionID = r.ID
 		}
 	}
-	if wasEnforcing {
+	if wasEnforcing || wasNetPolDefaultDenying {
 		s.config.Revision++
-		s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: "system", Action: "ebpf.restart.fail-open", Target: "fast-path"})
+		if wasEnforcing {
+			s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: "system", Action: "ebpf.restart.fail-open", Target: "fast-path"})
+		}
+		if wasNetPolDefaultDenying {
+			s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: "system", Action: "ebpf.netpol.default-deny.restart-fail-open", Target: "netpol-v2"})
+		}
 		if err := s.persistLocked(); err != nil {
 			return fmt.Errorf("persist restart fail-open: %w", err)
 		}

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.26.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.27.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -239,7 +239,7 @@ docs/high-availability.md HA runbook
 docs/host-readiness.md    netra-doctor host readiness runbook
 docs/drop-detective.md    conntrack + policy Drop Detective
 docs/tcx-and-shield.md    TCX modes + XDP Shield
-docs/native-netpol.md     optional native deny-list NetPol maps
+docs/native-netpol.md     optional native NetPol maps: v1 deny-list + v2 allow-list/default-deny
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)

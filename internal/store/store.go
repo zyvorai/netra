@@ -72,6 +72,7 @@ type Store struct {
 	nextRuleSeq           map[string]uint64
 	firewallRuleRevisions []models.FirewallRuleRevision
 	nextFirewallRevID     uint64
+	nextNetPolRuleSeq     uint64
 	backend               *fileBackend
 }
 
@@ -167,6 +168,23 @@ func (s *Store) normalizeLocked(now time.Time) {
 	for token, p := range s.preflights {
 		if !now.Before(p.expiresAt) {
 			delete(s.preflights, token)
+		}
+	}
+	if len(s.config.NetPolDefaultDenies) > 0 {
+		out := make([]models.NetPolDefaultDeny, 0, len(s.config.NetPolDefaultDenies))
+		expired := false
+		for _, d := range s.config.NetPolDefaultDenies {
+			if d.EnabledUntil != nil && !now.Before(*d.EnabledUntil) {
+				expired = true
+				key, _ := json.Marshal(d.Selector)
+				s.appendAuditLocked(models.AuditEvent{At: now.UTC(), Actor: "system", Action: "ebpf.netpol.default-deny.expired", Target: string(key)})
+				continue
+			}
+			out = append(out, d)
+		}
+		if expired {
+			s.config.NetPolDefaultDenies = out
+			s.config.Revision++
 		}
 	}
 }
@@ -1075,6 +1093,123 @@ func (s *Store) SetNetPolEnabled(enabled bool, actor string) (models.EBPFFastPat
 	return cloneConfig(s.config), nil
 }
 
+func (s *Store) SetNetPolV2Enabled(enabled bool, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.NetPolV2Enabled = enabled
+	s.config.Revision++
+	action := "ebpf.netpol.v2.disable"
+	if enabled {
+		action = "ebpf.netpol.v2.enable"
+	}
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: "netpol-v2"})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+// AddNetPolRule appends a new v2 allow/deny rule with a freshly allocated
+// ID — no dedup-by-value here (unlike the flat rule types): two identical
+// rules from different callers are legitimately distinct entries with
+// their own lifecycle, since NetPolRule doesn't feed the Phase 2 rule-ID
+// system (see docs/firewall.md).
+func (s *Store) AddNetPolRule(rule models.NetPolRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.nextNetPolRuleSeq++
+	rule.ID = "netpolrule-" + strconv.FormatUint(s.nextNetPolRuleSeq, 10)
+	rule.CreatedAt = time.Now().UTC()
+	rule.CreatedBy = actor
+	rule.Selector = cloneScopes([]models.EBPFWorkloadScope{rule.Selector})[0]
+	s.config.NetPolRules = append(s.config.NetPolRules, rule)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: rule.CreatedAt, Actor: actor, Action: "ebpf.netpol.rule.add", Target: rule.ID, Details: map[string]any{"action": rule.Action, "peer": rule.PeerIPv4}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		s.nextNetPolRuleSeq--
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelNetPolRule(id, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.NetPolRule, 0, len(s.config.NetPolRules))
+	found := false
+	for _, r := range s.config.NetPolRules {
+		if r.ID == id {
+			found = true
+			continue
+		}
+		out = append(out, r)
+	}
+	if !found {
+		return cloneConfig(s.config), fmt.Errorf("netpol rule %s not found", id)
+	}
+	s.config.NetPolRules = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.netpol.rule.delete", Target: id})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+// SetNetPolDefaultDeny activates (enabled=true) or deactivates
+// (enabled=false) default-deny posture for every workload matching
+// selector, replacing any prior entry for the identical selector (compared
+// by JSON encoding, which Go's encoding/json produces deterministically —
+// map keys sorted — making it a stable equality key despite Labels being a
+// map). This is the single highest-blast-radius mutation in the firewall
+// feature; callers (internal/api) are expected to have already gone
+// through the mandatory plan/confirm preflight before reaching here — this
+// method itself has no opinion on risk, it just records the activation.
+func (s *Store) SetNetPolDefaultDeny(selector models.EBPFWorkloadScope, enabled bool, lease time.Duration, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	key, err := json.Marshal(selector)
+	if err != nil {
+		return cloneConfig(s.config), fmt.Errorf("invalid selector: %w", err)
+	}
+	out := make([]models.NetPolDefaultDeny, 0, len(s.config.NetPolDefaultDenies)+1)
+	for _, d := range s.config.NetPolDefaultDenies {
+		dk, _ := json.Marshal(d.Selector)
+		if string(dk) != string(key) {
+			out = append(out, d)
+		}
+	}
+	action := "ebpf.netpol.default-deny.disable"
+	leaseSeconds := int64(0)
+	if enabled {
+		until := time.Now().UTC().Add(lease)
+		leaseSeconds = int64(lease.Seconds())
+		out = append(out, models.NetPolDefaultDeny{
+			Selector: cloneScopes([]models.EBPFWorkloadScope{selector})[0], EnabledUntil: &until, LeaseSeconds: leaseSeconds, Actor: actor,
+		})
+		action = "ebpf.netpol.default-deny.enable"
+	}
+	s.config.NetPolDefaultDenies = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: string(key), Details: map[string]any{"leaseSeconds": leaseSeconds}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) Report(r models.AgentReport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1381,7 +1516,30 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 		sh.ProtectedIPv4 = append([]string(nil), c.Shield.ProtectedIPv4...)
 		c.Shield = &sh
 	}
+	c.NetPolRules = cloneNetPolRules(c.NetPolRules)
+	c.NetPolDefaultDenies = cloneNetPolDefaultDenies(c.NetPolDefaultDenies)
 	return c
+}
+
+func cloneNetPolRules(in []models.NetPolRule) []models.NetPolRule {
+	out := make([]models.NetPolRule, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Selector = cloneScopes([]models.EBPFWorkloadScope{in[i].Selector})[0]
+	}
+	return out
+}
+func cloneNetPolDefaultDenies(in []models.NetPolDefaultDeny) []models.NetPolDefaultDeny {
+	out := make([]models.NetPolDefaultDeny, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Selector = cloneScopes([]models.EBPFWorkloadScope{in[i].Selector})[0]
+		if in[i].EnabledUntil != nil {
+			t := *in[i].EnabledUntil
+			out[i].EnabledUntil = &t
+		}
+	}
+	return out
 }
 
 func cloneRevision(r models.PolicyRevision) models.PolicyRevision {

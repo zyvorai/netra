@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.27.0 — 2026-09-12
+
+- Added a second, independent per-workload NetPol engine ("v2") with real allow-list and default-deny semantics, alongside the existing deny-only v1 engine (which is untouched). New BPF maps `netpol_rules4` (explicit allow/deny per workload+peer), `netpol_default4` (per-workload default-deny posture, absent = fail-open), and `netpol_v2_enabled`. See `docs/native-netpol.md`.
+- **An explicit v2 `allow` rule can override the flat global emergency deny-list** for matching traffic — checked first in the cgroup hook, before the flat deny-lists, the legacy v1 NetPol denies, and default-deny posture. This is deliberate (an operator can carve a narrow exception into a cluster-wide emergency deny) but is the behavior most likely to surprise someone reading only the flat deny-list, so it's called out explicitly in the UI when adding a rule that would override a live flat-deny entry. New Drop Detective reason codes `netpol-rule` (10) and `netpol-default-deny` (11) distinguish v2 blocks from the existing `netpol-deny` (9, v1) and `cidr-deny` (2).
+- Added `PUT /api/v1/ebpf/netpol/v2/config`, `POST/DELETE /api/v1/ebpf/netpol/rules[/{id}]`, mirrored into `netractl ebpf netpol v2 enable|disable`/`rule add|del` and four new `netra_ebpf_netpol_*` MCP tools.
+- Activating default-deny for a workload selector — the highest blast-radius mutation in the firewall feature — now requires a **mandatory** plan → confirm step (`POST /api/v1/ebpf/netpol/default-deny/plan` then `PUT /api/v1/ebpf/netpol/default-deny` with the preflight token), reusing the existing CiliumNetworkPolicy preflight mechanism but, unlike that flow, never optional. Planning against a selector with zero covering allow rules is refused outright (a certain-outage config) unless explicitly overridden. Lease-bounded (1m–60m, default 5m) and always fails open on controller restart, exactly like general enforce mode.
+- The Firewall dashboard's new NETPOL V2 card exposes all of the above: enable toggle, rule add/list/delete with chips, and a plan/activate/deactivate flow for default-deny with the risk assessment shown before activation is enabled.
+- This completes Phase 3 of the firewall plan (`docs/firewall.md`); the flat global rule lists remain deny-only by design — allow/default-deny semantics only ever apply to the per-workload NetPol engine.
+
 ## 0.26.0 — 2026-09-12
 
 - Gave every eBPF fast-path rule (exact IP, CIDR, port, UID, process, DNS, SNI, rate limit) a stable ID, tracked in a new server-side index kept separate from `EBPFFastPathConfig`'s wire shape — zero compatibility impact on existing agents/`netractl`/MCP callers using the legacy value-keyed routes, which are untouched and still work.

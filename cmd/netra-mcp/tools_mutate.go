@@ -168,8 +168,45 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_ebpf_netpol_config_set", method: "PUT", path: "/api/v1/ebpf/netpol/config",
-			description: "Enable or disable the per-workload NetPol-emulation deny engine (independent of the eBPF fast-path deny-list). Returns the full updated fast-path config.",
-			schema:      objSchema(map[string]any{"enabled": map[string]any{"type": "boolean", "description": "Whether NetPol-emulation enforcement is active."}}, "enabled"),
+			description: "Enable or disable the legacy per-workload NetPol-emulation deny engine (independent of the eBPF fast-path deny-list, and independent of the v2 allow/default-deny engine below). Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"enabled": map[string]any{"type": "boolean", "description": "Whether legacy NetPol-emulation enforcement is active."}}, "enabled"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_netpol_v2_config_set", method: "PUT", path: "/api/v1/ebpf/netpol/v2/config",
+			description: "Enable or disable the v2 per-workload allow-list/default-deny engine (independent of the legacy NetPol-emulation deny engine above). An explicit allow rule (netra_ebpf_netpol_rule_add) can override even the flat eBPF fast-path deny-list for that specific workload+peer — this is deliberate, not a bug.",
+			schema:      objSchema(map[string]any{"enabled": map[string]any{"type": "boolean", "description": "Whether the v2 engine evaluates rules/default-deny posture at all."}}, "enabled"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_netpol_rule_add", method: "POST", path: "/api/v1/ebpf/netpol/rules",
+			description: "Add a v2 allow/deny rule for workloads matching a selector (namespace/pod/owner/labels — same shape as netra_ebpf_scope_set), exact IPv4 peer only. An \"allow\" rule can override the flat fast-path deny-list for matching traffic. Returns the full updated fast-path config with the new rule's assigned id.",
+			schema: objSchema(map[string]any{
+				"selector":  map[string]any{"type": "object", "description": "Workload selector: namespace/pod/workloadKind/workloadName/labels/cgroupId. At least one field required."},
+				"peerIpv4":  strProp("Exact IPv4 peer address."),
+				"port":      intProp("Peer port, 0/omitted = any port."),
+				"protocol":  enumProp("Default ANY.", "TCP", "UDP", "ANY"),
+				"direction": enumProp("Default egress.", "egress", "ingress", "both"),
+				"action":    enumProp("allow overrides even the flat deny-list; deny blocks immediately.", "allow", "deny"),
+			}, "selector", "peerIpv4", "action"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_netpol_rule_delete", method: "DELETE", path: "/api/v1/ebpf/netpol/rules/{id}",
+			description: "Delete a v2 allow/deny rule by its id (from the fast-path config's netPolRules, or netra_ebpf_netpol_rule_add's response).",
+			schema:      objSchema(map[string]any{"id": strProp("Rule id.")}, "id"),
+			pathParams:  []string{"id"},
+		},
+		{
+			name: "netra_ebpf_netpol_default_deny_plan", method: "POST", path: "/api/v1/ebpf/netpol/default-deny/plan",
+			description: "Mandatory first step to activate/deactivate v2 default-deny for a workload selector: assesses risk (workloads with zero covering allow rules make this \"critical\" and the call is refused unless allow_no_rules is set) and issues a receipt.token (5-minute, single-use) required by netra_ebpf_netpol_default_deny_set. Deactivating is always risk \"low\". Mutates nothing else.",
+			schema: objSchema(map[string]any{
+				"selector":     map[string]any{"type": "object", "description": "Workload selector this default-deny posture targets."},
+				"enabled":      map[string]any{"type": "boolean", "description": "true to plan activation, false to plan deactivation."},
+				"lease":        strProp("Intended lease duration if activating, e.g. \"5m\" (1m-60m). Default 5m."),
+				"allowNoRules": map[string]any{"type": "boolean", "description": "Override the critical-risk refusal when zero matched workloads have a covering allow rule. Use deliberately, not by default."},
+			}, "selector", "enabled"),
+			queryParams: []string{"allowNoRules"},
 			bodyFields:  true,
 		},
 		{
@@ -267,7 +304,67 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 	if err := registerPolicyApply(srv, c); err != nil {
 		return err
 	}
-	return registerPolicyHistoryImport(srv, c)
+	if err := registerPolicyHistoryImport(srv, c); err != nil {
+		return err
+	}
+	return registerNetPolDefaultDenySet(srv, c)
+}
+
+// registerNetPolDefaultDenySet wraps PUT /api/v1/ebpf/netpol/default-deny.
+// Like registerPolicyApply, this can't be a plain endpointTool: plan_token
+// and confirm_risk are headers, not part of the JSON body, and the body's
+// exact bytes must match what netra_ebpf_netpol_default_deny_plan hashed.
+func registerNetPolDefaultDenySet(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name: "netra_ebpf_netpol_default_deny_set",
+		Description: "Activate or deactivate v2 default-deny for a workload selector. Requires plan_token from a prior " +
+			"netra_ebpf_netpol_default_deny_plan call with the identical selector/enabled/lease (tokens are single-use, " +
+			"5-minute). If the plan's risk was \"medium\" or higher, confirm_risk must equal that risk. This is the " +
+			"single highest-blast-radius mutation in the firewall feature — a workload in default-deny posture only " +
+			"accepts traffic an explicit allow rule (netra_ebpf_netpol_rule_add) permits.",
+		InputSchema: objSchema(map[string]any{
+			"selector":     map[string]any{"type": "object", "description": "Must exactly match the selector passed to netra_ebpf_netpol_default_deny_plan."},
+			"enabled":      map[string]any{"type": "boolean", "description": "Must exactly match the plan call."},
+			"lease":        strProp("Must exactly match the plan call, if it was set."),
+			"plan_token":   strProp("receipt.token from netra_ebpf_netpol_default_deny_plan's result."),
+			"confirm_risk": enumProp("Required when the plan's risk was medium/high/critical; must match exactly.", "low", "medium", "high", "critical"),
+		}, "selector", "enabled", "plan_token"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			// The preflight token from netra_ebpf_netpol_default_deny_plan
+			// is hash-bound to that call's exact request body — which,
+			// since plan is a plain endpointTool with bodyFields:true, is
+			// just json.Marshal of its incoming args map after stripping
+			// allowNoRules. To reproduce byte-identical bytes here (so the
+			// hash actually matches when the caller passes the same
+			// selector/enabled/lease to both calls, whether or not lease
+			// was included), do the same transform: parse to a generic
+			// map, strip only the fields that are specific to this call,
+			// re-marshal — do not reconstruct the body from typed fields.
+			args := map[string]any{}
+			if len(raw) > 0 {
+				if err := json.Unmarshal(raw, &args); err != nil {
+					return fmt.Sprintf("invalid arguments: %v", err), true, nil
+				}
+			}
+			planToken, _ := args["plan_token"].(string)
+			confirmRisk, _ := args["confirm_risk"].(string)
+			delete(args, "plan_token")
+			delete(args, "confirm_risk")
+			body, err := json.Marshal(args)
+			if err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			extra := map[string]string{"X-Netra-Plan-Token": planToken}
+			if confirmRisk != "" {
+				extra["X-Netra-Confirm-Risk"] = confirmRisk
+			}
+			out, status, err := c.do(ctx, "PUT", "/api/v1/ebpf/netpol/default-deny", body, extra)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
 }
 
 // registerPolicyPlan and registerPolicyApply encode Netra's existing

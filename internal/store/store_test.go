@@ -538,6 +538,131 @@ func jsonUnmarshalRuleEditCIDR(raw []byte, out *models.EBPFCIDRRule) error {
 	return nil
 }
 
+func TestNetPolRuleCRUD(t *testing.T) {
+	s := New()
+	rule := models.NetPolRule{
+		Selector: models.EBPFWorkloadScope{Namespace: "payments"},
+		PeerIPv4: "10.0.0.5", Port: 5432, Protocol: "TCP", Direction: "egress", Action: "allow",
+	}
+	cfg, err := s.AddNetPolRule(rule, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolRules) != 1 {
+		t.Fatalf("want 1 rule, got %#v", cfg.NetPolRules)
+	}
+	added := cfg.NetPolRules[0]
+	if added.ID == "" || added.CreatedBy != "test" || added.CreatedAt.IsZero() {
+		t.Fatalf("rule metadata not set: %#v", added)
+	}
+	if added.Selector.Namespace != "payments" {
+		t.Fatalf("selector not preserved: %#v", added.Selector)
+	}
+
+	// A second rule must get a distinct, sequential ID.
+	cfg, err = s.AddNetPolRule(models.NetPolRule{PeerIPv4: "10.0.0.6", Action: "deny"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolRules) != 2 || cfg.NetPolRules[0].ID == cfg.NetPolRules[1].ID {
+		t.Fatalf("expected 2 distinct rule IDs: %#v", cfg.NetPolRules)
+	}
+
+	cfg, err = s.DelNetPolRule(added.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolRules) != 1 || cfg.NetPolRules[0].PeerIPv4 != "10.0.0.6" {
+		t.Fatalf("delete did not remove the right rule: %#v", cfg.NetPolRules)
+	}
+	if _, err := s.DelNetPolRule("nonexistent", "test"); err == nil {
+		t.Fatal("expected error deleting an unknown netpol rule id")
+	}
+}
+
+func TestSetNetPolDefaultDenyActivateAndExpire(t *testing.T) {
+	s := New()
+	selector := models.EBPFWorkloadScope{Namespace: "payments", Pod: "api-1"}
+	cfg, err := s.SetNetPolDefaultDeny(selector, true, 5*time.Minute, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolDefaultDenies) != 1 || cfg.NetPolDefaultDenies[0].LeaseSeconds != 300 || cfg.NetPolDefaultDenies[0].Actor != "operator" {
+		t.Fatalf("activation not recorded: %#v", cfg.NetPolDefaultDenies)
+	}
+
+	// Re-activating the identical selector must replace, not duplicate.
+	cfg, err = s.SetNetPolDefaultDeny(selector, true, 10*time.Minute, "operator2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolDefaultDenies) != 1 || cfg.NetPolDefaultDenies[0].Actor != "operator2" {
+		t.Fatalf("re-activation should replace the existing entry: %#v", cfg.NetPolDefaultDenies)
+	}
+
+	// Explicit deactivation.
+	cfg, err = s.SetNetPolDefaultDeny(selector, false, 0, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetPolDefaultDenies) != 0 {
+		t.Fatalf("expected deactivation to clear the entry: %#v", cfg.NetPolDefaultDenies)
+	}
+
+	// Lease self-revert: a negative lease sets EnabledUntil in the past, so
+	// the very next Config() call (which normalizes) must expire it.
+	if _, err := s.SetNetPolDefaultDeny(selector, true, -time.Second, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	cfg = s.Config()
+	if len(cfg.NetPolDefaultDenies) != 0 {
+		t.Fatalf("expected expired default-deny to self-revert, got %#v", cfg.NetPolDefaultDenies)
+	}
+	found := false
+	for _, e := range s.Audit(20) {
+		if e.Action == "ebpf.netpol.default-deny.expired" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected an ebpf.netpol.default-deny.expired audit event")
+	}
+}
+
+func TestNetPolDefaultDenyNeverResurrectsAcrossRestart(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := models.EBPFWorkloadScope{Namespace: "payments"}
+	if _, err := s.SetNetPolDefaultDeny(selector, true, time.Hour, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	cfg := s.Config()
+	if len(cfg.NetPolDefaultDenies) != 0 {
+		t.Fatalf("default-deny must not resurrect across a restart, got %#v", cfg.NetPolDefaultDenies)
+	}
+	found := false
+	for _, e := range s.Audit(20) {
+		if e.Action == "ebpf.netpol.default-deny.restart-fail-open" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected an ebpf.netpol.default-deny.restart-fail-open audit event")
+	}
+}
+
 func TestSetShieldBumpsGenerationLastAndDeepCopies(t *testing.T) {
 	s := New()
 	cfg, err := s.SetShield(models.ShieldConfig{Mode: "audit", ProtectedIPv4: []string{"203.0.113.9", "203.0.113.1"}, SynPPS: 5000}, "test")

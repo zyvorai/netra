@@ -52,6 +52,19 @@ export default function EBPF() {
   const [shieldOther, setShieldOther] = useState('0');
   const [shieldBurst, setShieldBurst] = useState('2');
   const [shieldIP, setShieldIP] = useState('');
+  const [npSelNS, setNpSelNS] = useState('');
+  const [npSelPod, setNpSelPod] = useState('');
+  const [npSelLabel, setNpSelLabel] = useState('');
+  const [npPeer, setNpPeer] = useState('');
+  const [npPort, setNpPort] = useState('');
+  const [npProto, setNpProto] = useState('TCP');
+  const [npDir, setNpDir] = useState('egress');
+  const [npAction, setNpAction] = useState('allow');
+  const [ddSelNS, setDdSelNS] = useState('');
+  const [ddSelPod, setDdSelPod] = useState('');
+  const [ddSelLabel, setDdSelLabel] = useState('');
+  const [ddLease, setDdLease] = useState('5m');
+  const [ddPlan, setDdPlan] = useState<any>(null);
   const [ruleList, setRuleList] = useState<any[]>([]);
   const [editingId, setEditingId] = useState('');
   const [editForm, setEditForm] = useState<Record<string, string>>({});
@@ -143,6 +156,73 @@ export default function EBPF() {
     call('/api/v1/ebpf/netpol/config', 'PUT', { enabled: next });
   }
 
+  function selectorFrom(ns: string, pod: string, label: string) {
+    const sel: any = {};
+    if (ns.trim()) sel.namespace = ns.trim();
+    if (pod.trim()) sel.pod = pod.trim();
+    if (label.trim()) {
+      const [k, ...rest] = label.split('=');
+      if (k && rest.length) sel.labels = { [k.trim()]: rest.join('=').trim() };
+    }
+    return sel;
+  }
+  function toggleNetPolV2() {
+    call('/api/v1/ebpf/netpol/v2/config', 'PUT', { enabled: !cfg?.netPolV2Enabled });
+  }
+  async function addNetPolRule() {
+    try {
+      await api('/api/v1/ebpf/netpol/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selector: selectorFrom(npSelNS, npSelPod, npSelLabel), peerIpv4: npPeer, port: npPort ? Number(npPort) : undefined, protocol: npProto, direction: npDir, action: npAction }),
+      });
+      setNpPeer('');
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  function delNetPolRule(id: string) {
+    call('/api/v1/ebpf/netpol/rules/' + encodeURIComponent(id), 'DELETE');
+  }
+  async function planDefaultDeny(enabled: boolean) {
+    const body: any = { selector: selectorFrom(ddSelNS, ddSelPod, ddSelLabel), enabled };
+    if (enabled) body.lease = ddLease;
+    try {
+      const res = await api<any>('/api/v1/ebpf/netpol/default-deny/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      setDdPlan({ ...res, body });
+      setErr('');
+    } catch (e) { setErr(String(e)); setDdPlan(null); }
+  }
+  async function applyDefaultDeny() {
+    if (!ddPlan) return;
+    if ((ddPlan.risk === 'high' || ddPlan.risk === 'critical') && !confirm(`Preflight risk is ${String(ddPlan.risk).toUpperCase()}. Apply this default-deny change anyway?`)) return;
+    try {
+      // Re-send the exact body object plan hashed — never rebuild it —
+      // since the preflight token is bound to that exact byte sequence.
+      await api('/api/v1/ebpf/netpol/default-deny', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Netra-Plan-Token': ddPlan.receipt?.token, 'X-Netra-Confirm-Risk': ddPlan.risk },
+        body: JSON.stringify(ddPlan.body),
+      });
+      setDdPlan(null);
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  async function deactivateDefaultDeny(selector: any) {
+    if (!confirm('Deactivate default-deny for this selector? Traffic reverts to fail-open immediately.')) return;
+    // Deactivation is always risk "low" and needs no operator confirmation,
+    // but the API still requires a fresh preflight token for every
+    // default-deny mutation — plan then immediately apply with it.
+    const body = { selector, enabled: false };
+    try {
+      const res = await api<any>('/api/v1/ebpf/netpol/default-deny/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      await api('/api/v1/ebpf/netpol/default-deny', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Netra-Plan-Token': res.receipt?.token },
+        body: JSON.stringify(body),
+      });
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+
   function startEdit(r: any) {
     setHistoryId('');
     setEditingId(r.id);
@@ -198,8 +278,9 @@ export default function EBPF() {
     }));
     if (cfg?.shield?.mode && cfg.shield.mode !== 'off') out.push({ type: 'shield', value: cfg.shield.protectAll ? 'all traffic' : `${(cfg.shield.protectedIpv4 || []).length} protected IPs`, detail: cfg.shield.mode, extra: '' });
     if (cfg?.netPolEnabled) out.push({ type: 'netpol', value: `${(cfg.netPolDenies || []).length} deny entries`, detail: 'enabled', extra: '' });
+    if (cfg?.netPolV2Enabled) out.push({ type: 'netpol-v2', value: `${(cfg.netPolRules || []).length} rules · ${(cfg.netPolDefaultDenies || []).length} default-deny`, detail: 'enabled', extra: '' });
     return out.sort((a, b) => a.type === b.type ? a.value.localeCompare(b.value) : a.type.localeCompare(b.type));
-  }, [ruleList, cfg?.shield, cfg?.netPolEnabled, cfg?.netPolDenies]);
+  }, [ruleList, cfg?.shield, cfg?.netPolEnabled, cfg?.netPolDenies, cfg?.netPolV2Enabled, cfg?.netPolRules, cfg?.netPolDefaultDenies]);
 
   function cap(count: number, limit: number | undefined) {
     if (!limit) return null;
@@ -264,7 +345,58 @@ export default function EBPF() {
 
     <section className="card span3"><p className="eyebrow">SHIELD</p><h3>DDoS per-source-class PPS shield</h3><p>Independent XDP-layer token-bucket limiter for SYN/UDP/ICMP/other floods, decoupled from the enforcement lease above. {shieldDiag?.summary && <>Live: {shieldDiag.summary.allowed||0} allowed · {shieldDiag.summary.dropped||0} dropped · {shieldDiag.summary.audited||0} audited.</>}</p><div className="ruleform"><select value={shieldMode} onChange={e => setShieldMode(e.target.value)}><option value="off">off</option><option value="audit">audit</option><option value="enforce">enforce</option></select><label><input type="checkbox" checked={shieldProtectAll} onChange={e => setShieldProtectAll(e.target.checked)}/> protect all</label><input value={shieldSyn} onChange={e => setShieldSyn(e.target.value)} inputMode="numeric" placeholder="SYN pps"/><input value={shieldUdp} onChange={e => setShieldUdp(e.target.value)} inputMode="numeric" placeholder="UDP pps"/><input value={shieldIcmp} onChange={e => setShieldIcmp(e.target.value)} inputMode="numeric" placeholder="ICMP pps"/><input value={shieldOther} onChange={e => setShieldOther(e.target.value)} inputMode="numeric" placeholder="other pps"/><input value={shieldBurst} onChange={e => setShieldBurst(e.target.value)} inputMode="numeric" placeholder="burst s"/><button className="primary" onClick={applyShield}>Apply shield config</button></div>{!shieldProtectAll && <div className="toolbar"><input value={shieldIP} onChange={e => setShieldIP(e.target.value)} placeholder="protected IPv4"/><button onClick={addShieldIP}>Add protected IP</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv4 || []).map((x: string) => <button key={x} onClick={() => delShieldIP(x)}>{x} ×</button>)}</div></section>
 
-    <section className="card span3"><p className="eyebrow">NETPOL</p><h3>Per-workload NetworkPolicy-style deny</h3><p>Legacy per-cgroup peer-deny engine, independent from the rules above. Rule authoring lands in a later phase — toggle enforcement and review existing entries here.</p><div className="toolbar"><button className={cfg?.netPolEnabled ? 'danger' : 'primary'} onClick={toggleNetPol}>{cfg?.netPolEnabled ? 'Disable NetPol' : 'Enable NetPol'}</button></div><div className="chips">{(cfg?.netPolDenies || []).length === 0 && <span>No NetPol deny entries.</span>}{(cfg?.netPolDenies || []).map((x: any, i: number) => <span key={i}>{x.direction || 'both'} · cgroup {x.cgroupId} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol || ''}</span>)}</div></section>
+    <section className="card span3"><p className="eyebrow">NETPOL</p><h3>Per-workload NetworkPolicy-style deny</h3><p>Legacy per-cgroup peer-deny engine, independent from the rules above and from NetPol v2 below. Rule authoring has no UI — toggle enforcement and review existing entries here.</p><div className="toolbar"><button className={cfg?.netPolEnabled ? 'danger' : 'primary'} onClick={toggleNetPol}>{cfg?.netPolEnabled ? 'Disable NetPol' : 'Enable NetPol'}</button></div><div className="chips">{(cfg?.netPolDenies || []).length === 0 && <span>No NetPol deny entries.</span>}{(cfg?.netPolDenies || []).map((x: any, i: number) => <span key={i}>{x.direction || 'both'} · cgroup {x.cgroupId} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol || ''}</span>)}</div></section>
+
+    <section className="card span3">
+      <p className="eyebrow">NETPOL V2</p><h3>Allow-list / default-deny per workload</h3>
+      <p>An explicit <b>allow</b> rule here can override even the emergency deny-list above for that workload+peer — by design. Activating default-deny for a selector requires a plan step first; a workload with zero covering allow rules is refused.</p>
+      <div className="toolbar"><button className={cfg?.netPolV2Enabled ? 'danger' : 'primary'} onClick={toggleNetPolV2}>{cfg?.netPolV2Enabled ? 'Disable NetPol v2' : 'Enable NetPol v2'}</button></div>
+
+      <p className="eyebrow" style={{ marginTop: 18 }}>ALLOW / DENY RULES</p>
+      <div className="ruleform">
+        <input value={npSelNS} onChange={e => setNpSelNS(e.target.value)} placeholder="namespace" />
+        <input value={npSelPod} onChange={e => setNpSelPod(e.target.value)} placeholder="pod (optional)" />
+        <input value={npSelLabel} onChange={e => setNpSelLabel(e.target.value)} placeholder="label key=value (optional)" />
+        <input value={npPeer} onChange={e => setNpPeer(e.target.value)} placeholder="peer IPv4" />
+        <input value={npPort} onChange={e => setNpPort(e.target.value)} inputMode="numeric" placeholder="port (optional)" />
+        <select value={npProto} onChange={e => setNpProto(e.target.value)}><option>TCP</option><option>UDP</option><option>ANY</option></select>
+        <select value={npDir} onChange={e => setNpDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select>
+        <select value={npAction} onChange={e => setNpAction(e.target.value)}><option value="allow">allow</option><option value="deny">deny</option></select>
+        <button className="primary" onClick={addNetPolRule}>Add rule</button>
+      </div>
+      <div className="chips">
+        {(cfg?.netPolRules || []).length === 0 && <span>No v2 rules configured.</span>}
+        {(cfg?.netPolRules || []).map((x: any) => (
+          <button key={x.id} onClick={() => delNetPolRule(x.id)}>
+            {x.action} · {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol} ({x.direction}) ×
+          </button>
+        ))}
+      </div>
+
+      <p className="eyebrow" style={{ marginTop: 18 }}>DEFAULT-DENY ACTIVATION</p>
+      <div className="ruleform">
+        <input value={ddSelNS} onChange={e => setDdSelNS(e.target.value)} placeholder="namespace" />
+        <input value={ddSelPod} onChange={e => setDdSelPod(e.target.value)} placeholder="pod (optional)" />
+        <input value={ddSelLabel} onChange={e => setDdSelLabel(e.target.value)} placeholder="label key=value (optional)" />
+        <input value={ddLease} onChange={e => setDdLease(e.target.value)} placeholder="lease, e.g. 5m (1m-60m)" title="1m–60m" />
+        <button onClick={() => planDefaultDeny(true)}>Plan activation</button>
+      </div>
+      {ddPlan && (
+        <div className={ddPlan.risk === 'critical' || ddPlan.risk === 'high' ? 'warning' : ''} style={{ marginTop: 10, padding: 12 }}>
+          <p><b>Risk: {String(ddPlan.risk).toUpperCase()}</b> · {ddPlan.matchedWorkloads} matched workload(s) · {ddPlan.workloadsWithAllowRule} with a covering allow rule</p>
+          <button className="primary" onClick={applyDefaultDeny}>Confirm and activate</button>
+          <button onClick={() => setDdPlan(null)}>Cancel</button>
+        </div>
+      )}
+      <div className="chips">
+        {(cfg?.netPolDefaultDenies || []).length === 0 && <span>No workloads currently in default-deny posture.</span>}
+        {(cfg?.netPolDefaultDenies || []).map((x: any, i: number) => (
+          <button key={i} onClick={() => deactivateDefaultDeny(x.selector)}>
+            {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} · until {x.enabledUntil ? new Date(x.enabledUntil).toLocaleTimeString() : '—'} ×
+          </button>
+        ))}
+      </div>
+    </section>
 
     <section className="card"><p className="eyebrow">CAPABILITIES</p><h3>Datapath capabilities</h3><p>{caps?.observability?.length || 0} observability classes and {caps?.enforcement?.length || 0} enforcement classes are exposed by this release.</p><div className="chips">{(caps?.hooks || []).map((x: string) => <span key={x}>{x}</span>)}</div></section>
 
