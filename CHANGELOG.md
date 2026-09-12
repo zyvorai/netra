@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.0 — 2026-09-12
+
+- Added `netra-mcp`, a Model Context Protocol (MCP) server exposing the controller's HTTP API as stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. See `docs/mcp-integration.md`.
+- ~35 read/generate tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, policy list/history/build/lockdown-preview) are always available; ~27 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in via `NETRA_MCP_ALLOW_MUTATIONS` and are off by default.
+- Every mutating tool reuses Netra's existing safety machinery unchanged: bearer-token auth, the single-use content-hash-bound preflight token for policy apply, the self-reverting lease on enforce mode, and the existing audit log — mutations from this server are tagged with a distinct actor label (`NETRA_MCP_ACTOR`, default `mcp:hermes`) so they're distinguishable from human `netractl` use.
+- Implemented stdlib-only (hand-rolled JSON-RPC 2.0 over newline-delimited stdio in the new `internal/mcpserver` package), matching this repo's existing dependency-averse convention for its CLI tools.
+
 ## 0.22.0 — 2026-09-12
 
 - Borrowed observe-only patterns from Cloudflare ebpf_exporter and Cilium Tetragon (no vendoring, no TracingPolicy engine). See `docs/exporter-tetragon-borrow-backlog.md`.

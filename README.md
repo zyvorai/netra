@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.22.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.23.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -76,6 +76,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Prometheus control-plane/aggregate metrics at `/metrics`.
 - Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). See `docs/alerting.md`.
 - Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as stdio tools for AI agents (e.g. Hermes Agent). Reads/generators are always available; mutating tools (policy apply/rollback/delete, eBPF rule changes, mode toggle) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`) and reuse Netra's existing auth/preflight/audit machinery unchanged. See `docs/mcp-integration.md`.
 
 ### Emergency enforcement
 
@@ -196,6 +197,7 @@ cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
+cmd/netra-mcp/          MCP server: controller API as stdio tools for AI agents
 internal/agent/          BPF loading, hook attachment and reporting
 internal/doctor/         host readiness checks used by netra-doctor
 internal/observability/  standalone eBPF summaries and workload topology
@@ -227,6 +229,7 @@ docs/native-netpol.md     optional native deny-list NetPol maps
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
+docs/mcp-integration.md   MCP server for AI agents (Hermes Agent, etc.), gated mutations
 ```
 
 ## Prerequisites
