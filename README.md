@@ -52,7 +52,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 
 ![Drop explain](docs/ux/03-drops.png)
 
-![eBPF controls](docs/ux/04-ebpf.png)
+![Firewall dashboard — unified rules, NetPol v2 allow-list/default-deny](docs/ux/04-ebpf.png)
 
 ## Standalone eBPF capabilities
 
