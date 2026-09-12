@@ -67,7 +67,7 @@ jobs:
         awk '/name: NETRA_HUBBLE_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
     - name: Standalone render must expose workload attribution safely
       run: |
-        grep -q 'resources: \["pods"\]' /tmp/netra-agent.yaml
+        grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml
         grep -q '/sys/fs/cgroup' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_ENABLED' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_SCAN_INTERVAL' /tmp/netra-agent.yaml

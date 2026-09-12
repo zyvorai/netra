@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.27.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.27.2-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -38,6 +38,10 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 ## Dashboard gallery
 
+Live walkthrough — Overview, the Firewall page's unified rules table and NetPol v2 allow-list, then a real in-browser VNC console connected to a running KubeVirt VM — captured against a live lab deployment, not a mockup:
+
+![Netra live demo — Overview, Firewall/NetPol v2, in-browser VNC console](docs/ux/netra-live-demo.gif)
+
 Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockdown appear above and under Cilium integration; the rest of the console:
 
 ![Sign in](docs/ux/07-login.png)
@@ -52,7 +56,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 
 ![Drop explain](docs/ux/03-drops.png)
 
-![eBPF controls](docs/ux/04-ebpf.png)
+![Firewall dashboard — unified rules, NetPol v2 allow-list/default-deny](docs/ux/04-ebpf.png)
 
 ## Standalone eBPF capabilities
 
@@ -376,4 +380,13 @@ See `SECURITY.md`, `VALIDATION.md`, `docs/standalone-ebpf.md`, `docs/workload-sc
 
 ## License
 
-Apache License 2.0. Copyright 2026 Zyvor AI Labs.
+### Open source (Apache-2.0)
+
+This repository is licensed under the [Apache License, Version 2.0](LICENSE).
+You may use, modify, and run it for personal, lab, and commercial production
+use at no charge, subject to Apache-2.0 (preserve notices / NOTICE where required).
+
+### Enterprise
+
+Production support, SLAs, and Zyvor Enterprise products are licensed separately.
+Contact [sales@zyvor.dev](mailto:sales@zyvor.dev) or see [zyvor.dev](https://zyvor.dev).

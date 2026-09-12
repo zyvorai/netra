@@ -57,7 +57,12 @@ rules:
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods/exec"]
-  verbs: ["create"]
+  # "get" is required alongside "create": DialPodExec (internal/kube/console.go)
+  # opens a raw WebSocket connection whose opening handshake is always an
+  # HTTP GET per RFC 6455 — the API server's RBAC check for that maps to
+  # the "get" verb, not "create" (which only covers the SPDY-protocol exec
+  # path). See helm/netra/templates/rbac.yaml for the same fix.
+  verbs: ["create","get"]
 - apiGroups: ["subresources.kubevirt.io"]
   resources: ["virtualmachineinstances/vnc"]
   verbs: ["get","create"]

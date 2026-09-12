@@ -57,10 +57,37 @@ netra_l7_dns_qname(void *payload, void *data_end, char out[96])
     return oi;
 }
 
+// netra_l7_tls_sni_value copies and validates the name_len bytes at p[i+9:]
+// once the SNI extension header at position i has already been validated by
+// the caller.
+static __attribute__((noinline)) int
+netra_l7_tls_sni_value(unsigned char *p, int i, unsigned short name_len, char out[96])
+{
+    int ok = 1;
+    for (int j = 0; j < 95; j++) {
+        if (j >= name_len) break;
+        unsigned char c = p[i + 9 + j];
+        if (!netra_l7_hostname_char(c)) { ok = 0; break; }
+        out[j] = (char)netra_l7_lower_ascii(c);
+    }
+    if (!ok) { __builtin_memset(out, 0, 96); return 0; }
+    out[name_len] = 0;
+    return name_len;
+}
+
 // tls_sni is a best-effort TLS ClientHello SNI parser. It intentionally
 // does not reassemble TCP streams and therefore only reports an SNI
-// present in this skb.
-static __inline__ __attribute__((always_inline)) int
+// present in this skb. Deliberately NOT always_inline (unlike almost every
+// other helper in this file): a kernel verifier tracking the packet
+// pointer's precise byte offset through this position-search loop's
+// backedge, combined with the conntrack/policy/DNS logic already inlined
+// ahead of it in the same program, hit a hard, fixed jump-history
+// complexity ceiling on some kernels — independent of this loop's own trip
+// count, since reducing it did not help. A real (non-inlined) BPF-to-BPF
+// call gives the verifier a fresh, isolated budget for this whole
+// function, checked once regardless of how it's called. See
+// docs/l7-metadata.md.
+static __attribute__((noinline)) int
 netra_l7_tls_sni(void *payload, void *data_end, char out[96])
 {
     unsigned char *p = payload;
@@ -73,16 +100,8 @@ netra_l7_tls_sni(void *payload, void *data_end, char out[96])
         unsigned short list_len = ((unsigned short)p[i + 4] << 8) | p[i + 5];
         unsigned short name_len = ((unsigned short)p[i + 7] << 8) | p[i + 8];
         if (!name_len || name_len > 95 || ext_len < (unsigned short)(5 + name_len) || list_len < (unsigned short)(3 + name_len)) continue;
-        int ok = 1;
-        for (int j = 0; j < 95; j++) {
-            if (j >= name_len) break;
-            unsigned char c = p[i + 9 + j];
-            if (!netra_l7_hostname_char(c)) { ok = 0; break; }
-            out[j] = (char)netra_l7_lower_ascii(c);
-        }
-        if (!ok) { __builtin_memset(out, 0, 96); continue; }
-        out[name_len] = 0;
-        return name_len;
+        int n = netra_l7_tls_sni_value(p, i, name_len, out);
+        if (n > 0) return n;
     }
     return 0;
 }
@@ -102,7 +121,40 @@ netra_l7_http_method(void *payload, void *data_end, char out[8])
     return 0;
 }
 
-static __inline__ __attribute__((always_inline)) int
+// netra_l7_http_host_value parses the header value starting at byte offset
+// pos in p (right after "host:"), once the caller has already found that
+// literal at the current scan position. Return value: >0 is success (the
+// copied length), 0 means this occurrence yielded nothing so the caller
+// should keep scanning for a later "Host:" line, and -1 means the packet
+// ran out mid-value (or a non-printable byte was hit) so the caller should
+// stop scanning entirely.
+static __attribute__((noinline)) int
+netra_l7_http_host_value(unsigned char *p, void *data_end, int pos, char out[96])
+{
+    for (int s = 0; s < 8; s++) {
+        if ((void *)(p + pos + 1) > data_end) return -1;
+        if (p[pos] != ' ' && p[pos] != '\t') break;
+        pos++;
+    }
+    int oi = 0, bad = 0;
+    for (int j = 0; j < 95; j++) {
+        if ((void *)(p + pos + 1) > data_end) break;
+        unsigned char c = p[pos++];
+        if (c == '\r' || c == '\n') break;
+        if (c < 0x21 || c > 0x7e) { bad = 1; break; }
+        out[oi++] = (char)netra_l7_lower_ascii(c);
+    }
+    if (bad) return -1;
+    if (oi > 0) { out[oi] = 0; return oi; }
+    return 0;
+}
+
+// http_host is a best-effort HTTP/1.x Host-header scanner. Deliberately
+// NOT always_inline, for the same reason as netra_l7_tls_sni above: this
+// isolates the whole position-search-plus-value-parse from the verifier
+// complexity already accumulated by the conntrack/policy/DNS/SNI logic
+// inlined ahead of it in the same program. See docs/l7-metadata.md.
+static __attribute__((noinline)) int
 netra_l7_http_host(void *payload, void *data_end, char out[96])
 {
     unsigned char *p = payload;
@@ -110,21 +162,9 @@ netra_l7_http_host(void *payload, void *data_end, char out[96])
         if ((void *)(p + i + 6) > data_end) break;
         if (i > 0 && p[i - 1] != '\n') continue;
         if (netra_l7_lower_ascii(p[i])!='h'||netra_l7_lower_ascii(p[i+1])!='o'||netra_l7_lower_ascii(p[i+2])!='s'||netra_l7_lower_ascii(p[i+3])!='t'||p[i+4]!=':') continue;
-        int pos = i + 5;
-        for (int s = 0; s < 8; s++) {
-            if ((void *)(p + pos + 1) > data_end) return 0;
-            if (p[pos] != ' ' && p[pos] != '\t') break;
-            pos++;
-        }
-        int oi = 0;
-        for (int j = 0; j < 95; j++) {
-            if ((void *)(p + pos + 1) > data_end) break;
-            unsigned char c = p[pos++];
-            if (c == '\r' || c == '\n') break;
-            if (c < 0x21 || c > 0x7e) return 0;
-            out[oi++] = (char)netra_l7_lower_ascii(c);
-        }
-        if (oi > 0) { out[oi] = 0; return oi; }
+        int r = netra_l7_http_host_value(p, data_end, i + 5, out);
+        if (r > 0) return r;
+        if (r < 0) return 0;
     }
     return 0;
 }

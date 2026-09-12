@@ -415,9 +415,9 @@ button.danger:disabled {
 }
 
 main {
-  max-width: 1380px;
+  max-width: 1800px;
   margin: auto;
-  padding: 28px 5vw 96px;
+  padding: 28px clamp(20px, 3.5vw, 64px) 96px;
 }
 
 /* Full marketing hero (Overview) */
@@ -791,7 +791,7 @@ code {
   align-items: end;
   flex-wrap: wrap;
 }
-.toolbar input { width: auto; margin: 0; min-width: 140px; }
+.toolbar input { flex: 1; margin: 0; min-width: 140px; }
 .toolbar button {
   display: inline-flex;
   align-items: center;
@@ -799,6 +799,12 @@ code {
   white-space: normal;
   line-height: 1.2;
   height: auto;
+  /* flex-shrink:0 keeps a whole button's label on one line whenever the row
+     has room; without it, flex can compress a button below its natural
+     width and force a mid-label line break (e.g. "Refresh summary" ->
+     "Refresh" / "summary") even though .toolbar's own flex-wrap already
+     wraps whole buttons to a new line once the row truly runs out of room. */
+  flex-shrink: 0;
 }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
@@ -831,10 +837,15 @@ code {
 }
 .filters label { font-size: 11px; color: var(--text-tertiary); min-width: 0; }
 .filters button {
-  white-space: normal;
+  white-space: nowrap;
   line-height: 1.2;
   height: auto;
   min-height: 44px;
+  /* Buttons share the same auto-fit grid columns as the filter inputs
+     (each as narrow as 140px), which isn't enough room for a two-word
+     label at normal font size — span 2 columns so it fits on one line
+     instead of breaking mid-label. */
+  grid-column: span 2;
 }
 
 .flowhead,
