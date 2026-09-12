@@ -36,6 +36,7 @@
   --terminal-bg: #0d0d0f;
   --terminal-bar: #1b1b1e;
   --terminal-text: #f5f5f7;
+  --terminal-text-dim: #86868b;
   --card-shadow: 0 15px 50px rgba(0, 0, 0, 0.04);
   --hero-glow-a: rgba(0, 113, 227, 0.14);
   --hero-glow-b: rgba(50, 173, 230, 0.12);
@@ -81,6 +82,7 @@
   --terminal-bg: #000000;
   --terminal-bar: #1d1d1f;
   --terminal-text: #f5f5f7;
+  --terminal-text-dim: #86868b;
   --card-shadow: none;
   --hero-glow-a: rgba(0, 113, 227, 0.18);
   --hero-glow-b: rgba(50, 173, 230, 0.16);
@@ -857,7 +859,7 @@ code {
   border-bottom: 1px solid var(--border);
   align-items: start;
 }
-.flowhead { color: var(--text-tertiary); font-size: 10px; letter-spacing: 0.08em; }
+.flowhead { color: var(--terminal-text-dim); font-size: 10px; letter-spacing: 0.08em; }
 .flowhead span,
 .flowrow span {
   min-width: 0;
@@ -865,9 +867,9 @@ code {
   overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.35;
-  color: var(--text-primary);
+  color: var(--terminal-text);
 }
-.flowhead span { color: var(--text-tertiary); }
+.flowhead span { color: var(--terminal-text-dim); }
 .flowhead.ebpf,
 .flowrow.ebpf,
 .flowhead.audit,
@@ -956,6 +958,8 @@ code {
 .agent.wide {
   grid-template-columns: minmax(0, 1fr) auto;
 }
+.terminalbody .agent { color: var(--terminal-text); }
+.terminalbody .agent small { color: var(--terminal-text-dim); }
 
 .risk {
   display: flex;
@@ -1122,7 +1126,7 @@ code {
   max-height: 420px;
   overflow: auto;
   background: #0a0a0c;
-  color: var(--text-primary);
+  color: var(--terminal-text);
   border-radius: 14px;
   padding: 14px;
   font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1153,7 +1157,7 @@ code {
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
-  color: var(--text-secondary);
+  color: var(--terminal-text-dim);
   font-size: 13px;
 }
 .eventtools select {
