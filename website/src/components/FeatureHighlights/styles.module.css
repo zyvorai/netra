@@ -1,5 +1,5 @@
 .features {
-  padding: 3rem 0;
+  padding: var(--zv-section-space) 0;
   width: 100%;
 }
 

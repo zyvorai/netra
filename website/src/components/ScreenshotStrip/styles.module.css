@@ -1,5 +1,5 @@
 .strip {
-  padding: 3rem 0;
+  padding: var(--zv-section-space) 0;
   background: var(--ifm-color-emphasis-100);
 }
 

@@ -1,12 +1,12 @@
 .heroBanner {
-  padding: 4rem 0;
+  padding: var(--zv-hero-space) 0;
   position: relative;
   overflow: hidden;
 }
 
 @media screen and (max-width: 996px) {
   .heroBanner {
-    padding: 2rem;
+    padding: clamp(3rem, 14vw, 6rem) 1.5rem;
   }
 }
 
@@ -50,12 +50,18 @@
   margin-top: 0.75rem;
 }
 
+.sectionHeading {
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
+  letter-spacing: -0.02em;
+  margin-bottom: 1.25rem;
+}
+
 .problem {
-  padding: 4rem 0;
+  padding: var(--zv-section-space) 0;
 }
 
 .trust {
-  padding: 3rem 0;
+  padding: var(--zv-section-space) 0;
   background: var(--ifm-color-emphasis-100);
 }
 
@@ -86,5 +92,11 @@
 }
 
 .enterprise {
-  padding: 4rem 0;
+  padding: var(--zv-section-space) 0;
+}
+
+.enterpriseCopy {
+  max-width: 38rem;
+  margin: 0 auto 2rem;
+  color: var(--ifm-color-emphasis-700);
 }

@@ -6,6 +6,7 @@ import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import FeatureHighlights from '@site/src/components/FeatureHighlights';
 import ScreenshotStrip from '@site/src/components/ScreenshotStrip';
+import Reveal from '@site/src/components/Reveal';
 
 import styles from './index.module.css';
 
@@ -60,9 +61,11 @@ function ProblemStatement() {
   return (
     <section className={styles.problem}>
       <div className="container">
-        <div className="row">
+        <Reveal className="row">
           <div className="col col--8 col--offset-2 text--center">
-            <Heading as="h2">Why standalone?</Heading>
+            <Heading as="h2" className={styles.sectionHeading}>
+              Why standalone?
+            </Heading>
             <p>
               Most network visibility and enforcement tools couple to a
               specific CNI. Netra's node agent owns its own eBPF programs and
@@ -82,7 +85,7 @@ function ProblemStatement() {
               policy engine you have to trust blindly.
             </p>
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );
@@ -92,9 +95,11 @@ function TrustBand() {
   return (
     <section className={styles.trust}>
       <div className="container">
-        <div className={styles.trustGrid}>
+        <Reveal className={styles.trustGrid}>
           <div>
-            <Heading as="h3">Open, and honest about its limits</Heading>
+            <Heading as="h3" className={styles.sectionHeading}>
+              Open, and honest about its limits
+            </Heading>
             <p>
               Apache-2.0 core. Real CI on every push (Go build/vet/test, web
               typecheck/test/build, Helm lint/render, and a live{' '}
@@ -114,7 +119,7 @@ function TrustBand() {
               alt="Apache 2.0 license"
             />
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );
@@ -124,17 +129,21 @@ function EnterpriseCTA() {
   return (
     <section className={styles.enterprise}>
       <div className="container text--center">
-        <Heading as="h2">Need production support or SLAs?</Heading>
-        <p>
-          Netra's core is Apache-2.0 and free to run in production. Zyvor
-          Enterprise adds support contracts, SLAs, and additional products
-          for teams that need them.
-        </p>
-        <Link
-          className="button button--primary button--lg"
-          to="mailto:sales@zyvor.dev">
-          Contact sales@zyvor.dev
-        </Link>
+        <Reveal>
+          <Heading as="h2" className={styles.sectionHeading}>
+            Need production support or SLAs?
+          </Heading>
+          <p className={styles.enterpriseCopy}>
+            Netra's core is Apache-2.0 and free to run in production. Zyvor
+            Enterprise adds support contracts, SLAs, and additional products
+            for teams that need them.
+          </p>
+          <Link
+            className="button button--primary button--lg"
+            to="mailto:sales@zyvor.dev">
+            Contact sales@zyvor.dev
+          </Link>
+        </Reveal>
       </div>
     </section>
   );
@@ -148,8 +157,12 @@ export default function Home(): ReactNode {
       <HomepageHeader />
       <main>
         <ProblemStatement />
-        <FeatureHighlights />
-        <ScreenshotStrip />
+        <Reveal>
+          <FeatureHighlights />
+        </Reveal>
+        <Reveal>
+          <ScreenshotStrip />
+        </Reveal>
         <TrustBand />
         <EnterpriseCTA />
       </main>
