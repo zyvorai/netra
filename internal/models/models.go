@@ -859,17 +859,24 @@ type FlowSummary struct {
 	TopBlockedWorkloads []NamedCount      `json:"topBlockedWorkloads,omitempty"`
 }
 
+// ContainerInfo is a container inside a pod (for logs/exec selectors).
+type ContainerInfo struct {
+	Name  string `json:"name"`
+	Ready bool   `json:"ready"`
+}
+
 // PodInfo is the operator-facing Kubernetes pod inventory record.
 type PodInfo struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Phase     string            `json:"phase"`
-	Node      string            `json:"node,omitempty"`
-	PodIP     string            `json:"podIP,omitempty"`
-	Ready     bool              `json:"ready"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	OwnerKind string            `json:"ownerKind,omitempty"`
-	OwnerName string            `json:"ownerName,omitempty"`
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	Phase      string            `json:"phase"`
+	Node       string            `json:"node,omitempty"`
+	PodIP      string            `json:"podIP,omitempty"`
+	Ready      bool              `json:"ready"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	OwnerKind  string            `json:"ownerKind,omitempty"`
+	OwnerName  string            `json:"ownerName,omitempty"`
+	Containers []ContainerInfo   `json:"containers,omitempty"`
 }
 
 type VMInfo struct {
@@ -902,6 +909,8 @@ type WorkloadDetail struct {
 	Labels              map[string]string `json:"labels,omitempty"`
 	OwnerKind           string            `json:"ownerKind,omitempty"`
 	OwnerName           string            `json:"ownerName,omitempty"`
+	Containers          []ContainerInfo   `json:"containers,omitempty"`
+	DefaultContainer    string            `json:"defaultContainer,omitempty"`
 	RecommendedSelector map[string]string `json:"recommendedSelector"`
 	LockdownPolicy      string            `json:"lockdownPolicy"`
 	LockedDown          bool              `json:"lockedDown"`

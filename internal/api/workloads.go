@@ -96,6 +96,10 @@ func (s *Server) workloadDetail(w http.ResponseWriter, r *http.Request) {
 		d.Labels = p.Labels
 		d.OwnerKind = p.OwnerKind
 		d.OwnerName = p.OwnerName
+		d.Containers = p.Containers
+		if len(p.Containers) > 0 {
+			d.DefaultContainer = p.Containers[0].Name
+		}
 	case "vm":
 		vm, available, err := s.kube.GetVMI(r.Context(), ns, name)
 		if err != nil {

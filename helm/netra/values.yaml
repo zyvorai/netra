@@ -15,6 +15,10 @@ ha:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+workloadConsole:
+  # In-browser pod logs/exec and VM VNC. Expands controller RBAC
+  # (pods/log, pods/exec, virtualmachineinstances/vnc). Default off.
+  enabled: false
 cilium:
   enabled: false
 hubble:
