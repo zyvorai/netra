@@ -66,7 +66,7 @@ export default function L7() {
         {(data?.tls || []).map((x:any, i:number) => {
           const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span><span className="truncate" title={x.sni}>{x.sni}</span><span>{x.handshakes}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span><span>{x.cgroupId || 0}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span><span className="truncate" title={x.sni} aria-label={x.sni}>{x.sni}</span><span>{x.handshakes}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span><span>{x.cgroupId || 0}</span>
           </div>;
         })}
       </div>}
@@ -80,7 +80,7 @@ export default function L7() {
         {(data?.http || []).map((x:any, i:number) => {
           const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span><span>{x.method}</span><span className="truncate" title={x.host}>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span><span>{x.method}</span><span className="truncate" title={x.host} aria-label={x.host}>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
           </div>;
         })}
       </div>}
@@ -94,7 +94,7 @@ export default function L7() {
         {connections.map((x:any, i:number) => {
           const who = x.namespace ? `${x.namespace}/${x.pod}` : `cgroup ${x.cgroupId || 0}`;
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span><span>{x.protocol}</span><span>{x.remoteIp}:{x.remotePort}</span><span>{x.attempts}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span><span>{x.protocol}</span><span>{x.remoteIp}:{x.remotePort}</span><span>{x.attempts}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span>
           </div>;
         })}
       </div>}

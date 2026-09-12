@@ -296,7 +296,7 @@ export default function EBPF() {
         {rules.map((r, i) => (
           <div key={r.id || (r.type + r.value + i)}>
             <div className="datarow rules">
-              <span>{r.type}</span><span className="truncate" title={r.value}>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
+              <span>{r.type}</span><span className="truncate" title={r.value} aria-label={r.value}>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
               <span>
                 {r.id && <button className="btn-secondary" onClick={() => startEdit(r.raw)}>edit</button>}
                 {r.id && <button className="btn-diag" onClick={() => toggleHistory(r.id!)}>history</button>}
@@ -429,7 +429,7 @@ export default function EBPF() {
         {events.map((e: any, i) => {
           const proc = e.namespace || e.pod ? `${e.namespace}/${e.pod} · ${e.comm || 'process?'} pid=${e.pid || 0}` : (e.comm ? `${e.comm} pid=${e.pid} uid=${e.uid}` : '—');
           const flow = e.dnsQuery || `${e.sourceIp || '—'}:${e.sourcePort || 0} → ${e.destinationIp || '—'}:${e.destinationPort || 0} ${e.protocol}`;
-          return <div className="datarow obs" key={i}><span>{new Date(e.observedAt).toLocaleTimeString()} · {e.node}</span><span>{e.direction} {e.hook} · {e.type}</span><span className="truncate" title={proc}>{proc}</span><span className="truncate" title={flow}>{flow}</span><span className={e.action === 'blocked' ? 'blocked' : ''}>{e.action}{e.reason ? ` · ${e.reason}` : ''}</span></div>;
+          return <div className="datarow obs" key={i}><span>{new Date(e.observedAt).toLocaleTimeString()} · {e.node}</span><span>{e.direction} {e.hook} · {e.type}</span><span className="truncate" title={proc} aria-label={proc}>{proc}</span><span className="truncate" title={flow} aria-label={flow}>{flow}</span><span className={e.action === 'blocked' ? 'blocked' : ''}>{e.action}{e.reason ? ` · ${e.reason}` : ''}</span></div>;
         })}
       </div>}
     </section>
@@ -440,7 +440,7 @@ export default function EBPF() {
         <div className="datahead obs"><span>NODE / HOOK</span><span>DIR</span><span>FLOW</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>
         {stats.map((s: any, i) => {
           const who = `${s.node} · ${s.hook}${s.namespace ? ` · ${s.namespace}/${s.pod}` : ''}`;
-          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{s.direction}</span><span>{s.sourceIp || '—'}:{s.sourcePort || 0} → {s.destinationIp}:{s.port}</span><span>{s.protocol}</span><span>{s.packets} / {s.bytes} / {s.blocked}</span></div>;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{s.direction}</span><span>{s.sourceIp || '—'}:{s.sourcePort || 0} → {s.destinationIp}:{s.port}</span><span>{s.protocol}</span><span>{s.packets} / {s.bytes} / {s.blocked}</span></div>;
         })}
       </div>}
     </section>
@@ -451,7 +451,7 @@ export default function EBPF() {
         <div className="datahead obs"><span>WORKLOAD</span><span>NODE</span><span>DESTINATION</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>
         {topology.map((e:any, i:number) => {
           const who = `${e.namespace}/${e.pod}${e.workloadName ? ` · ${e.workloadKind}/${e.workloadName}` : ''}`;
-          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{e.node}</span><span>{e.destination}</span><span>{e.protocol}</span><span>{e.packets} / {e.bytes} / {e.blocked}</span></div>;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{e.node}</span><span>{e.destination}</span><span>{e.protocol}</span><span>{e.packets} / {e.bytes} / {e.blocked}</span></div>;
         })}
       </div>}
     </section>

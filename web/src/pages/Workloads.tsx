@@ -226,8 +226,8 @@ export default function Workloads({ kind }: { kind: Kind }) {
             return (
               <button key={`${x.namespace}/${x.name}`} onClick={() => open(x)}>
                 <span>
-                  <b className="truncate" title={x.name}>{x.name}</b>
-                  <small className="truncate" title={subtitle}>{subtitle}</small>
+                  <b className="truncate" title={x.name} aria-label={x.name}>{x.name}</b>
+                  <small className="truncate" title={subtitle} aria-label={subtitle}>{subtitle}</small>
                 </span>
                 <span>{x.lockedDown ? 'LOCKED' : x.phase || (x.running ? 'Running' : '—')}</span>
               </button>

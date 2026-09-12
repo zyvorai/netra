@@ -23,9 +23,9 @@ export default function Audit() {
             {items.map((x, i) => (
               <div className="datarow audit" key={i}>
                 <span>{new Date(x.at).toLocaleString()}</span>
-                <span className="truncate" title={x.actor}>{x.actor}</span>
+                <span className="truncate" title={x.actor} aria-label={x.actor}>{x.actor}</span>
                 <span>{x.action}</span>
-                <span className="truncate" title={x.target || '—'}>{x.target || '—'}</span>
+                <span className="truncate" title={x.target || '—'} aria-label={x.target || '—'}>{x.target || '—'}</span>
               </div>
             ))}
           </div>

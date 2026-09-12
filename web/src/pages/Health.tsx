@@ -64,7 +64,7 @@ export default function Health() {
         {(data?.tcp || []).map((t:any, i:number) => {
           const who = `${t.namespace ? `${t.namespace}/${t.pod}` : (t.comm || `cgroup ${t.cgroupId || 0}`)}${t.pid ? ` · pid=${t.pid}` : ''}${t.exe ? ` · ${t.exe}` : ''}${t.ownershipStale ? ' · stale-owner' : ''}`;
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
             <span>{t.remoteIp}:{t.remotePort}</span>
             <span>{ms(t.srttUs)} ms · min {ms(t.minRttUs)} ms</span>
             <span>retrans {t.retransmissions} · RTO {t.rtos}</span>
@@ -83,8 +83,8 @@ export default function Health() {
         {(data?.dns || []).map((d:any, i:number) => {
           const who = d.namespace ? `${d.namespace}/${d.pod}` : `cgroup ${d.cgroupId || 0}`;
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span>
-            <span className="truncate" title={d.name}>{d.name}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
+            <span className="truncate" title={d.name} aria-label={d.name}>{d.name}</span>
             <span>{d.queries} / {d.responses} matched</span>
             <span>{d.failures} · {pct(d.failures, d.responses)}</span>
             <span>avg {ms(d.responses ? d.totalLatencyUs / d.responses : 0)} ms · max {ms(d.maxLatencyUs)} ms</span>
@@ -102,7 +102,7 @@ export default function Health() {
         {resetRows.map((r:any, i:number) => {
           const who = r.namespace ? `${r.namespace}/${r.pod}` : `cgroup ${r.cgroupId || 0}`;
           return <div className="datarow obs" key={i}>
-            <span className="truncate" title={who}>{who}</span>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
             <span>{r.syn}</span><span>{r.synAck}</span><span>{r.fin}</span><span>{r.rst} / {r.packets}</span>
           </div>;
         })}

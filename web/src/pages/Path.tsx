@@ -30,7 +30,7 @@ export default function Path(){
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>CWND / FLIGHT</span><span>LOSS</span><span>DELIVERY</span></div>
         {pressure.map((p:any,i:number)=>{
           const who = p.namespace?`${p.namespace}/${p.pod}`:`cgroup ${p.cgroupId||0}`;
-          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{p.remoteIp}:{p.remotePort}</span><span>{p.packetsOut}/{p.sendCwnd} · {pct(p.packetsOut,p.sendCwnd)}</span><span>lost {p.lostOut} · retrans-out {p.retransOut} · total {p.totalRetrans}</span><span>{p.rateIntervalUs?Math.round(p.rateDelivered*1000000/p.rateIntervalUs):0} pkt/s · MSS {p.mss||0}</span></div>;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{p.remoteIp}:{p.remotePort}</span><span>{p.packetsOut}/{p.sendCwnd} · {pct(p.packetsOut,p.sendCwnd)}</span><span>lost {p.lostOut} · retrans-out {p.retransOut} · total {p.totalRetrans}</span><span>{p.rateIntervalUs?Math.round(p.rateDelivered*1000000/p.rateIntervalUs):0} pkt/s · MSS {p.mss||0}</span></div>;
         })}
       </div>}
     </section>
@@ -41,7 +41,7 @@ export default function Path(){
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>ESTABLISHED</span><span>AVG</span><span>MAX</span></div>
         {connect.map((c:any,i:number)=>{
           const who = c.namespace?`${c.namespace}/${c.pod}`:`cgroup ${c.cgroupId||0}`;
-          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{c.remoteIp}:{c.remotePort}</span><span>{c.established}</span><span>{ms(c.established?c.totalLatencyUs/c.established:0)} ms</span><span>{ms(c.maxLatencyUs)} ms</span></div>;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{c.remoteIp}:{c.remotePort}</span><span>{c.established}</span><span>{ms(c.established?c.totalLatencyUs/c.established:0)} ms</span><span>{ms(c.maxLatencyUs)} ms</span></div>;
         })}
       </div>}
     </section>

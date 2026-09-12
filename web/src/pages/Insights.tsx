@@ -118,7 +118,7 @@ export default function Insights() {
       {(graph?.edges || []).length === 0 && <p className="empty-state">No dependency edges observed yet.</p>}
       {(graph?.edges || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead deps"><span>SOURCE</span><span>TARGET</span><span>NETWORK</span><span>PACKETS / BYTES</span></div>
-        {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="datarow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}><span className="truncate" title={label(e.source)}>{label(e.source)}</span><span className="truncate" title={label(e.target)}>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span></div>)}
+        {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="datarow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}><span className="truncate" title={label(e.source)} aria-label={label(e.source)}>{label(e.source)}</span><span className="truncate" title={label(e.target)} aria-label={label(e.target)}>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span></div>)}
       </div>}
     </section>
 
