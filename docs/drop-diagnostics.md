@@ -46,3 +46,5 @@ No interface name or drop reason is emitted as a Prometheus label.
 ## Limits
 
 These signals are diagnostics, not proof of root cause. Counters are cumulative. A non-zero softnet or interface counter does not prove that Cilium, the NIC, a switch, a firewall, the application, or the remote peer caused the loss. Kernel drop-reason numbers should be interpreted against the running kernel's enum/symbol definitions.
+
+See `docs/interface-flow-attribution.md` for per-interface breakdown of Netra's own flow counters (not kernel drop reasons), scoped to TC/TCX-attached interfaces only.

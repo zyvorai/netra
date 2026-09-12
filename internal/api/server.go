@@ -25,12 +25,14 @@ import (
 	"github.com/zyvorai/netra/internal/flowstats"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/hubble"
+	"github.com/zyvorai/netra/internal/ipv6diag"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/policy"
+	"github.com/zyvorai/netra/internal/shielddiag"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/workload"
 )
@@ -117,6 +119,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/drops", s.auth(http.HandlerFunc(s.ebpfDropDiagnostics)))
+	mux.Handle("GET /api/v1/ebpf/ipv6", s.auth(http.HandlerFunc(s.ebpfIPv6Diagnostics)))
+	mux.Handle("GET /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldDiagnostics)))
+	mux.Handle("GET /api/v1/ebpf/interfaces", s.auth(http.HandlerFunc(s.ebpfInterfaceFlows)))
 	mux.Handle("GET /api/v1/ebpf/diagnose", s.auth(http.HandlerFunc(s.ebpfDropDetective)))
 	mux.Handle("GET /api/v1/ebpf/l7", s.auth(http.HandlerFunc(s.ebpfL7)))
 	mux.Handle("GET /api/v1/ebpf/capabilities", s.auth(http.HandlerFunc(s.ebpfCapabilities)))
@@ -1173,7 +1178,6 @@ func (s *Server) ebpfPathDiagnostics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, pathdiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
-
 func (s *Server) ebpfDropDetective(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -1190,6 +1194,30 @@ func (s *Server) ebpfDropDiagnostics(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	writeJSON(w, 200, dropdiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
+func (s *Server) ebpfIPv6Diagnostics(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+		limit = n
+	}
+	writeJSON(w, 200, ipv6diag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
+func (s *Server) ebpfShieldDiagnostics(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+		limit = n
+	}
+	writeJSON(w, 200, shielddiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
+func (s *Server) ebpfInterfaceFlows(w http.ResponseWriter, r *http.Request) {
+	limit := 10
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	writeJSON(w, 200, observability.InterfaceSummary(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
 func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
@@ -1271,6 +1299,17 @@ func (s *Server) serveWeb(w http.ResponseWriter, r *http.Request) {
 		if ct := mime.TypeByExtension(ext); ct != "" {
 			w.Header().Set("Content-Type", ct)
 		}
+	}
+	// Vite's build output hashes every filename under assets/ by content,
+	// so those are safe to cache forever; index.html (and any SPA-routed
+	// path that falls back to it above) names those hashed files, so it
+	// must always be revalidated or a stale cached copy keeps pointing a
+	// browser at old JS/CSS indefinitely — with no header here at all,
+	// browsers apply heuristic caching and can do exactly that silently.
+	if strings.Contains(p, string(os.PathSeparator)+"assets"+string(os.PathSeparator)) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeFile(w, r, p)
 }

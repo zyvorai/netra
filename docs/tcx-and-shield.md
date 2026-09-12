@@ -42,3 +42,12 @@ Generation is published last so protected-IP maps can be filled before the confi
 - Shield refuses to be useful on empty interface lists.
 - Default agent still uses observe-first Netra policy; shield is an additional emergency layer.
 - IPv6 protected-IP set is limited to `protectAll` in this version.
+
+## Per-class and per-source diagnostics
+
+The aggregate `allowed`/`dropped`/`audited` counters Shield always exposed don't say *what kind* of traffic was involved, or *who* it came from. Two additive maps (never resizing the original `shield_stats`/`shield_sources`) fill that in:
+
+- **Per-class breakdown** — the same allowed/dropped/audited counters, broken out by the class Shield already computes internally (`syn`, `udp`, `icmp`, `other`), so a spike shows up as "SYN flood" or "UDP flood" rather than an undifferentiated total.
+- **Per-source hit counts** — how many times each source address has been denied, recorded identically whether Shield is in `audit` or `enforce` mode. This lets an operator see who Shield *would* drop before ever flipping it to `enforce`.
+
+Exposed via `GET /api/v1/ebpf/shield`, `netractl ebpf shield`, and the `netra_ebpf_shield` MCP tool. Anomalies: `shield-class-drop-rate` (a class's drop rate is at or above 10%/50%) and `shield-source-flood` (a single source has 10,000+ denied hits). Both are purely observational — they don't change Shield's own mode or thresholds.

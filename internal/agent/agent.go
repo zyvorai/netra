@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,6 +33,16 @@ import (
 )
 
 var native = binary.LittleEndian // Netra ships a bpfel object.
+
+// mapIterErr treats concurrent BPF map mutation during userspace
+// iteration as non-fatal. Partial snapshots are still useful for observe
+// reports; failing the whole sync left the controller with zero agents.
+func mapIterErr(err error) error {
+	if err == nil || errors.Is(err, ebpf.ErrIterationAborted) {
+		return nil
+	}
+	return err
+}
 
 type Agent struct {
 	log                                *slog.Logger
@@ -135,10 +146,11 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
+	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -197,6 +209,43 @@ func (a *Agent) loadAndAttach() error {
 			a.links = append(a.links, lnk)
 			a.hooks = append(a.hooks, h.name)
 			a.markAttached(h.prog)
+		}
+		// L7/DNS (SNI/HTTP/DNS-qname) observability runs in its own dedicated
+		// cgroup_skb programs, isolated from the CT/policy program's already-
+		// tight verifier budget (see bpf/netra_tc.c and docs/l7-metadata.md).
+		// NETRA_L7 mirrors NETRA_TCX's attach-with-fallback convention: real
+		// kernel verifier acceptance for these programs' un-unrolled SNI/HTTP
+		// scan loops can vary across kernel versions, so a rejection degrades
+		// to "no L7 observability" rather than failing agent startup, unless
+		// the operator has explicitly opted into NETRA_L7=required.
+		l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
+		if l7Mode != "off" {
+			for _, h := range []struct {
+				name   string
+				attach ebpf.AttachType
+				prog   string
+			}{
+				{"l7-cgroup-ingress", ebpf.AttachCGroupInetIngress, "netra_l7_cgroup_ingress"},
+				{"l7-cgroup-egress", ebpf.AttachCGroupInetEgress, "netra_l7_cgroup_egress"},
+			} {
+				p := coll.Programs[h.prog]
+				if p == nil {
+					return fmt.Errorf("BPF program %s missing", h.prog)
+				}
+				lnk, err := link.AttachCgroup(link.CgroupOptions{Path: a.cgroupPath, Attach: h.attach, Program: p})
+				if err != nil {
+					if l7Mode == "required" {
+						return fmt.Errorf("attach %s to %s (NETRA_L7=required): %w", h.name, a.cgroupPath, err)
+					}
+					a.log.Warn("L7/DNS cgroup program attach failed; continuing without L7 observability", "hook", h.name, "error", err)
+					continue
+				}
+				a.links = append(a.links, lnk)
+				a.hooks = append(a.hooks, h.name)
+				a.markAttached(h.prog)
+			}
+		} else {
+			a.log.Info("L7/DNS observability skipped by NETRA_L7=off")
 		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
@@ -405,6 +454,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ipv6ExtHeaders, err := a.readIPv6ExtStats()
+	if err != nil {
+		return err
+	}
 	policyDrops, err := a.readPolicyDrops()
 	if err != nil {
 		return err
@@ -414,6 +467,18 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	shieldStats, err := a.readShieldStats()
+	if err != nil {
+		return err
+	}
+	shieldClasses, err := a.readShieldClassStats()
+	if err != nil {
+		return err
+	}
+	shieldSources, err := a.readShieldSourceHits()
+	if err != nil {
+		return err
+	}
+	ifaceFlows, err := a.readInterfaceFlowStats()
 	if err != nil {
 		return err
 	}
@@ -445,8 +510,8 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, PolicyDrops: policyDrops,
-		ConntrackEntries: ctEntries, Shield: shieldStats, ProcessMeta: processMeta,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
@@ -560,7 +625,7 @@ func (a *Agent) replaceIPSet(name string, values []string, size int) error {
 		for _, x := range keys {
 			_ = m.Delete(x)
 		}
-		if err := it.Err(); err != nil {
+		if err := mapIterErr(it.Err()); err != nil {
 			return err
 		}
 		for _, s := range values {
@@ -586,7 +651,7 @@ func (a *Agent) replaceIPSet(name string, values []string, size int) error {
 	for _, x := range keys {
 		_ = m.Delete(x)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, s := range values {
@@ -626,7 +691,7 @@ func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
 	for _, k := range ks4 {
 		_ = m4.Delete(k)
 	}
-	if err := i4.Err(); err != nil {
+	if err := mapIterErr(i4.Err()); err != nil {
 		return err
 	}
 	i6 := m6.Iterate()
@@ -636,7 +701,7 @@ func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
 	for _, k := range ks6 {
 		_ = m6.Delete(k)
 	}
-	if err := i6.Err(); err != nil {
+	if err := mapIterErr(i6.Err()); err != nil {
 		return err
 	}
 	for _, r := range rules {
@@ -689,7 +754,7 @@ func (a *Agent) replacePorts(rules []models.EBPFPortRule) error {
 	for _, x := range keys {
 		_ = m.Delete(x)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, r := range rules {
@@ -717,7 +782,7 @@ func (a *Agent) replaceUIDs(values []uint32) error {
 	for _, x := range keys {
 		_ = m.Delete(x)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, x := range values {
@@ -743,7 +808,7 @@ func (a *Agent) replaceStringMap(name string, values []string, size int) error {
 		for _, x := range keys {
 			_ = m.Delete(x)
 		}
-		if err := it.Err(); err != nil {
+		if err := mapIterErr(it.Err()); err != nil {
 			return err
 		}
 		for _, s := range values {
@@ -765,7 +830,7 @@ func (a *Agent) replaceStringMap(name string, values []string, size int) error {
 	for _, x := range keys {
 		_ = m.Delete(x)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, s := range values {
@@ -790,7 +855,7 @@ func (a *Agent) replaceRates(values []models.EBPFRateLimit) error {
 	for _, x := range keys {
 		_ = m.Delete(x)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, r := range values {
@@ -832,7 +897,7 @@ func (a *Agent) applyWorkloadScopes(cfg models.EBPFFastPathConfig) error {
 	for it.Next(&key, &value) {
 		old = append(old, key)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
 	for _, k := range old {
@@ -988,7 +1053,7 @@ func (a *Agent) readStats() ([]models.DestinationStat, error) {
 		a.enrichStat(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	// Preserve interface-level TCX/XDP counters as unattributed rows. Cgroup rows
@@ -1012,7 +1077,7 @@ func (a *Agent) readStats() ([]models.DestinationStat, error) {
 			}
 			out = append(out, models.DestinationStat{SourceIP: src, SourcePort: binary.BigEndian.Uint16(gk[4:6]), DestinationIP: dst, Port: binary.BigEndian.Uint16(gk[6:8]), Protocol: protoName(gk[3]), Direction: dirName(gk[1]), Hook: hookName(gk[2]), Packets: native.Uint64(gv[0:8]), Bytes: native.Uint64(gv[8:16]), Blocked: native.Uint64(gv[16:24]), LastSeenNS: native.Uint64(gv[24:32])})
 		}
-		if err := git.Err(); err != nil {
+		if err := mapIterErr(git.Err()); err != nil {
 			return nil, err
 		}
 	}
@@ -1055,7 +1120,7 @@ func (a *Agent) readTCPHealth() ([]models.TCPHealthStat, error) {
 		a.enrichTCPHealth(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1098,7 +1163,7 @@ func (a *Agent) readTCPPressure() ([]models.TCPPressureStat, error) {
 		a.enrichTCPPressure(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1131,7 +1196,7 @@ func (a *Agent) readConnectLatency() ([]models.ConnectLatencyStat, error) {
 		a.enrichConnectLatency(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1164,7 +1229,7 @@ func (a *Agent) readTCPSignals() ([]models.TCPSignalStat, error) {
 		a.enrichTCPSignal(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RST > out[j].RST })
@@ -1185,7 +1250,7 @@ func (a *Agent) readDNSHealth() ([]models.DNSHealthStat, error) {
 		a.enrichDNSHealth(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1215,7 +1280,7 @@ func (a *Agent) readTLSMetadata() ([]models.TLSMetadataStat, error) {
 		a.enrichTLSMetadata(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Handshakes > out[j].Handshakes })
@@ -1239,7 +1304,7 @@ func (a *Agent) readHTTPMetadata() ([]models.HTTPMetadataStat, error) {
 		a.enrichHTTPMetadata(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Requests > out[j].Requests })
@@ -1270,7 +1335,7 @@ func (a *Agent) readConnectionAttempts() ([]models.ConnectionAttemptStat, error)
 		a.enrichConnectionAttempt(&st)
 		out = append(out, st)
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Attempts > out[j].Attempts })
@@ -1356,10 +1421,53 @@ func (a *Agent) readKernelDrops() ([]models.KernelDropStat, error) {
 			break
 		}
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
+func (a *Agent) readIPv6ExtStats() ([]models.IPv6ExtHeaderStat, error) {
+	m := a.collection.Maps["ipv6_ext_stats"]
+	if m == nil {
+		return nil, nil
+	}
+	type key struct {
+		Direction uint8
+		Hook      uint8
+		Pad       uint16
+	}
+	type value struct {
+		Packets           uint64
+		ExtHeaderPackets  uint64
+		TotalExtHeaders   uint64
+		Fragmented        uint64
+		NonFirstFragments uint64
+		MoreFragments     uint64
+		ChainTruncated    uint64
+	}
+	var k key
+	var v value
+	out := make([]models.IPv6ExtHeaderStat, 0, 16)
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		out = append(out, models.IPv6ExtHeaderStat{
+			Direction:         dirName(k.Direction),
+			Hook:              hookName(k.Hook),
+			Packets:           v.Packets,
+			ExtHeaderPackets:  v.ExtHeaderPackets,
+			TotalExtHeaders:   v.TotalExtHeaders,
+			Fragmented:        v.Fragmented,
+			NonFirstFragments: v.NonFirstFragments,
+			MoreFragments:     v.MoreFragments,
+			ChainTruncated:    v.ChainTruncated,
+		})
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
 	return out, nil
 }
 
@@ -1377,7 +1485,7 @@ func (a *Agent) countMap(name string) (int, error) {
 			break
 		}
 	}
-	return n, it.Err()
+	return n, mapIterErr(it.Err())
 }
 
 func (a *Agent) readPolicyDrops() ([]models.PolicyDropStat, error) {
@@ -1422,7 +1530,7 @@ func (a *Agent) readPolicyDrops() ([]models.PolicyDropStat, error) {
 			break
 		}
 	}
-	if err := it.Err(); err != nil {
+	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
@@ -1444,6 +1552,147 @@ func (a *Agent) readShieldStats() (*models.ShieldStats, error) {
 		return nil, nil
 	}
 	return &models.ShieldStats{Allowed: v.Allowed, Dropped: v.Dropped, Audited: v.Audited}, nil
+}
+
+func shieldClassName(id uint32) string {
+	switch id {
+	case 1:
+		return "syn"
+	case 2:
+		return "udp"
+	case 3:
+		return "icmp"
+	case 4:
+		return "other"
+	default:
+		return "unknown"
+	}
+}
+
+// readShieldClassStats reads the fixed 5-entry shield_class_stats array
+// (index 0 unused, 1-4 = syn/udp/icmp/other), a new map added alongside
+// the existing, unresized shield_stats array.
+func (a *Agent) readShieldClassStats() ([]models.ShieldClassStat, error) {
+	m := a.collection.Maps["shield_class_stats"]
+	if m == nil {
+		return nil, nil
+	}
+	type value struct {
+		Allowed uint64
+		Dropped uint64
+		Audited uint64
+	}
+	out := make([]models.ShieldClassStat, 0, 4)
+	for id := uint32(1); id <= 4; id++ {
+		var v value
+		if err := m.Lookup(&id, &v); err != nil {
+			continue
+		}
+		if v.Allowed == 0 && v.Dropped == 0 && v.Audited == 0 {
+			continue
+		}
+		out = append(out, models.ShieldClassStat{Class: shieldClassName(id), Allowed: v.Allowed, Dropped: v.Dropped, Audited: v.Audited})
+	}
+	return out, nil
+}
+
+// readShieldSourceHits reads the new shield_source_hits LRU map, bounding
+// and pre-sorting agent-side so the controller only needs to merge and
+// re-truncate a small top-N across nodes, not build one from scratch.
+func (a *Agent) readShieldSourceHits() ([]models.ShieldSourceStat, error) {
+	m := a.collection.Maps["shield_source_hits"]
+	if m == nil {
+		return nil, nil
+	}
+	type key struct {
+		Family  uint8
+		ClassID uint8
+		Pad     uint16
+		Addr    [16]byte
+	}
+	type value struct {
+		Denied uint64
+		LastNS uint64
+	}
+	var k key
+	var v value
+	out := make([]models.ShieldSourceStat, 0, 200)
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		addr := ""
+		if k.Family == 4 {
+			addr = net.IP(k.Addr[:4]).String()
+		} else {
+			addr = net.IP(k.Addr[:]).String()
+		}
+		out = append(out, models.ShieldSourceStat{
+			Family:     familyName(k.Family),
+			Class:      shieldClassName(uint32(k.ClassID)),
+			Address:    addr,
+			Denied:     v.Denied,
+			LastSeenNS: v.LastNS,
+		})
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Denied > out[j].Denied })
+	if len(out) > 200 {
+		out = out[:200]
+	}
+	return out, nil
+}
+
+// readInterfaceFlowStats decodes iface_flow_stats using the same raw
+// byte-offset convention as flow_stats/workload_flow_stats above:
+// key = ifindex(4, native) + flow_key(40: family,direction,hook,protocol
+// each 1 byte, src_port/dst_port 2 bytes network order, src_addr/dst_addr
+// 16 bytes each) = 44 bytes; value = flow_value's 4 uint64 fields = 32
+// bytes. Interface names are resolved agent-side from a fresh
+// net.Interfaces() snapshot rather than pushing an ifindex->name map
+// into BPF, since the agent already has this for free.
+func (a *Agent) readInterfaceFlowStats() ([]models.InterfaceFlowStat, error) {
+	m := a.collection.Maps["iface_flow_stats"]
+	if m == nil {
+		return nil, nil
+	}
+	ifNames := map[uint32]string{}
+	if ifs, err := net.Interfaces(); err == nil {
+		for _, it := range ifs {
+			ifNames[uint32(it.Index)] = it.Name
+		}
+	}
+	var k [44]byte
+	var v [32]byte
+	out := make([]models.InterfaceFlowStat, 0, 256)
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		ifIndex := native.Uint32(k[0:4])
+		family := k[4]
+		src, dst := "", ""
+		if family == 4 {
+			src = net.IP(k[12:16]).String()
+			dst = net.IP(k[28:32]).String()
+		} else if family == 6 {
+			src = net.IP(k[12:28]).String()
+			dst = net.IP(k[28:44]).String()
+		}
+		out = append(out, models.InterfaceFlowStat{
+			IfIndex: ifIndex, Interface: ifNames[ifIndex],
+			Family: familyName(family), Direction: dirName(k[5]), Protocol: protoName(k[7]),
+			SourceIP: src, DestinationIP: dst,
+			SourcePort: binary.BigEndian.Uint16(k[8:10]), DestinationPort: binary.BigEndian.Uint16(k[10:12]),
+			Packets: native.Uint64(v[0:8]), Bytes: native.Uint64(v[8:16]), Blocked: native.Uint64(v[16:24]), LastSeenNS: native.Uint64(v[24:32]),
+		})
+		if len(out) >= 2000 {
+			break
+		}
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
+	return out, nil
 }
 
 func (a *Agent) applyShield(cfg *models.ShieldConfig) error {
@@ -1741,6 +1990,8 @@ func reasonName(v byte) string {
 		return "process"
 	case 8:
 		return "tls-sni"
+	case 9:
+		return "netpol"
 	default:
 		return ""
 	}

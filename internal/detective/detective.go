@@ -27,6 +27,7 @@ var reasonNames = map[uint8]string{
 	6: "dns-deny",
 	7: "process-deny",
 	8: "sni-deny",
+	9: "netpol-deny",
 }
 
 // Build correlates agent-reported policy drops into detective findings.
@@ -125,6 +126,8 @@ func explain(d models.PolicyDropStat, cfg models.EBPFFastPathConfig) string {
 		return base + fmt.Sprintf(" %d port deny rule(s) are staged.", len(cfg.BlockedPorts))
 	case 5:
 		return base + " Destination PPS ceiling rejected the packet."
+	case 9:
+		return base + " A NetworkPolicy-shaped deny rule (distinct from a manually staged CIDR deny) rejected the packet."
 	default:
 		return base
 	}
@@ -140,6 +143,8 @@ func suggest(reason uint8) string {
 		return "Raise the emergency PPS ceiling or narrow the protected destination set."
 	case 6, 8:
 		return "Review the DNS/SNI deny list for false positives before extending the lease."
+	case 9:
+		return "Review the NetworkPolicy-shaped deny rules (netpolDenies) for this workload, separate from any manual CIDR deny."
 	default:
 		return "Inspect eBPF config and recent audit events for the matching deny primitive."
 	}

@@ -141,6 +141,24 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_ipv6", method: "GET", path: "/api/v1/ebpf/ipv6",
+			description: "IPv6 extension-header and fragmentation diagnostics: extension-header counts, fragmentation rate, and truncated-chain counts per node, with anomaly detection.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_ebpf_shield", method: "GET", path: "/api/v1/ebpf/shield",
+			description: "XDP Shield diagnostics: allowed/dropped/audited traffic broken out by class (SYN/UDP/ICMP/other) per node, plus the top offending sources across the cluster, with anomaly detection.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_ebpf_interfaces", method: "GET", path: "/api/v1/ebpf/interfaces",
+			description: "Per-interface flow attribution: packets/bytes/blocked and top destinations per network interface, from Netra's TC/TCX-attached hooks only (not cgroup or XDP-early-deny traffic).",
+			schema:      objSchema(map[string]any{"limit": intProp("Max top destinations per interface, 1-200. Default 10.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_ebpf_diagnose", method: "GET", path: "/api/v1/ebpf/diagnose",
 			description: "Drop-detective findings: likely root causes for observed drops, correlated with the current fast-path config.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max findings. Default 50.")}),

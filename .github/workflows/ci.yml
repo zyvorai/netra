@@ -97,4 +97,8 @@ jobs:
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
     - name: Test IPv6 extension-header walker
       run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/ipv6_walk_test.c -o /tmp/netra-ipv6-walk-test && /tmp/netra-ipv6-walk-test
+    - name: Test L7/DNS byte-level parsers
+      run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/l7_parse_test.c -o /tmp/netra-l7-parse-test && /tmp/netra-l7-parse-test
+    - name: Guard BPF map struct ABI layouts Go decodes by raw byte offset
+      run: cc -std=c11 -O2 -Wall -Wextra -Werror bpf/tests/abi_layout_test.c -o /tmp/netra-abi-layout-test && /tmp/netra-abi-layout-test
     - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tc.c -o /tmp/netra_tc.o

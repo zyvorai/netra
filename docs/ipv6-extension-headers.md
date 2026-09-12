@@ -46,3 +46,5 @@ The limit is intentional. It keeps the eBPF control flow small and predictable a
 ## Validation
 
 `bpf/tests/ipv6_walk_test.c` exercises direct L4, chained options, AH, atomic/first/non-first fragments, ESP/No-Next-Header, malformed lengths and the depth bound using the exact header-walking helper compiled into the eBPF datapath.
+
+See `docs/ipv6-diagnostics.md` for the counters this walk feeds into `ipv6_ext_stats` and the resulting `GET /api/v1/ebpf/ipv6` diagnostics surface.
