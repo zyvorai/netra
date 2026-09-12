@@ -59,6 +59,8 @@ effectively has the password already. Treat it with the same care as the
 
 ## Netra is a Zyvor project
 
-The dashboard's nav bar and login screen carry the [Zyvor](https://zyvor.dev)
-mark — Netra is Zyvor's open-source eBPF observability product ([Zyvor
-product page](https://zyvor.dev/netra)).
+The dashboard carries [Zyvor](https://zyvor.dev)'s branding in two places: the
+top nav uses Zyvor's bare orange "Z" logomark (matching the mark in Zyvor's
+own site header), while the login screen and browser favicon use Zyvor's
+filled gradient tile mark. Netra is Zyvor's open-source eBPF observability
+product ([Zyvor product page](https://zyvor.dev/netra)).
