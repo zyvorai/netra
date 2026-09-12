@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 export default function L7() {
   const [data, setData] = useState<any>();
@@ -59,25 +58,46 @@ export default function L7() {
       <div className="chips">{(sum.topRemotePorts || []).slice(0, 12).map((x:any) => <span key={'p'+x.name}>{x.name} · {x.count}</span>)}</div>
     </section>
 
-    <div className="span3"><TerminalFrame title="tls clienthello · parsed sni metadata">
-      <div className="flowhead obs"><span>WORKLOAD</span><span>SNI</span><span>HANDSHAKES</span><span>BLOCKED</span><span>CGROUP</span></div>
-      {(data?.tls || []).map((x:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved'}</span><span>{x.sni}</span><span>{x.handshakes}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span><span>{x.cgroupId || 0}</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">TLS CLIENTHELLO</p><h3>Parsed SNI metadata</h3>
+      {(data?.tls || []).length === 0 && <p className="empty-state">No TLS ClientHello samples yet.</p>}
+      {(data?.tls || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>SNI</span><span>HANDSHAKES</span><span>BLOCKED</span><span>CGROUP</span></div>
+        {(data?.tls || []).map((x:any, i:number) => {
+          const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span><span className="truncate" title={x.sni}>{x.sni}</span><span>{x.handshakes}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span><span>{x.cgroupId || 0}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
 
-    <div className="span3"><TerminalFrame title="cleartext http/1 · method + host only">
-      <div className="flowhead obs"><span>WORKLOAD</span><span>METHOD</span><span>HOST</span><span>REQUESTS</span><span>CGROUP</span></div>
-      {(data?.http || []).map((x:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved'}</span><span>{x.method}</span><span>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">CLEARTEXT HTTP/1</p><h3>Method + host only</h3>
+      {(data?.http || []).length === 0 && <p className="empty-state">No cleartext HTTP/1 samples yet.</p>}
+      {(data?.http || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>METHOD</span><span>HOST</span><span>REQUESTS</span><span>CGROUP</span></div>
+        {(data?.http || []).map((x:any, i:number) => {
+          const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span><span>{x.method}</span><span className="truncate" title={x.host}>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
 
-    <div className="span3"><TerminalFrame title="socket attempts · exact destination counters">
-      <div className="flowhead obs"><span>WORKLOAD</span><span>PROTO</span><span>REMOTE</span><span>ATTEMPTS</span><span>BLOCKED</span></div>
-      {connections.map((x:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{x.namespace ? `${x.namespace}/${x.pod}` : `cgroup ${x.cgroupId || 0}`}</span><span>{x.protocol}</span><span>{x.remoteIp}:{x.remotePort}</span><span>{x.attempts}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">SOCKET ATTEMPTS</p><h3>Exact destination counters</h3>
+      {connections.length === 0 && <p className="empty-state">No socket attempt samples yet.</p>}
+      {connections.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>PROTO</span><span>REMOTE</span><span>ATTEMPTS</span><span>BLOCKED</span></div>
+        {connections.map((x:any, i:number) => {
+          const who = x.namespace ? `${x.namespace}/${x.pod}` : `cgroup ${x.cgroupId || 0}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span><span>{x.protocol}</span><span>{x.remoteIp}:{x.remotePort}</span><span>{x.attempts}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
   </div>;
 }

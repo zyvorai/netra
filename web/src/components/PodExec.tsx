@@ -42,10 +42,14 @@ export default function PodExec({ namespace, name, containers = [], defaultConta
     disconnect();
     setErr('');
     if (!hostRef.current) return;
+    const rootStyle = getComputedStyle(document.documentElement);
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      theme: { background: '#0b1220', foreground: '#e6edf7' },
+      theme: {
+        background: rootStyle.getPropertyValue('--terminal-bg').trim() || '#0d0d0f',
+        foreground: rootStyle.getPropertyValue('--terminal-text').trim() || '#f5f5f7',
+      },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

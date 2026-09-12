@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 export default function Audit() {
   const [items, setItems] = useState<any[]>([]);
@@ -9,24 +8,29 @@ export default function Audit() {
   }, []);
   return (
     <div className="grid">
-      <div className="span3">
-        <TerminalFrame title="Netra control-plane audit">
-          <div className="flowhead audit">
-            <span>TIME</span>
-            <span>ACTOR</span>
-            <span>ACTION</span>
-            <span>TARGET</span>
-          </div>
-          {items.map((x, i) => (
-            <div className="flowrow audit" key={i}>
-              <span>{new Date(x.at).toLocaleString()}</span>
-              <span>{x.actor}</span>
-              <span>{x.action}</span>
-              <span>{x.target || '—'}</span>
+      <section className="card span3">
+        <p className="eyebrow">CONTROL PLANE</p>
+        <h3>Netra control-plane audit</h3>
+        {items.length === 0 && <p className="empty-state">No audit events recorded yet.</p>}
+        {items.length > 0 && (
+          <div className="datatable-scroll">
+            <div className="datahead audit">
+              <span>TIME</span>
+              <span>ACTOR</span>
+              <span>ACTION</span>
+              <span>TARGET</span>
             </div>
-          ))}
-        </TerminalFrame>
-      </div>
+            {items.map((x, i) => (
+              <div className="datarow audit" key={i}>
+                <span>{new Date(x.at).toLocaleString()}</span>
+                <span className="truncate" title={x.actor}>{x.actor}</span>
+                <span>{x.action}</span>
+                <span className="truncate" title={x.target || '—'}>{x.target || '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

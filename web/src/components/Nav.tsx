@@ -46,7 +46,7 @@ export default function Nav({
     <nav className="nav" aria-label="Global">
       <div className="nav-inner">
         <button type="button" className="brand" onClick={() => setPage('overview')} aria-label="Netra home">
-          <img src="/zyvor-mark.svg" alt="" className="brand-mark" aria-hidden />
+          <img src="/zyvor-logomark.svg" alt="" className="brand-mark" aria-hidden />
           Netra
         </button>
         <div className="navlinks">

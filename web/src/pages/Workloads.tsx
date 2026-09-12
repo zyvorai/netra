@@ -203,16 +203,23 @@ export default function Workloads({ kind }: { kind: Kind }) {
           <span>
             Showing {showingFrom}–{showingTo} of {filtered.length}
           </span>
-          <button className="btn-prev" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
-            Prev
-          </button>
-          <span>
-            Page {safePage} / {totalPages}
-          </span>
-          <button className="btn-next" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
-            Next
-          </button>
+          {totalPages > 1 && (
+            <>
+              <button className="btn-secondary" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                Prev
+              </button>
+              <span>
+                Page {safePage} / {totalPages}
+              </span>
+              <button className="btn-next" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+                Next
+              </button>
+            </>
+          )}
         </div>
+        {pageItems.length === 0 && (
+          <p className="empty-state">No {kind === 'pod' ? 'pods' : 'VMs'} match these filters.</p>
+        )}
         <div className="list">
           {pageItems.map((x) => (
             <button key={`${x.namespace}/${x.name}`} onClick={() => open(x)}>
@@ -249,7 +256,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
               <button className="btn-success" onClick={unlock} disabled={!detail.lockedDown}>
                 Unlock
               </button>
-              <button className="btn-warn" onClick={preflight} disabled={!candidate}>
+              <button className="btn-secondary" onClick={preflight} disabled={!candidate}>
                 Preflight
               </button>
               <button className="primary" onClick={apply} disabled={!receipt?.receipt?.token}>

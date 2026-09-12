@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { api, authHeaders } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 const sample = JSON.stringify(
   {
@@ -230,8 +229,8 @@ export default function Policies() {
         <div className="toolbar">
           <input value={ns} onChange={(e) => setNs(e.target.value)} />
           <button className="btn-refresh" onClick={refresh}>Refresh</button>
-          <button className="btn-warn" onClick={preflight}>Preflight</button>
-          <button className="btn-warn" onClick={() => apply(true)}>Server dry-run</button>
+          <button className="btn-secondary" onClick={preflight}>Preflight</button>
+          <button className="btn-secondary" onClick={() => apply(true)}>Server dry-run</button>
           <button className="primary" onClick={() => apply(false)}>Apply CRD</button>
         </div>
         {msg && <p>{msg}</p>}
@@ -253,7 +252,9 @@ export default function Policies() {
         <button className="primary buildbutton" onClick={buildGuided}>Generate CNP</button>
       </section>
 
-      <TerminalFrame title="advanced CiliumNetworkPolicy JSON">
+      <section className="card">
+        <p className="eyebrow">ADVANCED</p>
+        <h3>CiliumNetworkPolicy JSON</h3>
         <textarea
           className="codeedit"
           value={text}
@@ -262,7 +263,7 @@ export default function Policies() {
             setPlan(null);
           }}
         />
-      </TerminalFrame>
+      </section>
 
       <section className="card">
         <h3>Preflight plan</h3>
@@ -291,7 +292,7 @@ export default function Policies() {
               <button className="btn-diag" onClick={() => loadHistory(x.metadata?.namespace || ns, x.metadata?.name)}>History</button>
               <button className="policydelete" onClick={() => removePolicy(x.metadata?.namespace || ns, x.metadata?.name)}>Delete</button>
             </div>
-          )) : 'No policies loaded.'}
+          )) : <p className="empty-state">No policies loaded.</p>}
         </div>
       </section>
 
@@ -302,7 +303,7 @@ export default function Policies() {
           <label className="buttonlike btn-secondary">Import history<input type="file" accept="application/json,.json" hidden onChange={(e) => void importHistory(e.target.files?.[0])} /></label>
         </div>
         <h3>{historyTarget ? `${historyTarget.namespace}/${historyTarget.name}` : 'Select a policy to inspect history'}</h3>
-        {!history.length && <p>No Netra-managed revisions recorded for this policy yet. History begins when Netra applies, deletes, or rolls back the policy.</p>}
+        {!history.length && <p className="empty-state">No Netra-managed revisions recorded for this policy yet. History begins when Netra applies, deletes, or rolls back the policy.</p>}
         <div className="revisionlist">
           {history.map((r) => (
             <div className="revisionrow" key={r.id}>

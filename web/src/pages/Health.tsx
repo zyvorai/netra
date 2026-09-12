@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
 const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
@@ -52,41 +51,100 @@ export default function Health() {
       <p>These are deterministic operational thresholds, not ML/statistical anomaly claims.</p>
       <div className="list">
         {anomalies.length === 0 && <p>No threshold-based network health signals in the latest reports.</p>}
-        {anomalies.map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={a.severity === 'critical' ? 'blocked' : ''}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}
+        {anomalies.map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}
       </div>
     </section>
 
-    <div className="span3"><TerminalFrame title="tcp health · sockops exact state">
-      <div className="flowhead obs"><span>WORKLOAD / PROCESS</span><span>REMOTE</span><span>RTT</span><span>LOSS SIGNALS</span><span>CONNECTION</span></div>
-      {(data?.tcp || []).map((t:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{t.namespace ? `${t.namespace}/${t.pod}` : (t.comm || `cgroup ${t.cgroupId || 0}`)}{t.pid ? ` · pid=${t.pid}` : ''}{t.exe ? ` · ${t.exe}` : ''}{t.ownershipStale ? ' · stale-owner' : ''}</span>
-        <span>{t.remoteIp}:{t.remotePort}</span>
-        <span>{ms(t.srttUs)} ms · min {ms(t.minRttUs)} ms</span>
-        <span>retrans {t.retransmissions} · RTO {t.rtos}</span>
-        <span>active {t.activeEstablished} · passive {t.passiveEstablished} · close {t.closes}</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">TCP HEALTH</p>
+      <h3>Sockops exact state</h3>
+      {(data?.tcp || []).length === 0 && <p className="empty-state">No TCP sockops samples yet.</p>}
+      {(data?.tcp || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD / PROCESS</span><span>REMOTE</span><span>RTT</span><span>LOSS SIGNALS</span><span>CONNECTION</span></div>
+        {(data?.tcp || []).map((t:any, i:number) => {
+          const who = `${t.namespace ? `${t.namespace}/${t.pod}` : (t.comm || `cgroup ${t.cgroupId || 0}`)}${t.pid ? ` · pid=${t.pid}` : ''}${t.exe ? ` · ${t.exe}` : ''}${t.ownershipStale ? ' · stale-owner' : ''}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span>
+            <span>{t.remoteIp}:{t.remotePort}</span>
+            <span>{ms(t.srttUs)} ms · min {ms(t.minRttUs)} ms</span>
+            <span>retrans {t.retransmissions} · RTO {t.rtos}</span>
+            <span>active {t.activeEstablished} · passive {t.passiveEstablished} · close {t.closes}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
 
-    <div className="span3"><TerminalFrame title="dns health · matched udp/53 transactions">
-      <div className="flowhead obs"><span>WORKLOAD</span><span>NAME</span><span>QUERIES</span><span>FAILURES</span><span>LATENCY</span></div>
-      {(data?.dns || []).map((d:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{d.namespace ? `${d.namespace}/${d.pod}` : `cgroup ${d.cgroupId || 0}`}</span>
-        <span>{d.name}</span>
-        <span>{d.queries} / {d.responses} matched</span>
-        <span>{d.failures} · {pct(d.failures, d.responses)}</span>
-        <span>avg {ms(d.responses ? d.totalLatencyUs / d.responses : 0)} ms · max {ms(d.maxLatencyUs)} ms</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">DNS HEALTH</p>
+      <h3>Matched UDP/53 transactions</h3>
+      {(data?.dns || []).length === 0 && <p className="empty-state">No DNS transactions matched yet.</p>}
+      {(data?.dns || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>NAME</span><span>QUERIES</span><span>FAILURES</span><span>LATENCY</span></div>
+        {(data?.dns || []).map((d:any, i:number) => {
+          const who = d.namespace ? `${d.namespace}/${d.pod}` : `cgroup ${d.cgroupId || 0}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span>
+            <span className="truncate" title={d.name}>{d.name}</span>
+            <span>{d.queries} / {d.responses} matched</span>
+            <span>{d.failures} · {pct(d.failures, d.responses)}</span>
+            <span>avg {ms(d.responses ? d.totalLatencyUs / d.responses : 0)} ms · max {ms(d.maxLatencyUs)} ms</span>
+          </div>;
+        })}
+      </div>}
+    </section>
 
-    <div className="span3"><TerminalFrame title="tcp reset / handshake signals">
-      <div className="flowhead obs"><span>WORKLOAD</span><span>SYN</span><span>SYN-ACK</span><span>FIN</span><span>RST / PACKETS</span></div>
-      {resetRows.map((r:any, i:number) => <div className="flowrow obs" key={i}>
-        <span>{r.namespace ? `${r.namespace}/${r.pod}` : `cgroup ${r.cgroupId || 0}`}</span>
-        <span>{r.syn}</span><span>{r.synAck}</span><span>{r.fin}</span><span>{r.rst} / {r.packets}</span>
-      </div>)}
-    </TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">TCP RESET SIGNALS</p>
+      <h3>Handshake / reset counters</h3>
+      {resetRows.length === 0 && <p className="empty-state">No TCP reset signals in the latest reports.</p>}
+      {resetRows.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>SYN</span><span>SYN-ACK</span><span>FIN</span><span>RST / PACKETS</span></div>
+        {resetRows.map((r:any, i:number) => {
+          const who = r.namespace ? `${r.namespace}/${r.pod}` : `cgroup ${r.cgroupId || 0}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who}>{who}</span>
+            <span>{r.syn}</span><span>{r.synAck}</span><span>{r.fin}</span><span>{r.rst} / {r.packets}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
 
-    <section className="card"><p className="eyebrow">KERNEL PULSE</p><h3>What Netra sees</h3><div className="metrics"><div><b>{summary?.packets ?? 0}</b><span>packets</span></div><div><b>{summary?.blocked ?? 0}</b><span>blocked</span></div><div><b>{summary?.dnsQueries ?? 0}</b><span>DNS</span></div><div><b>{summary?.socketEvents ?? 0}</b><span>socket events</span></div></div><pre className="mini">{JSON.stringify({ hooks: summary?.hooks, reasons: summary?.blockReasons, topDNS: summary?.topDns, topProcesses: summary?.topProcesses, topWorkloads: summary?.topWorkloads, blockedWorkloads: summary?.topBlockedWorkloads }, null, 2)}</pre></section>
+    <section className="card">
+      <p className="eyebrow">KERNEL PULSE</p>
+      <h3>What Netra sees</h3>
+      <div className="metrics">
+        <div><b>{summary?.packets ?? 0}</b><span>packets</span></div>
+        <div><b>{summary?.blocked ?? 0}</b><span>blocked</span></div>
+        <div><b>{summary?.dnsQueries ?? 0}</b><span>DNS</span></div>
+        <div><b>{summary?.socketEvents ?? 0}</b><span>socket events</span></div>
+      </div>
+      {Object.entries(summary?.hooks || {}).length === 0 &&
+        !(summary?.blockReasons || []).length &&
+        !(summary?.topDns || []).length &&
+        !(summary?.topProcesses || []).length &&
+        !(summary?.topWorkloads || []).length &&
+        !(summary?.topBlockedWorkloads || []).length && (
+        <p className="empty-state">No kernel-side breakdown yet.</p>
+      )}
+      {Object.entries(summary?.hooks || {}).length > 0 && (
+        <div className="chips">{Object.entries(summary.hooks as Record<string, number>).map(([name, count]) => <span key={'hook-'+name}>{name} · {count}</span>)}</div>
+      )}
+      {(summary?.blockReasons || []).length > 0 && (
+        <div className="chips">{summary.blockReasons.slice(0, 12).map((x: any) => <span key={'reason-'+x.name}>{x.name} · {x.count}</span>)}</div>
+      )}
+      {(summary?.topDns || []).length > 0 && (
+        <div className="chips">{summary.topDns.slice(0, 12).map((x: any) => <span key={'dns-'+x.name}>DNS {x.name} · {x.count}</span>)}</div>
+      )}
+      {(summary?.topProcesses || []).length > 0 && (
+        <div className="chips">{summary.topProcesses.slice(0, 12).map((x: any) => <span key={'proc-'+x.name}>{x.name} · {x.count}</span>)}</div>
+      )}
+      {(summary?.topWorkloads || []).length > 0 && (
+        <div className="chips">{summary.topWorkloads.slice(0, 12).map((x: any) => <span key={'wl-'+x.name}>{x.name} · {x.count}</span>)}</div>
+      )}
+      {(summary?.topBlockedWorkloads || []).length > 0 && (
+        <div className="chips">{summary.topBlockedWorkloads.slice(0, 12).map((x: any) => <span key={'blk-'+x.name}>{x.name} · {x.count}</span>)}</div>
+      )}
+    </section>
     <section className="card span2"><p className="eyebrow">BPF PROGRAM HEALTH</p><h3>Attach state and run stats</h3><p>Per-node program attach flags plus kernel run counts when BPF stats are enabled. Use this when a hook is missing after upgrade or verifier load failures.</p>{agents.map(a => <div className="agent wide" key={'prog-'+a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : `${(a.programs || []).filter((p:any)=>p.attached).length}/${(a.programs || []).length} attached`}</span><small>{(a.programs || []).length === 0 ? 'no program report yet' : (a.programs || []).map((p:any) => `${p.name}${p.attached ? '' : ' (detached)'}: runs=${p.runCount || 0}`).join(' · ')}</small></div>)}</section>
     <section className="card span3"><p className="eyebrow">NETWORK HISTOGRAMS</p><h3>Retransmit / RTT / connect buckets</h3><p>Agent-side histograms from existing sockops samples, plus listen overflow and softirq NET_RX counters. Softirq entry→exit latency remains deferred.</p>{agents.map(a => {
       const h = a.histograms;

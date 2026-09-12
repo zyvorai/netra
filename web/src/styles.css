@@ -17,7 +17,6 @@
   --apple-blue: #0071e3;
   --apple-blue-hover: #0077ed;
   --apple-link: #0066cc;
-  --brand: #0071e3;
   --danger: #ff3b30;
   --danger-bg: #fff1f0;
   --accent-cyan: #32ade6;
@@ -191,17 +190,6 @@ button.btn-refresh:hover {
   background: var(--accent-cyan-hover) !important;
 }
 
-.btn-prev,
-button.btn-prev {
-  background: var(--accent-purple) !important;
-  color: #fff !important;
-  border-color: transparent !important;
-}
-.btn-prev:hover,
-button.btn-prev:hover {
-  background: var(--accent-purple-hover) !important;
-}
-
 .btn-next,
 button.btn-next {
   background: var(--apple-blue) !important;
@@ -260,7 +248,6 @@ button.btn-diag:hover {
 }
 
 button.btn-refresh:disabled,
-button.btn-prev:disabled,
 button.btn-next:disabled,
 button.btn-success:disabled,
 button.btn-warn:disabled,
@@ -487,7 +474,7 @@ main {
   font-size: 12px !important;
   letter-spacing: 0.14em;
   font-weight: 700;
-  color: var(--brand) !important;
+  color: var(--apple-blue) !important;
   text-transform: uppercase;
 }
 .login-shell {
@@ -747,7 +734,7 @@ main {
 .vnc-screen {
   min-height: 360px;
   height: 420px;
-  background: #0b1220;
+  background: var(--terminal-bg);
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -759,12 +746,15 @@ main {
 .codeedit {
   width: 100%;
   min-height: 460px;
-  background: transparent;
-  color: var(--terminal-text);
-  border: 0;
+  background: var(--bg-elevated-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
   outline: 0;
   resize: vertical;
   font: 12px ui-monospace, monospace;
+  margin-top: 12px;
 }
 
 .toolbar label {
@@ -892,8 +882,132 @@ code {
 .flowrow.rules {
   grid-template-columns: minmax(70px, 90px) minmax(0, 1fr) minmax(80px, 100px) minmax(140px, 210px) minmax(160px, 230px);
 }
-.flowrow.rules .ruleform {
+.flowrow.rules .ruleform,
+.datarow.rules .ruleform {
   margin: 6px 0;
+}
+
+/* Scroll container for a .datahead/.datarow table living inside a .card
+   (mirrors .terminalbody's overflow-x:auto at the mobile breakpoint, since
+   the table itself gets a min-width there — see the max-width:900px block). */
+.datatable-scroll {
+  overflow-x: auto;
+}
+
+/* Light-theme replacement for .flowhead/.flowrow, used for static/polled
+   tabular data rendered inside a .card instead of a dark .terminal — same
+   grid system and modifier suffixes so page markup only swaps class names. */
+.datahead,
+.datarow {
+  display: grid;
+  grid-template-columns: minmax(100px, 120px) minmax(80px, 100px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+.datahead {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.datahead span,
+.datarow span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.datahead span { color: var(--text-tertiary); }
+.datarow:hover { background: var(--hover-fill); border-radius: 10px; }
+.datarow:last-child { border-bottom: 0; }
+.datahead.ebpf,
+.datarow.ebpf,
+.datahead.audit,
+.datarow.audit {
+  grid-template-columns: minmax(120px, 1.1fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr) minmax(0, 1.4fr);
+}
+/* Widened vs. .flowhead.obs's 5 equal columns — the first column usually
+   holds a long workload/namespace identifier that was getting crushed. */
+.datahead.obs,
+.datarow.obs {
+  grid-template-columns: minmax(160px, 1.6fr) repeat(4, minmax(0, 1fr));
+}
+.datahead.stats,
+.datarow.stats {
+  grid-template-columns: minmax(120px, 160px) minmax(0, 1fr) minmax(80px, 100px) minmax(0, 1fr);
+}
+.datahead.deps,
+.datarow.deps {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(90px, 120px) minmax(120px, 180px);
+}
+.datahead.rules,
+.datarow.rules {
+  grid-template-columns: minmax(70px, 90px) minmax(0, 1fr) minmax(80px, 100px) minmax(140px, 210px) minmax(160px, 230px);
+}
+
+/* Truncate a single long identifier instead of letting it wrap 3 lines;
+   pair with a title="" attribute on the same element for a hover tooltip. */
+.truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* One-line "nothing here" message — replaces ad hoc <p>/<span>/bare-text
+   empty states so every table/list reads the same way when its data is
+   empty. Render this INSTEAD OF the header+rows, not alongside them. */
+.empty-state {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  padding: 18px 4px;
+}
+
+/* Severity pill covering the full status range (critical/high/medium/low/
+   warning/info) — .blocked stays separate, it's a boolean flag, not a
+   severity spectrum. */
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 980px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.severity-badge.critical {
+  color: #fff;
+  background: var(--danger);
+}
+.severity-badge.high {
+  color: #1d1d1f;
+  background: var(--accent-amber);
+}
+.severity-badge.medium,
+.severity-badge.warning {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+}
+.severity-badge.low {
+  color: var(--accent-cyan-hover);
+  background: rgba(50, 173, 230, 0.1);
+  border: 1px solid rgba(50, 173, 230, 0.3);
+}
+.severity-badge.info {
+  color: var(--text-tertiary);
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
 }
 
 .chips {
@@ -901,6 +1015,20 @@ code {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 14px;
+}
+/* Read-only display chip (e.g. "name · count" tags) — .chips previously
+   only styled <button> remove-chips, leaving plain <span> children
+   (L7.tsx's "TOP IDENTITIES") as unstyled run-on text. */
+.chips span {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 980px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
 }
 /* Compact tier — deliberately smaller than the standard 44px action
    button, reserved for icon/chip-scale controls inside dense rows
@@ -910,7 +1038,8 @@ code {
    shares it, and .theme-toggle, which is the same height but circular. */
 .chips button,
 .revisionrow button,
-.flowrow.rules button {
+.flowrow.rules button,
+.datarow.rules button {
   border: 1px solid var(--border-strong);
   background: transparent;
   border-radius: 980px;
@@ -934,8 +1063,10 @@ code {
   filter: brightness(0.97);
 }
 .revisionrow button:hover,
-.flowrow.rules button:hover { background: var(--hover-fill); }
-.flowrow.rules > span:last-child {
+.flowrow.rules button:hover,
+.datarow.rules button:hover { background: var(--hover-fill); }
+.flowrow.rules > span:last-child,
+.datarow.rules > span:last-child {
   display: flex;
   gap: 6px;
   overflow: visible;
@@ -1085,9 +1216,25 @@ code {
   overflow-wrap: anywhere;
   white-space: normal;
 }
+.insightrow.critical {
+  border-color: rgba(255, 59, 48, 0.4);
+  background: var(--danger-bg);
+}
+.insightrow.high {
+  border-color: rgba(255, 159, 10, 0.5);
+  background: rgba(255, 159, 10, 0.12);
+}
+.insightrow.medium,
 .insightrow.warning {
   border-color: rgba(255, 214, 10, 0.4);
   background: rgba(255, 214, 10, 0.08);
+}
+.insightrow.low {
+  border-color: rgba(50, 173, 230, 0.35);
+  background: rgba(50, 173, 230, 0.06);
+}
+.insightrow.info {
+  border-color: var(--border);
 }
 .insightrow code {
   color: var(--accent-cyan);
@@ -1125,7 +1272,7 @@ code {
 .recommendation pre {
   max-height: 420px;
   overflow: auto;
-  background: #0a0a0c;
+  background: var(--terminal-bg);
   color: var(--terminal-text);
   border-radius: 14px;
   padding: 14px;
@@ -1166,17 +1313,6 @@ code {
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated-2);
   color: var(--text-primary);
-}
-.mini {
-  margin: 12px 0 0;
-  padding: 12px;
-  border-radius: 12px;
-  background: #0a0a0c;
-  border: 1px solid var(--border);
-  color: #c8c8d0;
-  font: 11px ui-monospace, monospace;
-  overflow: auto;
-  max-height: 220px;
 }
 .blocked {
   color: var(--danger) !important;
@@ -1249,7 +1385,19 @@ code {
   .flowhead.deps,
   .flowrow.deps,
   .flowhead.rules,
-  .flowrow.rules {
+  .flowrow.rules,
+  .datahead,
+  .datarow,
+  .datahead.ebpf,
+  .datarow.ebpf,
+  .datahead.audit,
+  .datarow.audit,
+  .datahead.obs,
+  .datarow.obs,
+  .datahead.deps,
+  .datarow.deps,
+  .datahead.rules,
+  .datarow.rules {
     min-width: 640px;
   }
   .buildergrid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }

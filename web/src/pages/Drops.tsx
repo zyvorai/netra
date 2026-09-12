@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 export default function Drops() {
   const [data, setData] = useState<any>();
@@ -73,7 +72,7 @@ export default function Drops() {
         <p className="eyebrow">DROP DETECTIVE</p>
         <h3>Policy-aware findings</h3>
         <div className="list">
-          {findings.length === 0 && <p>No Netra policy-drop findings.</p>}
+          {findings.length === 0 && <p className="empty-state">No Netra policy-drop findings.</p>}
           {findings.map((f: any, i: number) => (
             <div className="agent wide" key={i}>
               <b>{f.code}</b>
@@ -92,11 +91,11 @@ export default function Drops() {
         <p className="eyebrow">STACK SIGNALS</p>
         <h3>Queue and interface findings</h3>
         <div className="list">
-          {anomalies.length === 0 && <p>No drop-pressure thresholds triggered.</p>}
+          {anomalies.length === 0 && <p className="empty-state">No drop-pressure thresholds triggered.</p>}
           {anomalies.map((a: any, i: number) => (
             <div className="agent wide" key={i}>
               <b>{a.kind}</b>
-              <span className={a.severity === 'critical' ? 'blocked' : ''}>{a.severity}</span>
+              <span className={`severity-badge ${a.severity}`}>{a.severity}</span>
               <span>{a.subject}</span>
               <small>{a.message}</small>
             </div>
@@ -104,29 +103,31 @@ export default function Drops() {
         </div>
       </section>
       {nodes.map((n: any) => (
-        <div className="span3" key={n.node}>
-          <TerminalFrame title={`kernel drops · ${n.node}`}>
-            <div className="flowhead obs">
-              <span>REASON</span>
-              <span>PROTOCOL</span>
-              <span>COUNT</span>
-              <span>LAST NS</span>
+        <section className="card span3" key={n.node}>
+          <p className="eyebrow">KERNEL DROPS</p>
+          <h3>{n.node}</h3>
+          {!(n.kernelDrops || []).length && (
+            <p className="empty-state">No kfree_skb tracepoint data. The hook may be unavailable on this kernel.</p>
+          )}
+          {(n.kernelDrops || []).length > 0 && (
+            <div className="datatable-scroll">
+              <div className="datahead">
+                <span>REASON</span>
+                <span>PROTOCOL</span>
+                <span>COUNT</span>
+                <span>LAST NS</span>
+              </div>
+              {(n.kernelDrops || []).map((d: any, i: number) => (
+                <div className="datarow" key={i}>
+                  <span>reason #{d.reason}</span>
+                  <span>{d.protocol || 'unknown'}</span>
+                  <span>{d.count}</span>
+                  <span>{d.lastSeenNs || 0}</span>
+                </div>
+              ))}
             </div>
-            {(n.kernelDrops || []).map((d: any, i: number) => (
-              <div className="flowrow obs" key={i}>
-                <span>reason #{d.reason}</span>
-                <span>{d.protocol || 'unknown'}</span>
-                <span>{d.count}</span>
-                <span>{d.lastSeenNs || 0}</span>
-              </div>
-            ))}
-            {!(n.kernelDrops || []).length && (
-              <div className="flowrow">
-                <span>No kfree_skb tracepoint data. The hook may be unavailable on this kernel.</span>
-              </div>
-            )}
-          </TerminalFrame>
-        </div>
+          )}
+        </section>
       ))}
       {nodes.map((n: any) => (
         <section className="card span3" key={`${n.node}-if`}>

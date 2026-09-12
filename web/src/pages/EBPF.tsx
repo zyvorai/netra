@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 type UnifiedRule = { id?: string; type: string; value: string; detail: string; extra: string; created?: string; raw?: any; del?: () => void };
 
@@ -288,49 +287,53 @@ export default function EBPF() {
   }
 
   return <div className="grid">
-    <div className="span3"><TerminalFrame title="all configured rules">
-      <div className="flowhead rules"><span>TYPE</span><span>VALUE</span><span>DETAIL</span><span>CREATED</span><span>ACTIONS</span></div>
-      {rules.length === 0 && <p style={{ padding: '9px 4px' }}>No firewall rules configured.</p>}
-      {rules.map((r, i) => (
-        <div key={r.id || (r.type + r.value + i)}>
-          <div className="flowrow rules">
-            <span>{r.type}</span><span>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
-            <span>
-              {r.id && <button className="btn-secondary" onClick={() => startEdit(r.raw)}>edit</button>}
-              {r.id && <button className="btn-diag" onClick={() => toggleHistory(r.id!)}>history</button>}
-              {r.del && <button className="danger" onClick={r.del}>delete</button>}
-            </span>
+    <section className="card span3">
+      <p className="eyebrow">FIREWALL RULES</p>
+      <h3>All configured rules</h3>
+      {rules.length === 0 && <p className="empty-state">No firewall rules configured.</p>}
+      {rules.length > 0 && <div className="datatable-scroll">
+        <div className="datahead rules"><span>TYPE</span><span>VALUE</span><span>DETAIL</span><span>CREATED</span><span>ACTIONS</span></div>
+        {rules.map((r, i) => (
+          <div key={r.id || (r.type + r.value + i)}>
+            <div className="datarow rules">
+              <span>{r.type}</span><span className="truncate" title={r.value}>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
+              <span>
+                {r.id && <button className="btn-secondary" onClick={() => startEdit(r.raw)}>edit</button>}
+                {r.id && <button className="btn-diag" onClick={() => toggleHistory(r.id!)}>history</button>}
+                {r.del && <button className="danger" onClick={r.del}>delete</button>}
+              </span>
+            </div>
+            {editingId === r.id && <div className="datarow rules">
+              <div style={{ gridColumn: '1 / -1' }} className="ruleform">
+                {(EDIT_FIELDS[r.type] || []).map(f => {
+                  if (f === 'direction') return <select key={f} value={editForm.direction} onChange={e => setEditForm({ ...editForm, direction: e.target.value })}><option>egress</option><option>ingress</option><option>both</option></select>;
+                  if (f === 'protocol') return <select key={f} value={editForm.protocol} onChange={e => setEditForm({ ...editForm, protocol: e.target.value })}><option>TCP</option><option>UDP</option><option>ANY</option></select>;
+                  return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} inputMode={(f === 'port' || f === 'pps' || f === 'uid') ? 'numeric' : undefined} />;
+                })}
+                <button className="primary" onClick={() => saveEdit(r.type)}>Save</button>
+                <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
+              </div>
+            </div>}
+            {historyId === r.id && <div className="datarow rules">
+              <div style={{ gridColumn: '1 / -1' }}>
+                {history.length === 0 && <p className="empty-state">No edit history for this rule.</p>}
+                {history.map((h: any) => (
+                  <div key={h.id} className="agent wide">
+                    <b>{new Date(h.at).toLocaleString()}</b><span>{h.actor}</span>
+                    <small><code>{JSON.stringify(h.before)}</code> → <code>{JSON.stringify(h.after)}</code></small>
+                    <button className="btn-warn" onClick={() => rollback(r.id!, h.id)}>undo this edit</button>
+                  </div>
+                ))}
+              </div>
+            </div>}
           </div>
-          {editingId === r.id && <div className="flowrow rules">
-            <div style={{ gridColumn: '1 / -1' }} className="ruleform">
-              {(EDIT_FIELDS[r.type] || []).map(f => {
-                if (f === 'direction') return <select key={f} value={editForm.direction} onChange={e => setEditForm({ ...editForm, direction: e.target.value })}><option>egress</option><option>ingress</option><option>both</option></select>;
-                if (f === 'protocol') return <select key={f} value={editForm.protocol} onChange={e => setEditForm({ ...editForm, protocol: e.target.value })}><option>TCP</option><option>UDP</option><option>ANY</option></select>;
-                return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} inputMode={(f === 'port' || f === 'pps' || f === 'uid') ? 'numeric' : undefined} />;
-              })}
-              <button className="primary" onClick={() => saveEdit(r.type)}>Save</button>
-              <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
-            </div>
-          </div>}
-          {historyId === r.id && <div className="flowrow rules">
-            <div style={{ gridColumn: '1 / -1' }}>
-              {history.length === 0 && <p>No edit history for this rule.</p>}
-              {history.map((h: any) => (
-                <div key={h.id} className="agent wide">
-                  <b>{new Date(h.at).toLocaleString()}</b><span>{h.actor}</span>
-                  <small>{JSON.stringify(h.before)} → {JSON.stringify(h.after)}</small>
-                  <button className="btn-warn" onClick={() => rollback(r.id!, h.id)}>undo this edit</button>
-                </div>
-              ))}
-            </div>
-          </div>}
-        </div>
-      ))}
-    </TerminalFrame></div>
+        ))}
+      </div>}
+    </section>
 
     <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'btn-success' : 'btn-secondary'} onClick={() => mode('observe')}>Observe</button><input value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : 'btn-warn'} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}{err && <p className="warning">{err}</p>}</section>
 
-    <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-warn" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
+    <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-secondary" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
 
     <section className="card"><p className="eyebrow">EXACT IP</p><h3>IPv4 + IPv6 egress deny</h3>{cap((cfg?.blockedIPv4?.length||0), caps?.limits?.exactIPv4)}<div className="toolbar"><input value={ip} onChange={e => setIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/deny', 'POST', { ip })}>Add</button></div><div className="chips">{[...(cfg?.blockedIPv4 || []), ...(cfg?.blockedIPv6 || [])].map((x: string) => <button key={x} onClick={() => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">CIDR</p><h3>Ingress / egress prefixes</h3>{cap((cfg?.blockedCidrs?.length||0), caps?.limits?.cidr)}<div className="ruleform"><input value={cidr} onChange={e => setCIDR(e.target.value)} placeholder="10.0.0.0/8 or 2001:db8::/32"/><select value={cidrDir} onChange={e => setCIDRDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/cidr', 'POST', { cidr, direction: cidrDir })}>Add CIDR</button></div><div className="chips">{(cfg?.blockedCidrs || []).map((x: any) => <button key={x.cidr + x.direction} onClick={() => call('/api/v1/ebpf/cidr/delete', 'POST', x)}>{x.direction} · {x.cidr} ×</button>)}</div></section>
@@ -381,7 +384,7 @@ export default function EBPF() {
         <input value={ddSelPod} onChange={e => setDdSelPod(e.target.value)} placeholder="pod (optional)" />
         <input value={ddSelLabel} onChange={e => setDdSelLabel(e.target.value)} placeholder="label key=value (optional)" />
         <input value={ddLease} onChange={e => setDdLease(e.target.value)} placeholder="lease, e.g. 5m (1m-60m)" title="1m–60m" />
-        <button className="btn-warn" onClick={() => planDefaultDeny(true)}>Plan activation</button>
+        <button className="btn-secondary" onClick={() => planDefaultDeny(true)}>Plan activation</button>
       </div>
       {ddPlan && (
         <div className={ddPlan.risk === 'critical' || ddPlan.risk === 'high' ? 'warning' : ''} style={{ marginTop: 10, padding: 12 }}>
@@ -391,7 +394,7 @@ export default function EBPF() {
         </div>
       )}
       <div className="chips">
-        {(cfg?.netPolDefaultDenies || []).length === 0 && <span>No workloads currently in default-deny posture.</span>}
+        {(cfg?.netPolDefaultDenies || []).length === 0 && <p className="empty-state">No workloads currently in default-deny posture.</p>}
         {(cfg?.netPolDefaultDenies || []).map((x: any, i: number) => (
           <button key={i} onClick={() => deactivateDefaultDeny(x.selector)}>
             {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} · until {x.enabledUntil ? new Date(x.enabledUntil).toLocaleTimeString() : '—'} ×
@@ -402,9 +405,41 @@ export default function EBPF() {
 
     <section className="card"><p className="eyebrow">CAPABILITIES</p><h3>Datapath capabilities</h3><p>{caps?.observability?.length || 0} observability classes and {caps?.enforcement?.length || 0} enforcement classes are exposed by this release.</p><div className="chips">{(caps?.hooks || []).map((x: string) => <span key={x}>{x}</span>)}</div></section>
 
-    <div className="span3"><TerminalFrame title="standalone eBPF events"><div className="eventtools"><span>Recent flow, DNS, socket and block events</span><select value={eventType} onChange={e => setEventType(e.target.value)}><option value="all">all</option><option value="flow">flow</option><option value="dns">dns</option><option value="connect">connect</option><option value="block">block</option></select></div><div className="flowhead obs"><span>TIME / NODE</span><span>TYPE</span><span>PROCESS</span><span>FLOW / DNS</span><span>ACTION</span></div>{events.map((e: any, i) => <div className="flowrow obs" key={i}><span>{new Date(e.observedAt).toLocaleTimeString()} · {e.node}</span><span>{e.direction} {e.hook} · {e.type}</span><span>{e.namespace || e.pod ? `${e.namespace}/${e.pod} · ${e.comm || 'process?'} pid=${e.pid || 0}` : (e.comm ? `${e.comm} pid=${e.pid} uid=${e.uid}` : '—')}</span><span>{e.dnsQuery || `${e.sourceIp || '—'}:${e.sourcePort || 0} → ${e.destinationIp || '—'}:${e.destinationPort || 0} ${e.protocol}`}</span><span className={e.action === 'blocked' ? 'blocked' : ''}>{e.action}{e.reason ? ` · ${e.reason}` : ''}</span></div>)}</TerminalFrame></div>
-    <div className="span3"><TerminalFrame title="exact flow counters"><div className="flowhead obs"><span>NODE / HOOK</span><span>DIR</span><span>FLOW</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>{stats.map((s: any, i) => <div className="flowrow obs" key={i}><span>{s.node} · {s.hook}{s.namespace ? ` · ${s.namespace}/${s.pod}` : ''}</span><span>{s.direction}</span><span>{s.sourceIp || '—'}:{s.sourcePort || 0} → {s.destinationIp}:{s.port}</span><span>{s.protocol}</span><span>{s.packets} / {s.bytes} / {s.blocked}</span></div>)}</TerminalFrame></div>
-    <div className="span3"><TerminalFrame title="workload network topology"><div className="flowhead obs"><span>WORKLOAD</span><span>NODE</span><span>DESTINATION</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>{topology.map((e:any, i:number) => <div className="flowrow obs" key={i}><span>{e.namespace}/{e.pod}{e.workloadName ? ` · ${e.workloadKind}/${e.workloadName}` : ''}</span><span>{e.node}</span><span>{e.destination}</span><span>{e.protocol}</span><span>{e.packets} / {e.bytes} / {e.blocked}</span></div>)}</TerminalFrame></div>
+    <section className="card span3">
+      <p className="eyebrow">STANDALONE EBPF EVENTS</p>
+      <div className="eventtools"><span>Recent flow, DNS, socket and block events</span><select value={eventType} onChange={e => setEventType(e.target.value)}><option value="all">all</option><option value="flow">flow</option><option value="dns">dns</option><option value="connect">connect</option><option value="block">block</option></select></div>
+      {events.length === 0 && <p className="empty-state">No events observed yet.</p>}
+      {events.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>TIME / NODE</span><span>TYPE</span><span>PROCESS</span><span>FLOW / DNS</span><span>ACTION</span></div>
+        {events.map((e: any, i) => {
+          const proc = e.namespace || e.pod ? `${e.namespace}/${e.pod} · ${e.comm || 'process?'} pid=${e.pid || 0}` : (e.comm ? `${e.comm} pid=${e.pid} uid=${e.uid}` : '—');
+          const flow = e.dnsQuery || `${e.sourceIp || '—'}:${e.sourcePort || 0} → ${e.destinationIp || '—'}:${e.destinationPort || 0} ${e.protocol}`;
+          return <div className="datarow obs" key={i}><span>{new Date(e.observedAt).toLocaleTimeString()} · {e.node}</span><span>{e.direction} {e.hook} · {e.type}</span><span className="truncate" title={proc}>{proc}</span><span className="truncate" title={flow}>{flow}</span><span className={e.action === 'blocked' ? 'blocked' : ''}>{e.action}{e.reason ? ` · ${e.reason}` : ''}</span></div>;
+        })}
+      </div>}
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">EXACT FLOW COUNTERS</p>
+      {stats.length === 0 && <p className="empty-state">No flow counters yet.</p>}
+      {stats.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>NODE / HOOK</span><span>DIR</span><span>FLOW</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>
+        {stats.map((s: any, i) => {
+          const who = `${s.node} · ${s.hook}${s.namespace ? ` · ${s.namespace}/${s.pod}` : ''}`;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{s.direction}</span><span>{s.sourceIp || '—'}:{s.sourcePort || 0} → {s.destinationIp}:{s.port}</span><span>{s.protocol}</span><span>{s.packets} / {s.bytes} / {s.blocked}</span></div>;
+        })}
+      </div>}
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">WORKLOAD TOPOLOGY</p>
+      {topology.length === 0 && <p className="empty-state">No workload network topology observed yet.</p>}
+      {topology.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>NODE</span><span>DESTINATION</span><span>PROTO</span><span>PACKETS / BYTES / BLOCKED</span></div>
+        {topology.map((e:any, i:number) => {
+          const who = `${e.namespace}/${e.pod}${e.workloadName ? ` · ${e.workloadKind}/${e.workloadName}` : ''}`;
+          return <div className="datarow obs" key={i}><span className="truncate" title={who}>{who}</span><span>{e.node}</span><span>{e.destination}</span><span>{e.protocol}</span><span>{e.packets} / {e.bytes} / {e.blocked}</span></div>;
+        })}
+      </div>}
+    </section>
     <section className="card span3"><p className="eyebrow">NODE COVERAGE</p><h3>Attached hooks</h3>{agents.map(a => <div className="agent wide" key={a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : a.mode}</span><span>{(a.hooks || []).join(', ') || '—'}</span><small>{(a.workloads || []).length} workload cgroups · {a.scopeMode || 'all'} scope ({a.selectedCgroups || 0} selected) · {a.cgroupPath || 'no cgroup'} · interfaces: {(a.interfaces || []).join(', ') || 'cgroup-only'} · XDP: {(a.xdpInterfaces || []).join(', ') || 'off'}</small></div>)}</section>
   </div>;
 }

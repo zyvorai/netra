@@ -91,44 +91,47 @@ export default function Insights() {
       <p className="eyebrow">RATE WINDOW</p><h3>Current deltas</h3>
       {rates?.warming && <p className="warning">Warming up — waiting for consecutive agent reports.</p>}
       <div className="list">{(rates?.metrics || []).slice(0, 12).map((m:any, i:number) => <div className="insightrow" key={`${m.source}-${m.metric}-${i}`}><b>{m.metric || m.name || 'rate'}</b><span>{m.source || m.workload || '—'}</span><small>{Number(m.rate ?? m.value ?? 0).toFixed(2)}/s</small></div>)}</div>
-      {!rates?.warming && !(rates?.metrics || []).length && <p>No rate samples in this window yet.</p>}
+      {!rates?.warming && !(rates?.metrics || []).length && <p className="empty-state">No rate samples in this window yet.</p>}
     </section>
 
     <section className="card">
       <p className="eyebrow">EXPOSURE</p><h3>Highest-ranked workloads</h3>
       {(exposure || []).slice(0, 8).map(x => <div className={`insightrow ${x.severity}`} key={x.source}><b>{x.score}/100 · {x.severity}</b><span>{x.source}</span><small>{(x.reasons || []).join(' · ')}</small></div>)}
-      {!exposure.length && <p>No exposure signals yet.</p>}
+      {!exposure.length && <p className="empty-state">No exposure signals yet.</p>}
     </section>
 
     <section className="card span2">
       <p className="eyebrow">RATE DRIFT</p><h3>Time-window anomalies</h3>
       {!rateDrift?.baselineCapturedAt && <p>Capture a rate baseline after warm-up to compare current traffic rates.</p>}
       {(rateDrift?.findings || []).slice(0, 30).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.metric}-${i}`}><b>{f.metric}</b><span>{f.source}</span><code>{f.ratio ? `${f.ratio.toFixed(1)}×` : 'new'}</code><small>{(f.currentRate ?? 0).toFixed(2)}/s current · {(f.baselineRate ?? 0).toFixed(2)}/s baseline</small></div>)}
-      {rateDrift?.baselineCapturedAt && !(rateDrift.findings || []).length && !rateDrift.window?.warming && <p>No rate changes crossed the deterministic thresholds.</p>}
+      {rateDrift?.baselineCapturedAt && !(rateDrift.findings || []).length && !rateDrift.window?.warming && <p className="empty-state">No rate changes crossed the deterministic thresholds.</p>}
     </section>
 
     <section className="card">
       <p className="eyebrow">BEHAVIOR DRIFT</p><h3>New inventory</h3>
       {(drift?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${f.value}-${i}`}><b>{f.kind}</b><span>{f.source}</span><code>{f.value}</code></div>)}
-      {drift?.baselineCapturedAt && !(drift.findings || []).length && <p>No new behavior crossed noise thresholds.</p>}
+      {drift?.baselineCapturedAt && !(drift.findings || []).length && <p className="empty-state">No new behavior crossed noise thresholds.</p>}
     </section>
 
     <section className="card span3">
       <p className="eyebrow">DEPENDENCY GRAPH</p><h3>Workload → workload/service/external</h3>
-      <div className="flowhead deps"><span>SOURCE</span><span>TARGET</span><span>NETWORK</span><span>PACKETS / BYTES</span></div>
-      {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="flowrow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}><span>{label(e.source)}</span><span>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span></div>)}
+      {(graph?.edges || []).length === 0 && <p className="empty-state">No dependency edges observed yet.</p>}
+      {(graph?.edges || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead deps"><span>SOURCE</span><span>TARGET</span><span>NETWORK</span><span>PACKETS / BYTES</span></div>
+        {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="datarow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}><span className="truncate" title={label(e.source)}>{label(e.source)}</span><span className="truncate" title={label(e.target)}>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span></div>)}
+      </div>}
     </section>
 
     <section className="card span3">
       <p className="eyebrow">REMEDIATION PROPOSALS</p><h3>Review-only containment and investigation drafts</h3>
       <p>Netra does not auto-execute these. A proposal is evidence plus a suggested next action, not authorization to block traffic.</p>
-      <div className="recommendations">{remediations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.title}</b><span>{r.severity} · {r.source}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.action, null, 2)}</pre></details>)}{!remediations.length && <p>No remediation draft currently meets the thresholds.</p>}</div>
+      <div className="recommendations">{remediations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.title}</b><span>{r.severity} · {r.source}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.action, null, 2)}</pre></details>)}{!remediations.length && <p className="empty-state">No remediation draft currently meets the thresholds.</p>}</div>
     </section>
 
     <section className="card span3">
       <p className="eyebrow">POLICY RECOMMENDATIONS</p><h3>Observed-traffic CiliumNetworkPolicy drafts</h3>
       {!ciliumEnabled && <p className="warning">Cilium integration is disabled. Drafts remain export/review only.</p>}
-      <div className="recommendations">{recommendations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.namespace}/{r.workloadName}</b><span>{r.confidence} · {r.kind}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.manifest, null, 2)}</pre></details>)}</div>
+      <div className="recommendations">{recommendations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.namespace}/{r.workloadName}</b><span>{r.confidence} · {r.kind}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.manifest, null, 2)}</pre></details>)}{!recommendations.length && <p className="empty-state">No policy recommendation drafts currently meet the thresholds.</p>}</div>
     </section>
   </div>;
 }

@@ -190,7 +190,7 @@ export default function Flows() {
         <p className="eyebrow">TOP DESTINATIONS</p>
         <h3>From summary window</h3>
         <div className="list">
-          {(summary?.topDestinations || []).length === 0 && <p>No destination aggregate yet — reconnect or refresh summary.</p>}
+          {(summary?.topDestinations || []).length === 0 && <p className="empty-state">No destination aggregate yet — reconnect or refresh summary.</p>}
           {(summary?.topDestinations || []).map((x: any) => (
             <button key={x.name} type="button" onClick={() => setFilter({ ...filter, destination: x.name })}>
               <span>
@@ -219,7 +219,7 @@ export default function Flows() {
         <h3>Recent Hubble denials</h3>
         {dropError && <p className="warning">{dropError}</p>}
         {drops.length === 0 && (
-          <p>Use “Explain recent drops” to fetch recent denied flows for the current namespace/pod scope.</p>
+          <p className="empty-state">Use “Explain recent drops” to fetch recent denied flows for the current namespace/pod scope.</p>
         )}
         {drops.map((d, i) => (
           <div className="dropcard" key={i}>

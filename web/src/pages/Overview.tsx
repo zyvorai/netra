@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import TerminalFrame from '../components/TerminalFrame';
 
 export default function Overview() {
   const [data, setData] = useState<any>();
@@ -39,12 +38,15 @@ export default function Overview() {
   const hs = health?.summary || {};
   const ls = l7?.summary || {};
   const ins = insights || {};
+  const topDestinations = obs?.topDestinations || [];
+  const topDns = obs?.topDns || [];
+  const topProcesses = obs?.topProcesses || [];
 
   return (
     <div className="grid">
       <section className="card span2">
         <p className="eyebrow">NETRA DATAPATH</p>
-        <h2>Independent by default.</h2>
+        <h3>Independent by default.</h3>
         <p>
           Root-cgroup packet hooks and socket hooks give workload visibility without a CNI dependency. TCX and XDP can be
           layered on selected interfaces. Hubble remains optional.
@@ -77,21 +79,31 @@ export default function Overview() {
         )}
       </section>
 
-      <TerminalFrame title="standalone / capabilities">
-        <pre>
-          {err ||
-            JSON.stringify(
-              {
-                datapath: data?.datapath,
-                ciliumRequired: data?.ciliumRequired,
-                hubble: data?.hubble,
-                mode: fp?.mode,
-              },
-              null,
-              2,
-            )}
-        </pre>
-      </TerminalFrame>
+      <section className="card span2">
+        <p className="eyebrow">STANDALONE / CAPABILITIES</p>
+        <h3>Datapath capabilities</h3>
+        {err && <p className="warning">{err}</p>}
+        {!err && (
+          <div className="metrics">
+            <div>
+              <b>{data?.datapath || '—'}</b>
+              <span>datapath</span>
+            </div>
+            <div>
+              <b>{data?.ciliumRequired ? 'Required' : 'Optional'}</b>
+              <span>Cilium</span>
+            </div>
+            <div>
+              <b>{data?.hubble ? 'Enabled' : 'Disabled'}</b>
+              <span>Hubble</span>
+            </div>
+            <div>
+              <b>{fp?.mode || '—'}</b>
+              <span>fast-path mode</span>
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="card span3">
         <p className="eyebrow">NETWORK HEALTH</p>
@@ -114,9 +126,10 @@ export default function Overview() {
             <span>DNS failures</span>
           </div>
         </div>
+        {(hs.anomalies || []).length === 0 && <p className="empty-state">No recent health anomalies.</p>}
         {(hs.anomalies || []).slice(0, 3).map((a: any) => (
           <p key={a.kind + a.subject}>
-            <b>{a.severity}</b> · {a.message || a.kind}
+            <span className={`severity-badge ${a.severity}`}>{a.severity}</span> {a.message || a.kind}
           </p>
         ))}
       </section>
@@ -237,6 +250,7 @@ export default function Overview() {
             <span>UDP samples</span>
           </div>
         </div>
+        {(obs?.blockReasons || []).length === 0 && <p className="empty-state">No recent block reasons.</p>}
         {(obs?.blockReasons || []).slice(0, 4).map((x: any) => (
           <p key={x.name}>
             <b>{x.name}</b> · {x.count}
@@ -244,19 +258,22 @@ export default function Overview() {
         ))}
       </section>
 
-      <TerminalFrame title="top destinations / DNS">
-        <pre>
-          {JSON.stringify(
-            {
-              destinations: obs?.topDestinations ?? [],
-              dns: obs?.topDns ?? [],
-              processes: obs?.topProcesses ?? [],
-            },
-            null,
-            2,
-          )}
-        </pre>
-      </TerminalFrame>
+      <section className="card span2">
+        <p className="eyebrow">TOP DESTINATIONS / DNS</p>
+        <h3>Kernel-observed identities</h3>
+        {!topDestinations.length && !topDns.length && !topProcesses.length && (
+          <p className="empty-state">No destination, DNS, or process breakdown yet.</p>
+        )}
+        {topDestinations.length > 0 && (
+          <div className="chips">{topDestinations.slice(0, 12).map((x: any) => <span key={'dest-' + x.name}>{x.name} · {x.count}</span>)}</div>
+        )}
+        {topDns.length > 0 && (
+          <div className="chips">{topDns.slice(0, 12).map((x: any) => <span key={'dns-' + x.name}>DNS {x.name} · {x.count}</span>)}</div>
+        )}
+        {topProcesses.length > 0 && (
+          <div className="chips">{topProcesses.slice(0, 12).map((x: any) => <span key={'proc-' + x.name}>{x.name} · {x.count}</span>)}</div>
+        )}
+      </section>
 
       <section className="card">
         <h3>Cilium is an integration</h3>
