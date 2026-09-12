@@ -25,6 +25,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Important visibility boundaries](#important-visibility-boundaries)
 - [Optional Cilium / Hubble integration](#optional-cilium--hubble-integration)
 - [HTTPS default](#https-default)
+- [Signing in](#signing-in)
 - [Architecture](#architecture)
 - [Repository](#repository)
 - [Prerequisites](#prerequisites)
@@ -37,6 +38,8 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 ## Dashboard gallery
 
 Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockdown appear above and under Cilium integration; the rest of the console:
+
+![Sign in](docs/ux/07-login.png)
 
 ![Hubble live flows](docs/ux/01-flows.png)
 
@@ -162,6 +165,14 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 ## HTTPS default
 
 `netrad` listens on `:30870` by default. Helm enables in-pod HTTPS by default and generates a self-signed P-256 certificate in an init container. The agent chart explicitly opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` only when TLS is terminated by a trusted proxy/ingress. Plain manifests intentionally remain HTTP unless you provide `NETRA_TLS_CERT` and `NETRA_TLS_KEY`.
+
+## Signing in
+
+The dashboard sits behind a login screen (`admin` / `Admin@321` by default) —
+see [docs/dashboard-login.md](docs/dashboard-login.md) for the full guide,
+including what the login maps to server-side and how to rotate the
+credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev)
+mark; Netra is Zyvor's open-source eBPF observability product.
 
 ## Architecture
 

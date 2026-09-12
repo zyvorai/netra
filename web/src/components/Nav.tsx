@@ -34,17 +34,19 @@ export default function Nav({
   setPage,
   theme,
   onToggleTheme,
+  onLogout,
 }: {
   page: Page;
   setPage: (p: Page) => void;
   theme: Theme;
   onToggleTheme: () => void;
+  onLogout: () => void;
 }) {
   return (
     <nav className="nav" aria-label="Global">
       <div className="nav-inner">
         <button type="button" className="brand" onClick={() => setPage('overview')} aria-label="Netra home">
-          <span className="dot" aria-hidden />
+          <img src="/zyvor-mark.svg" alt="" className="brand-mark" aria-hidden />
           Netra
         </button>
         <div className="navlinks">
@@ -61,6 +63,9 @@ export default function Nav({
           ))}
         </div>
         <div className="nav-actions">
+          <button type="button" className="buttonlike" onClick={onLogout}>
+            Log out
+          </button>
           <button
             type="button"
             className="theme-toggle"
