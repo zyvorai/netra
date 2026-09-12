@@ -32,7 +32,7 @@ can reach the controller's port can already load the unauthenticated static
 UI shell (only the `/api/v1/*` calls require the bearer token) — it only
 removes the friction of copy-pasting the token into the UI by hand.
 
-Logging out (the **Log out** button in the top nav) clears the stored token
+Logging out (the exit-arrow icon button next to the theme toggle in the top nav) clears the stored token
 and returns you to the login screen. If the controller ever rejects a request
 with `401` (e.g. the API key was rotated on the controller since you signed
 in), the dashboard automatically clears its stale token and returns you to

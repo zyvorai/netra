@@ -63,8 +63,11 @@ export default function Nav({
           ))}
         </div>
         <div className="nav-actions">
-          <button type="button" className="buttonlike" onClick={onLogout}>
-            Log out
+          <button type="button" className="theme-toggle" onClick={onLogout} aria-label="Log out" title="Log out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+              <path d="M15 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 12h11m0 0-3.5-3.5M21 12l-3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
           <button
             type="button"
