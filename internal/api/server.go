@@ -115,6 +115,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/ebpf/sni/delete", s.auth(http.HandlerFunc(s.ebpfSNIDelete)))
 	mux.Handle("PUT /api/v1/ebpf/rate", s.auth(http.HandlerFunc(s.ebpfRateSet)))
 	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
+	mux.Handle("PUT /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldSet)))
+	mux.Handle("PUT /api/v1/ebpf/netpol/config", s.auth(http.HandlerFunc(s.ebpfNetPolConfigSet)))
 	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
@@ -1158,6 +1160,61 @@ func (s *Server) ebpfRateDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, cfg)
 }
+func (s *Server) ebpfShieldSet(w http.ResponseWriter, r *http.Request) {
+	var x models.ShieldConfig
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	switch x.Mode {
+	case "off", "audit", "enforce":
+	default:
+		errorJSON(w, 400, "mode must be off, audit, or enforce")
+		return
+	}
+	for _, ip := range x.ProtectedIPv4 {
+		a, err := netip.ParseAddr(strings.TrimSpace(ip))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "protectedIpv4 entries must be exact IPv4 addresses: "+ip)
+			return
+		}
+	}
+	for _, pps := range []uint32{x.SynPPS, x.UDPPPS, x.ICMPPPS, x.OtherPPS} {
+		if pps > 10000000 {
+			errorJSON(w, 400, "pps thresholds must be at most 10000000 (0 disables that class)")
+			return
+		}
+	}
+	if x.BurstSeconds > 60 {
+		errorJSON(w, 400, "burstSeconds must be at most 60")
+		return
+	}
+	cfg, err := s.store.SetShield(x, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist shield config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfNetPolConfigSet(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	cfg, err := s.store.SetNetPolEnabled(x.Enabled, actor(r))
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
 func (s *Server) ebpfSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, observability.Summarize(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), 10))
 }
@@ -1230,8 +1287,24 @@ func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, l7.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
+// ebpfRuleLimits mirrors the hardcoded BPF map max_entries values in
+// bpf/netra_tc.c — these are compile-time constants, not runtime-tunable,
+// so raising any of them requires a source change and program reload.
+var ebpfRuleLimits = map[string]int{
+	"exactIPv4": 4096,  // blocked_v4
+	"exactIPv6": 4096,  // blocked_v6
+	"cidr":      8192,  // blocked_cidr_v4 + blocked_cidr_v6 (each)
+	"ports":     4096,  // blocked_ports
+	"uids":      4096,  // blocked_uids
+	"dns":       4096,  // blocked_dns
+	"sni":       4096,  // blocked_sni
+	"processes": 4096,  // blocked_comms
+	"rate":      4096,  // rate_v4
+	"netpol":    65536, // netpol_deny4
+}
+
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

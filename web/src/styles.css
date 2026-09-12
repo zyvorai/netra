@@ -690,6 +690,10 @@ code {
 .flowrow.deps {
   grid-template-columns: 1.2fr 1.2fr 120px 180px;
 }
+.flowhead.rules,
+.flowrow.rules {
+  grid-template-columns: 90px 1fr 110px 140px 70px;
+}
 
 .chips {
   display: flex;
@@ -990,6 +994,12 @@ code {
   .flowrow.deps { grid-template-columns: 1fr 1fr 90px; }
   .flowhead.deps span:last-child,
   .flowrow.deps span:last-child { display: none; }
+  .flowhead.rules,
+  .flowrow.rules { grid-template-columns: 70px 1fr 60px; }
+  .flowhead.rules span:nth-of-type(3),
+  .flowrow.rules span:nth-of-type(3),
+  .flowhead.rules span:nth-of-type(4),
+  .flowrow.rules span:nth-of-type(4) { display: none; }
   .insightrow { grid-template-columns: 90px 1fr; }
   .insightrow code { grid-column: 1 / -1; }
   .recommendation summary { display: block; }

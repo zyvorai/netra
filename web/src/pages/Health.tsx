@@ -7,8 +7,14 @@ const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
 
 export default function Health() {
   const [data, setData] = useState<any>();
+  const [summary, setSummary] = useState<any>();
+  const [agents, setAgents] = useState<any[]>([]);
   const [err, setErr] = useState('');
-  const load = () => api<any>('/api/v1/ebpf/health?limit=50').then(x => { setData(x); setErr(''); }).catch(e => setErr(String(e)));
+  const load = () => Promise.all([
+    api<any>('/api/v1/ebpf/health?limit=50'),
+    api<any>('/api/v1/ebpf/summary'),
+    api<any>('/api/v1/agents'),
+  ]).then(([x, s, a]) => { setData(x); setSummary(s); setAgents(a.items || []); setErr(''); }).catch(e => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
   const s = data?.summary || {};
   const anomalies = data?.summary?.anomalies || [];
@@ -79,5 +85,13 @@ export default function Health() {
         <span>{r.syn}</span><span>{r.synAck}</span><span>{r.fin}</span><span>{r.rst} / {r.packets}</span>
       </div>)}
     </TerminalFrame></div>
+
+    <section className="card"><p className="eyebrow">KERNEL PULSE</p><h3>What Netra sees</h3><div className="metrics"><div><b>{summary?.packets ?? 0}</b><span>packets</span></div><div><b>{summary?.blocked ?? 0}</b><span>blocked</span></div><div><b>{summary?.dnsQueries ?? 0}</b><span>DNS</span></div><div><b>{summary?.socketEvents ?? 0}</b><span>socket events</span></div></div><pre className="mini">{JSON.stringify({ hooks: summary?.hooks, reasons: summary?.blockReasons, topDNS: summary?.topDns, topProcesses: summary?.topProcesses, topWorkloads: summary?.topWorkloads, blockedWorkloads: summary?.topBlockedWorkloads }, null, 2)}</pre></section>
+    <section className="card span2"><p className="eyebrow">BPF PROGRAM HEALTH</p><h3>Attach state and run stats</h3><p>Per-node program attach flags plus kernel run counts when BPF stats are enabled. Use this when a hook is missing after upgrade or verifier load failures.</p>{agents.map(a => <div className="agent wide" key={'prog-'+a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : `${(a.programs || []).filter((p:any)=>p.attached).length}/${(a.programs || []).length} attached`}</span><small>{(a.programs || []).length === 0 ? 'no program report yet' : (a.programs || []).map((p:any) => `${p.name}${p.attached ? '' : ' (detached)'}: runs=${p.runCount || 0}`).join(' · ')}</small></div>)}</section>
+    <section className="card span3"><p className="eyebrow">NETWORK HISTOGRAMS</p><h3>Retransmit / RTT / connect buckets</h3><p>Agent-side histograms from existing sockops samples, plus listen overflow and softirq NET_RX counters. Softirq entry→exit latency remains deferred.</p>{agents.map(a => {
+      const h = a.histograms;
+      if (!h) return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>—</span></div>;
+      return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>retrans n={h.tcpRetransmissions?.count || 0} · srtt n={h.tcpSrttUs?.count || 0} · connect n={h.tcpConnectUs?.count || 0}</span><small>listen overflows={h.host?.listenOverflows || 0} · listen drops={h.host?.listenDrops || 0} · softirq NET_RX={h.host?.softirqNetRx || 0}</small></div>;
+    })}</section>
   </div>;
 }

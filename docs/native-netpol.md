@@ -4,7 +4,9 @@ Netra v0.19 adds an **optional**, fail-open-by-default deny dataplane shaped lik
 
 ## Enable
 
-Set in fast-path config (controller → agents):
+The enforcement toggle is writable via `PUT /api/v1/ebpf/netpol/config` (`{"enabled": true}`), `netractl ebpf netpol enable|disable`, the `netra_ebpf_netpol_config_set` MCP tool, or the Firewall dashboard page's NETPOL card.
+
+`netPolDenies` itself (the actual per-cgroup peer-deny entries below) has no write path yet on any surface — only the controller and agent read/apply it today. Authoring these entries directly is a planned follow-up; for now they can only be observed once populated by another mechanism, e.g. directly editing the persisted state file:
 
 ```json
 {

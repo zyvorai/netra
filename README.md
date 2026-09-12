@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.24.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.25.0-informational.svg)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
@@ -18,6 +18,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 
 - [Dashboard gallery](#dashboard-gallery)
 - [Standalone eBPF capabilities](#standalone-ebpf-capabilities)
+- [Firewall dashboard page](docs/firewall.md)
 - [TCP Path Diagnostics](#tcp-path-diagnostics)
 - [Drop Diagnostics](#drop-diagnostics)
 - [Behavior and Rate Insights](#behavior-and-rate-insights)
@@ -346,7 +347,7 @@ netractl ebpf mode enforce 15m
 netractl ebpf mode observe
 ```
 
-The same controls are available in the **eBPF Network** dashboard, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
+The same controls are available in the **Firewall** dashboard page, including workload scope preview, discovered workloads, per-node selected-cgroup coverage and workload topology.
 
 Behavior Insights CLI:
 

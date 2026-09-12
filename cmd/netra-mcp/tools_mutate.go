@@ -152,6 +152,27 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			pathParams:  []string{"ip"},
 		},
 		{
+			name: "netra_ebpf_shield_set", method: "PUT", path: "/api/v1/ebpf/shield",
+			description: "Configure the XDP DDoS shield: a per-source-class (SYN/UDP/ICMP/other) PPS token-bucket rate limiter, independent of the eBPF fast-path deny-list and its own mode. \"enforce\" actively drops traffic exceeding thresholds for protected IPs; use \"audit\" first to see what would be dropped. Returns the full updated fast-path config.",
+			schema: objSchema(map[string]any{
+				"mode":          enumProp("Shield mode.", "off", "audit", "enforce"),
+				"protectAll":    map[string]any{"type": "boolean", "description": "Apply thresholds to all traffic instead of just protectedIpv4 (also the only way to cover IPv6 in this version)."},
+				"protectedIpv4": map[string]any{"type": "array", "description": "Exact IPv4 addresses to protect (ignored if protectAll is true).", "items": map[string]any{"type": "string"}},
+				"synPps":        intProp("SYN packets-per-second threshold, 0-10000000. 0 disables that class."),
+				"udpPps":        intProp("UDP packets-per-second threshold, 0-10000000. 0 disables that class."),
+				"icmpPps":       intProp("ICMP packets-per-second threshold, 0-10000000. 0 disables that class."),
+				"otherPps":      intProp("Other-protocol packets-per-second threshold, 0-10000000. 0 disables that class."),
+				"burstSeconds":  intProp("Token-bucket burst window in seconds, 0-60."),
+			}, "mode"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_netpol_config_set", method: "PUT", path: "/api/v1/ebpf/netpol/config",
+			description: "Enable or disable the per-workload NetPol-emulation deny engine (independent of the eBPF fast-path deny-list). Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"enabled": map[string]any{"type": "boolean", "description": "Whether NetPol-emulation enforcement is active."}}, "enabled"),
+			bodyFields:  true,
+		},
+		{
 			name: "netra_insights_baseline_capture", method: "POST", path: "/api/v1/insights/baseline",
 			description: "Capture a new behavior baseline from current agent reports, replacing any existing one. netra_insights_drift compares future traffic against this snapshot.",
 			schema:      emptySchema(),

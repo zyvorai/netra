@@ -516,6 +516,54 @@ func (s *Store) SetRateLimit(rule models.EBPFRateLimit, actor string) (models.EB
 	return cloneConfig(s.config), nil
 }
 
+// SetShield replaces the DDoS shield config wholesale. Generation is bumped
+// last, after ProtectedIPv4/thresholds are already in place, so an agent
+// that observes the new generation always sees a fully-populated config —
+// never a window where mode has flipped to enforce but the protected-IP set
+// is still the old (possibly empty) one. See docs/tcx-and-shield.md.
+func (s *Store) SetShield(cfg models.ShieldConfig, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	prevGen := uint32(0)
+	if s.config.Shield != nil {
+		prevGen = s.config.Shield.Generation
+	}
+	protected := append([]string(nil), cfg.ProtectedIPv4...)
+	sort.Strings(protected)
+	next := cfg
+	next.ProtectedIPv4 = protected
+	next.Generation = prevGen + 1
+	s.config.Shield = &next
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.shield.set", Target: cfg.Mode, Details: map[string]any{"protectedCount": len(protected), "generation": next.Generation}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) SetNetPolEnabled(enabled bool, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.NetPolEnabled = enabled
+	s.config.Revision++
+	action := "ebpf.netpol.disable"
+	if enabled {
+		action = "ebpf.netpol.enable"
+	}
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: "netpol"})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) Report(r models.AgentReport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -816,6 +864,12 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.RateLimits = append([]models.EBPFRateLimit(nil), c.RateLimits...)
 	c.WorkloadScopes = cloneScopes(c.WorkloadScopes)
 	c.Workloads = cloneWorkloads(c.Workloads)
+	c.NetPolDenies = append([]models.NetPolPeerDeny(nil), c.NetPolDenies...)
+	if c.Shield != nil {
+		sh := *c.Shield
+		sh.ProtectedIPv4 = append([]string(nil), c.Shield.ProtectedIPv4...)
+		c.Shield = &sh
+	}
 	return c
 }
 

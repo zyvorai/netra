@@ -305,6 +305,54 @@ func TestStandaloneEBPFRules(t *testing.T) {
 	}
 }
 
+func TestSetShieldBumpsGenerationLastAndDeepCopies(t *testing.T) {
+	s := New()
+	cfg, err := s.SetShield(models.ShieldConfig{Mode: "audit", ProtectedIPv4: []string{"203.0.113.9", "203.0.113.1"}, SynPPS: 5000}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Shield == nil || cfg.Shield.Mode != "audit" || cfg.Shield.Generation != 1 {
+		t.Fatalf("cfg.Shield=%#v", cfg.Shield)
+	}
+	if len(cfg.Shield.ProtectedIPv4) != 2 || cfg.Shield.ProtectedIPv4[0] != "203.0.113.1" {
+		t.Fatalf("protected IPs not sorted: %#v", cfg.Shield.ProtectedIPv4)
+	}
+	// A second SetShield call must bump the generation further, confirming
+	// it's read from the prior stored config, not reset to a fixed value.
+	cfg2, err := s.SetShield(models.ShieldConfig{Mode: "enforce"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.Shield.Generation != 2 {
+		t.Fatalf("expected generation 2, got %d", cfg2.Shield.Generation)
+	}
+	// Config() must be a deep copy — mutating the returned Shield pointer
+	// or its slice must not corrupt the stored state.
+	cfg2.Shield.Mode = "mutated"
+	cfg3 := s.Config()
+	if cfg3.Shield.Mode == "mutated" {
+		t.Fatal("Config() leaked the Shield pointer")
+	}
+}
+
+func TestSetNetPolEnabled(t *testing.T) {
+	s := New()
+	cfg, err := s.SetNetPolEnabled(true, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.NetPolEnabled {
+		t.Fatal("expected NetPolEnabled=true")
+	}
+	cfg, err = s.SetNetPolEnabled(false, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NetPolEnabled {
+		t.Fatal("expected NetPolEnabled=false")
+	}
+}
+
 func TestWorkloadScopePersists(t *testing.T) {
 	path := t.TempDir() + "/state.json"
 	s, err := Open(path)

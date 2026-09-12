@@ -23,7 +23,7 @@ const items: [Page, string][] = [
   ['drops', 'Drops'],
   ['l7', 'L7'],
   ['insights', 'Insights'],
-  ['ebpf', 'eBPF'],
+  ['ebpf', 'Firewall'],
   ['flows', 'Hubble'],
   ['policies', 'Policies'],
   ['audit', 'Audit'],

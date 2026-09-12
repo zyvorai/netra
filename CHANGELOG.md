@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.25.0 — 2026-09-12
+
+- Renamed the dashboard's **eBPF** nav page to **Firewall** and added a unified "all configured rules" table at the top of it, flattening every rule type (exact IP, CIDR, port, UID, process, DNS, SNI, rate limit, plus DDoS shield and NetPol state) into one view with per-row delete — previously each rule type only had its own isolated card with no cross-type view.
+- Added the missing TLS SNI deny card to the dashboard (`AddSNI`/`DelSNI`, the API routes, `netractl ebpf sni`, and the MCP tools already existed; only the UI card was missing).
+- Wired up write paths for two previously dashboard-invisible, CLI-invisible, MCP-invisible-but-fully-enforced features: the XDP DDoS shield (`PUT /api/v1/ebpf/shield`, `netractl ebpf shield set`, `netra_ebpf_shield_set`) and the NetPol-emulation enable/disable toggle (`PUT /api/v1/ebpf/netpol/config`, `netractl ebpf netpol enable|disable`, `netra_ebpf_netpol_config_set`). Both were already fully modeled (`EBPFFastPathConfig.Shield`/`NetPolEnabled`) and enforced in the kernel datapath, but had no way to ever be configured outside hand-editing the persisted state file.
+- Added a `limits` block to `GET /api/v1/ebpf/capabilities` reporting the real hardcoded BPF map capacities (4096 per rule type for most, 8192 for CIDR, 65536 for NetPol), and live `count / limit` indicators on each rule card — these limits were previously invisible operational information.
+- Moved Kernel Pulse, BPF Program Health, and Network Histograms from the eBPF/Firewall page to the Health page, since they are node/program diagnostics rather than firewall rule configuration.
+- Fixed a latent deep-copy gap in `Store.cloneConfig`: `Shield` and `NetPolDenies` were never cloned, so a caller mutating a `Config()` snapshot could have corrupted the stored state. Harmless until this release since neither field had a setter before now.
+
 ## 0.24.0 — 2026-09-12
 
 - **Fixed a regression**: cgroup-side TLS SNI / cleartext HTTP / DNS query-name parsing (`docs/l7-metadata.md`, shipped in v0.10) was silently disconnected by an earlier "slim TC/L7 path" change that added conntrack and NetworkPolicy-shaped deny logic to the same program and pushed it over the BPF verifier's stack budget — the parser functions were still defined but never called, so `/api/v1/ebpf/l7`, the L7 dashboard, and Drop Detective's `dns-deny`/`sni-deny` findings were all silently starved of data. Restored via two new dedicated `netra_l7_cgroup_egress`/`netra_l7_cgroup_ingress` programs with their own independent verifier budget, isolated from the conntrack/policy program. Gated by `NETRA_L7=auto|off|required` (default `auto`, attach-with-fallback like `NETRA_TCX`) since real verifier acceptance for the restored programs' scan loops can vary by kernel version. See `docs/l7-metadata.md`'s new "Implementation note" section.

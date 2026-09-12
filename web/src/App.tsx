@@ -54,9 +54,9 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Baselines, drift, and review-only remediation proposals derived from exact eBPF counters.',
   },
   ebpf: {
-    eyebrow: 'Standalone datapath',
+    eyebrow: 'Firewall',
     title: 'Observe everywhere. Enforce when leased.',
-    lede: 'Program health, network histograms, and emergency controls — Netra owns only /sys/fs/bpf/netra.',
+    lede: 'Every configured rule in one place — deny lists, DDoS shield, and NetPol — plus emergency controls. Netra owns only /sys/fs/bpf/netra.',
   },
   flows: {
     eyebrow: 'Hubble',

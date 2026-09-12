@@ -80,6 +80,8 @@ func usage() {
   ebpf process add COMM | process del COMM
   ebpf sni add NAME | sni del NAME
   ebpf rate set IPv4 PPS | rate del IPv4
+  ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
+  ebpf netpol enable | disable
   ebpf workloads [node]
   ebpf scope show | scope all
   ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
@@ -344,7 +346,86 @@ func ebpf() error {
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":
-		return request("GET", "/api/v1/ebpf/shield", nil)
+		if len(os.Args) < 4 {
+			return request("GET", "/api/v1/ebpf/shield", nil)
+		}
+		if os.Args[3] != "set" {
+			return fmt.Errorf("shield [set --mode off|audit|enforce] [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]")
+		}
+		cfg := map[string]any{}
+		var ips []string
+		for i := 4; i < len(os.Args); i++ {
+			flag := os.Args[i]
+			if flag == "--protect-all" {
+				cfg["protectAll"] = true
+				continue
+			}
+			if i+1 >= len(os.Args) {
+				return fmt.Errorf("%s requires a value", flag)
+			}
+			value := os.Args[i+1]
+			i++
+			switch flag {
+			case "--mode":
+				cfg["mode"] = value
+			case "--ip":
+				ips = append(ips, value)
+			case "--syn-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --syn-pps required")
+				}
+				cfg["synPps"] = uint32(n)
+			case "--udp-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --udp-pps required")
+				}
+				cfg["udpPps"] = uint32(n)
+			case "--icmp-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --icmp-pps required")
+				}
+				cfg["icmpPps"] = uint32(n)
+			case "--other-pps":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --other-pps required")
+				}
+				cfg["otherPps"] = uint32(n)
+			case "--burst-seconds":
+				n, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return fmt.Errorf("valid --burst-seconds required")
+				}
+				cfg["burstSeconds"] = uint32(n)
+			default:
+				return fmt.Errorf("unknown shield flag %s", flag)
+			}
+		}
+		if _, ok := cfg["mode"]; !ok {
+			return fmt.Errorf("--mode off|audit|enforce is required")
+		}
+		if len(ips) > 0 {
+			cfg["protectedIpv4"] = ips
+		}
+		b, _ := json.Marshal(cfg)
+		return request("PUT", "/api/v1/ebpf/shield", b)
+	case "netpol":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("netpol enable|disable")
+		}
+		switch os.Args[3] {
+		case "enable":
+			b, _ := json.Marshal(map[string]bool{"enabled": true})
+			return request("PUT", "/api/v1/ebpf/netpol/config", b)
+		case "disable":
+			b, _ := json.Marshal(map[string]bool{"enabled": false})
+			return request("PUT", "/api/v1/ebpf/netpol/config", b)
+		default:
+			return fmt.Errorf("netpol enable|disable")
+		}
 	case "interfaces":
 		return request("GET", "/api/v1/ebpf/interfaces", nil)
 	case "diagnose":
