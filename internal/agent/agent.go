@@ -169,7 +169,33 @@ func (a *Agent) loadAndAttach() error {
 			defer m.Close()
 		}
 	}
+	l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
+	l7Progs := []string{"netra_l7_cgroup_ingress", "netra_l7_cgroup_egress"}
+	l7Stripped := false
+	if l7Mode == "off" {
+		for _, p := range l7Progs {
+			delete(spec.Programs, p)
+		}
+		l7Stripped = true
+	}
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	if err != nil && l7Mode == "auto" && mentionsAny(err.Error(), l7Progs) {
+		// A kernel verifier rejection of one program fails the WHOLE
+		// collection load, unlike an attach-time failure (handled below via
+		// NETRA_L7's documented attach-with-fallback) which only affects that
+		// one hook — the L7 cgroup programs' un-unrolled SNI/HTTP scan loops
+		// are the ones known to vary in verifier acceptance across kernel
+		// versions (see docs/l7-metadata.md). Drop them from the spec and
+		// retry so a rejection degrades to "no L7 observability" as intended,
+		// rather than crash-looping the whole agent, unless the operator has
+		// explicitly opted into NETRA_L7=required.
+		a.log.Warn("L7/DNS cgroup programs failed verifier load; retrying without L7 observability", "error", err)
+		for _, p := range l7Progs {
+			delete(spec.Programs, p)
+		}
+		l7Stripped = true
+		coll, err = ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	}
 	if err != nil {
 		return fmt.Errorf("load BPF collection: %w", err)
 	}
@@ -219,8 +245,7 @@ func (a *Agent) loadAndAttach() error {
 		// scan loops can vary across kernel versions, so a rejection degrades
 		// to "no L7 observability" rather than failing agent startup, unless
 		// the operator has explicitly opted into NETRA_L7=required.
-		l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
-		if l7Mode != "off" {
+		if l7Mode != "off" && !l7Stripped {
 			for _, h := range []struct {
 				name   string
 				attach ebpf.AttachType
@@ -245,8 +270,10 @@ func (a *Agent) loadAndAttach() error {
 				a.hooks = append(a.hooks, h.name)
 				a.markAttached(h.prog)
 			}
-		} else {
+		} else if l7Mode == "off" {
 			a.log.Info("L7/DNS observability skipped by NETRA_L7=off")
+		} else {
+			a.log.Info("L7/DNS observability skipped: programs failed verifier load")
 		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
@@ -2126,6 +2153,19 @@ func env(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// mentionsAny reports whether msg names any of names — used to tell whether
+// a collection-load failure was caused specifically by one of the L7 cgroup
+// programs (safe to retry without them) rather than something else entirely
+// (a real failure that retrying blind would only mask).
+func mentionsAny(msg string, names []string) bool {
+	for _, n := range names {
+		if strings.Contains(msg, n) {
+			return true
+		}
+	}
+	return false
 }
 func envBool(k string, d bool) bool {
 	v := strings.TrimSpace(os.Getenv(k))

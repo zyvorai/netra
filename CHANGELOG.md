@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.27.1 — 2026-09-12
+
+- **Fixed**: the agent could crash-loop forever on kernels where the L7 cgroup programs (`netra_l7_cgroup_ingress`/`egress`) fail kernel verifier acceptance, discovered when first enabling the node agent DaemonSet against a real cluster. `NETRA_L7=auto`'s documented "attach-with-fallback" degrade-to-no-L7-observability behavior only ever handled an *attach*-time failure; a *verifier-rejection-at-load* failure (as seen here: `load program: bad address`) fails the whole BPF collection load atomically, taking every other program down with it before the attach step is ever reached. The agent now detects that a collection-load failure specifically named one of the two L7 programs, drops them from the spec, and reloads — degrading to no L7 observability exactly as already documented, instead of crash-looping the whole datapath. See `docs/l7-metadata.md`.
+- Extended `scripts/deploy-remote.sh` with an opt-in `NETRA_AGENT_ENABLED=true` to also build (`Dockerfile.agent`, compiling both the Go binary and the BPF object), import, and enable the `netra-agent` DaemonSet — previously the script only ever deployed the controller, with no supported path to also get the privileged node agent running on the target host.
+
 ## 0.27.0 — 2026-09-12
 
 - Added a second, independent per-workload NetPol engine ("v2") with real allow-list and default-deny semantics, alongside the existing deny-only v1 engine (which is untouched). New BPF maps `netpol_rules4` (explicit allow/deny per workload+peer), `netpol_default4` (per-workload default-deny posture, absent = fail-open), and `netpol_v2_enabled`. See `docs/native-netpol.md`.

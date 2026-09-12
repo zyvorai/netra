@@ -81,6 +81,7 @@ ALLOW_UNAUTH_LOCAL="${NETRA_ALLOW_UNAUTHENTICATED:-false}"
 # rotating credentials out from under whatever the operator had configured.
 API_KEY_LOCAL="${NETRA_API_KEY:-$(openssl rand -hex 32)}"
 AGENT_KEY_LOCAL="${NETRA_AGENT_KEY:-$(openssl rand -hex 32)}"
+AGENT_ENABLED_LOCAL="${NETRA_AGENT_ENABLED:-false}"
 
 ssh_host() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 REMOTE_HOME="$(ssh_host 'printf %s "$HOME"')"
@@ -135,6 +136,7 @@ bash scripts/lib/ensure-hubble-relay.sh
 ALLOW_UNAUTH="${ALLOW_UNAUTH_LOCAL}"
 API_KEY="${API_KEY_LOCAL}"
 AGENT_KEY="${AGENT_KEY_LOCAL}"
+AGENT_ENABLED="${AGENT_ENABLED_LOCAL}"
 mkdir -p "\$HOME/.netra"
 printf '%s\n' "\$API_KEY" > "\$HOME/.netra/api-key"
 printf '%s\n' "\$AGENT_KEY" > "\$HOME/.netra/agent-key"
@@ -180,9 +182,41 @@ import_image() {
   fi
 }
 
+# Builds the privileged node agent from Dockerfile.agent (compiles both the
+# Go binary and bpf/netra_tc.c inside the image, same as CI's compile check)
+# and imports it the same way as the controller image above. Only invoked
+# when AGENT_ENABLED=true, since most deploys don't run the agent — see
+# helm/netra/values.yaml's agent.enabled default and docs/native-netpol.md.
+build_agent_image() {
+  local runtime=""
+  if command -v podman >/dev/null 2>&1; then
+    runtime=podman
+  elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    runtime=docker
+  fi
+  if [[ -z "\$runtime" ]]; then
+    echo "podman or working docker required to build the agent image" >&2
+    exit 1
+  fi
+  echo "Building netra-agent (Go binary + BPF object) via Dockerfile.agent..."
+  \$runtime build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.22.0 .
+}
+
+import_agent_image() {
+  if command -v podman >/dev/null 2>&1; then
+    podman save ghcr.io/zyvorai/netra-agent:0.22.0 | sudo k3s ctr images import -
+  else
+    docker save ghcr.io/zyvorai/netra-agent:0.22.0 | sudo k3s ctr images import -
+  fi
+}
+
 if [[ "\$PROFILE" != "quick" ]]; then
   build_image
   import_image
+  if [[ "\$AGENT_ENABLED" == "true" ]]; then
+    build_agent_image
+    import_agent_image
+  fi
 fi
 
 HELM_AUTH=(--set "auth.apiKey=\$API_KEY" --set "auth.agentKey=\$AGENT_KEY")
@@ -190,9 +224,15 @@ if [[ "\$ALLOW_UNAUTH" == "true" ]]; then
   HELM_AUTH=(--set auth.allowUnauthenticated=true --set auth.apiKey="" --set auth.agentKey="")
 fi
 
+AGENT_SET=(--set agent.enabled=false)
+if [[ "\$AGENT_ENABLED" == "true" ]]; then
+  AGENT_SET=(--set agent.enabled=true --set agentImage.repository=ghcr.io/zyvorai/netra-agent --set agentImage.tag=0.22.0)
+fi
+
 helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \
   "\${HELM_AUTH[@]}" \
+  "\${AGENT_SET[@]}" \
   --set image.repository=ghcr.io/zyvorai/netra \
   --set image.tag=0.22.0 \
   --set image.pullPolicy=IfNotPresent \
@@ -215,6 +255,10 @@ helm upgrade --install netra ./helm/netra \
 # what ends up running, not just what's sitting in the local image store.
 kubectl -n netra-system rollout restart deployment/netra
 kubectl -n netra-system rollout status deploy/netra --timeout=180s
+if [[ "\$AGENT_ENABLED" == "true" ]]; then
+  kubectl -n netra-system rollout restart daemonset/netra-agent
+  kubectl -n netra-system rollout status daemonset/netra-agent --timeout=180s
+fi
 echo "API_KEY=\$API_KEY"
 echo "NETRA_URL=https://\$(hostname -I | awk '{print \$1}'):30870"
 echo "NETRA ready (Hubble Relay + Cilium, HTTPS)"
