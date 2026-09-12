@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.26.0 — 2026-09-12
+
+- Gave every eBPF fast-path rule (exact IP, CIDR, port, UID, process, DNS, SNI, rate limit) a stable ID, tracked in a new server-side index kept separate from `EBPFFastPathConfig`'s wire shape — zero compatibility impact on existing agents/`netractl`/MCP callers using the legacy value-keyed routes, which are untouched and still work.
+- Added true in-place edit: `PATCH /api/v1/ebpf/rules/{id}` changes a rule's value under the same ID (a CIDR edit that changes the prefix, for example, no longer needs a separate delete+add) instead of the previous delete-old-value/add-new-value-only model.
+- Added per-rule revision history for edits (`GET /api/v1/ebpf/rules/{id}/history`) with before/after snapshots, and rollback (`POST /api/v1/ebpf/rules/{id}/rollback/{revision}`) that undoes one specific edit — mirrors the existing CiliumNetworkPolicy revision/rollback pattern. Rule creation/deletion remain visible via the existing audit log rather than duplicating that into the new revision system.
+- Added `GET /api/v1/ebpf/rules` (list) and `GET/DELETE /api/v1/ebpf/rules/{id}`, all mirrored into `netractl ebpf rules ...` and five new `netra_ebpf_rules_*` MCP tools.
+- The Firewall dashboard's unified rules table now shows each rule's created-by/created-at, and gained inline Edit/History/Delete actions wired to the new endpoints.
+- This is Phase 2 of the firewall plan (`docs/firewall.md`); the NetPol allow-list/default-deny engine is a separate, higher-risk follow-up phase.
+
 ## 0.25.0 — 2026-09-12
 
 - Renamed the dashboard's **eBPF** nav page to **Firewall** and added a unified "all configured rules" table at the top of it, flattening every rule type (exact IP, CIDR, port, UID, process, DNS, SNI, rate limit, plus DDoS shield and NetPol state) into one view with per-row delete — previously each rule type only had its own isolated card with no cross-type view.

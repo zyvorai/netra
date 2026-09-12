@@ -30,15 +30,19 @@ type diskPreflight struct {
 }
 
 type diskState struct {
-	SchemaVersion   int                       `json:"schemaVersion"`
-	SavedAt         time.Time                 `json:"savedAt"`
-	Config          models.EBPFFastPathConfig `json:"config"`
-	Audit           []models.AuditEvent       `json:"audit"`
-	PolicyRevisions []models.PolicyRevision   `json:"policyRevisions"`
-	NextRevisionID  uint64                    `json:"nextRevisionId"`
-	Preflights      map[string]diskPreflight  `json:"preflights,omitempty"`
-	Baseline        models.BehaviorBaseline   `json:"baseline,omitempty"`
-	RateBaseline    models.RateBaseline       `json:"rateBaseline,omitempty"`
+	SchemaVersion         int                           `json:"schemaVersion"`
+	SavedAt               time.Time                     `json:"savedAt"`
+	Config                models.EBPFFastPathConfig     `json:"config"`
+	Audit                 []models.AuditEvent           `json:"audit"`
+	PolicyRevisions       []models.PolicyRevision       `json:"policyRevisions"`
+	NextRevisionID        uint64                        `json:"nextRevisionId"`
+	Preflights            map[string]diskPreflight      `json:"preflights,omitempty"`
+	Baseline              models.BehaviorBaseline       `json:"baseline,omitempty"`
+	RateBaseline          models.RateBaseline           `json:"rateBaseline,omitempty"`
+	RuleIndex             map[string]firewallRuleIndex  `json:"ruleIndex,omitempty"`
+	NextRuleSeq           map[string]uint64             `json:"nextRuleSeq,omitempty"`
+	FirewallRuleRevisions []models.FirewallRuleRevision `json:"firewallRuleRevisions,omitempty"`
+	NextFirewallRevID     uint64                        `json:"nextFirewallRevisionId,omitempty"`
 }
 
 // Open returns a store backed by an atomically replaced JSON state file. The
@@ -115,6 +119,37 @@ func (s *Store) load() error {
 	s.preflights = map[string]preflight{}
 	s.baseline = cloneBaseline(d.Baseline)
 	s.rateBaseline = cloneRateBaseline(d.RateBaseline)
+	if len(d.RuleIndex) == 0 && len(d.NextRuleSeq) == 0 {
+		// First load after upgrading to a controller version with the
+		// rule-ID system: synthesize an index for whatever rules already
+		// exist so they immediately get stable IDs, but attribute them to
+		// a migration actor rather than fabricating history/attribution
+		// that was never actually recorded.
+		s.ruleIndex = map[string]firewallRuleIndex{}
+		s.ruleIndexByKey = map[string]string{}
+		s.nextRuleSeq = map[string]uint64{}
+		s.reconcileRuleIndexLocked("system:migration", d.SavedAt)
+	} else {
+		s.ruleIndex = make(map[string]firewallRuleIndex, len(d.RuleIndex))
+		for id, e := range d.RuleIndex {
+			s.ruleIndex[id] = e
+		}
+		s.ruleIndexByKey = make(map[string]string, len(d.RuleIndex))
+		for id, e := range s.ruleIndex {
+			s.ruleIndexByKey[e.Type+"|"+e.Key] = id
+		}
+		s.nextRuleSeq = make(map[string]uint64, len(d.NextRuleSeq))
+		for typ, n := range d.NextRuleSeq {
+			s.nextRuleSeq[typ] = n
+		}
+	}
+	s.firewallRuleRevisions = append([]models.FirewallRuleRevision(nil), tailFirewallRevisions(d.FirewallRuleRevisions, 1000)...)
+	s.nextFirewallRevID = d.NextFirewallRevID
+	for _, r := range s.firewallRuleRevisions {
+		if r.ID > s.nextFirewallRevID {
+			s.nextFirewallRevID = r.ID
+		}
+	}
 	now := time.Now().UTC()
 	for token, item := range d.Preflights {
 		if token == "" || len(item.Hash) != 32 || !now.Before(item.ExpiresAt) {
@@ -171,16 +206,28 @@ func (s *Store) persistLocked() error {
 	cfg := cloneConfig(s.config)
 	// Pod inventory is node-local, short-lived metadata supplied to agents. Never persist it.
 	cfg.Workloads = nil
+	ruleIndex := make(map[string]firewallRuleIndex, len(s.ruleIndex))
+	for id, e := range s.ruleIndex {
+		ruleIndex[id] = e
+	}
+	nextRuleSeq := make(map[string]uint64, len(s.nextRuleSeq))
+	for typ, n := range s.nextRuleSeq {
+		nextRuleSeq[typ] = n
+	}
 	d := diskState{
-		SchemaVersion:   stateSchemaVersion,
-		SavedAt:         time.Now().UTC(),
-		Config:          cfg,
-		Audit:           append([]models.AuditEvent(nil), s.audit...),
-		PolicyRevisions: cloneRevisions(s.policyRevisions),
-		NextRevisionID:  s.nextRevisionID,
-		Preflights:      make(map[string]diskPreflight, len(s.preflights)),
-		Baseline:        cloneBaseline(s.baseline),
-		RateBaseline:    cloneRateBaseline(s.rateBaseline),
+		SchemaVersion:         stateSchemaVersion,
+		SavedAt:               time.Now().UTC(),
+		Config:                cfg,
+		Audit:                 append([]models.AuditEvent(nil), s.audit...),
+		PolicyRevisions:       cloneRevisions(s.policyRevisions),
+		NextRevisionID:        s.nextRevisionID,
+		Preflights:            make(map[string]diskPreflight, len(s.preflights)),
+		Baseline:              cloneBaseline(s.baseline),
+		RateBaseline:          cloneRateBaseline(s.rateBaseline),
+		RuleIndex:             ruleIndex,
+		NextRuleSeq:           nextRuleSeq,
+		FirewallRuleRevisions: append([]models.FirewallRuleRevision(nil), s.firewallRuleRevisions...),
+		NextFirewallRevID:     s.nextFirewallRevID,
 	}
 	now := time.Now().UTC()
 	for token, item := range s.preflights {
@@ -232,6 +279,12 @@ func tailAudit(in []models.AuditEvent, n int) []models.AuditEvent {
 	return in[len(in)-n:]
 }
 func tailRevisions(in []models.PolicyRevision, n int) []models.PolicyRevision {
+	if len(in) <= n {
+		return in
+	}
+	return in[len(in)-n:]
+}
+func tailFirewallRevisions(in []models.FirewallRuleRevision, n int) []models.FirewallRuleRevision {
 	if len(in) <= n {
 		return in
 	}

@@ -117,6 +117,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/ebpf/rate/{ip}", s.auth(http.HandlerFunc(s.ebpfRateDelete)))
 	mux.Handle("PUT /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldSet)))
 	mux.Handle("PUT /api/v1/ebpf/netpol/config", s.auth(http.HandlerFunc(s.ebpfNetPolConfigSet)))
+	mux.Handle("GET /api/v1/ebpf/rules", s.auth(http.HandlerFunc(s.ebpfRulesList)))
+	mux.Handle("GET /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRuleGet)))
+	mux.Handle("PATCH /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRulePatch)))
+	mux.Handle("DELETE /api/v1/ebpf/rules/{id}", s.auth(http.HandlerFunc(s.ebpfRuleDelete)))
+	mux.Handle("GET /api/v1/ebpf/rules/{id}/history", s.auth(http.HandlerFunc(s.ebpfRuleHistory)))
+	mux.Handle("POST /api/v1/ebpf/rules/{id}/rollback/{revision}", s.auth(http.HandlerFunc(s.ebpfRuleRollback)))
 	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
@@ -1210,6 +1216,215 @@ func (s *Server) ebpfNetPolConfigSet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
 		errorJSON(w, http.StatusInsufficientStorage, "could not persist NetPol config: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRulesList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"items": s.store.ListRules()})
+}
+
+func (s *Server) ebpfRuleGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	for _, rule := range s.store.ListRules() {
+		if rule.ID == id {
+			writeJSON(w, 200, rule)
+			return
+		}
+	}
+	errorJSON(w, 404, "rule not found")
+}
+
+// ebpfRulePatch decodes and validates a PATCH body using exactly the same
+// per-type checks as the corresponding legacy Add* handler (ebpfCIDRMutate,
+// ebpfPortMutate, etc.) before handing a store.RuleEdit to Store.PatchRule
+// — PATCH can never accept a value the value-keyed POST path would reject.
+func (s *Server) ebpfRulePatch(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	typ, ok := s.store.RuleType(id)
+	if !ok {
+		errorJSON(w, 404, "rule not found")
+		return
+	}
+	var edit store.RuleEdit
+	switch typ {
+	case "ip4":
+		var x struct {
+			IP string `json:"ip"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.IP))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "valid IPv4 required")
+			return
+		}
+		edit.Str = a.String()
+	case "ip6":
+		var x struct {
+			IP string `json:"ip"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.IP))
+		if err != nil || !a.Is6() || a.Is4In6() {
+			errorJSON(w, 400, "valid IPv6 required")
+			return
+		}
+		edit.Str = a.String()
+	case "cidr":
+		var x models.EBPFCIDRRule
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		p, err := netip.ParsePrefix(strings.TrimSpace(x.CIDR))
+		if err != nil {
+			errorJSON(w, 400, "valid IPv4 or IPv6 CIDR required")
+			return
+		}
+		x.CIDR = p.Masked().String()
+		var dirOK bool
+		x.Direction, dirOK = normalizeDirection(x.Direction)
+		if !dirOK {
+			errorJSON(w, 400, "direction must be ingress, egress, or both")
+			return
+		}
+		edit.CIDR = x
+	case "port":
+		var x models.EBPFPortRule
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		if x.Port == 0 {
+			errorJSON(w, 400, "port must be 1-65535")
+			return
+		}
+		var ok bool
+		x.Protocol, ok = normalizeProtocol(x.Protocol)
+		if !ok {
+			errorJSON(w, 400, "protocol must be TCP, UDP, or ANY")
+			return
+		}
+		x.Direction, ok = normalizeDirection(x.Direction)
+		if !ok {
+			errorJSON(w, 400, "direction must be ingress, egress, or both")
+			return
+		}
+		edit.Port = x
+	case "uid":
+		var x struct {
+			UID uint32 `json:"uid"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.UID = x.UID
+	case "dns", "sni":
+		var x struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		name, err := normalizeDNSName(x.Name)
+		if err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.Str = name
+	case "process":
+		var x struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		name, err := normalizeProcessName(x.Name)
+		if err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.Str = name
+	case "rate":
+		var x models.EBPFRateLimit
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		a, err := netip.ParseAddr(strings.TrimSpace(x.Destination))
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "rate limiting currently requires an exact IPv4 destination")
+			return
+		}
+		if x.PPS < 1 || x.PPS > 10000000 {
+			errorJSON(w, 400, "pps must be between 1 and 10000000")
+			return
+		}
+		x.Destination = a.String()
+		edit.Rate = x
+	default:
+		errorJSON(w, 400, "rule type "+typ+" does not support edit")
+		return
+	}
+	cfg, err := s.store.PatchRule(id, edit, actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRuleDelete(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.store.DeleteRule(r.PathValue("id"), actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
+func (s *Server) ebpfRuleHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	writeJSON(w, 200, map[string]any{"items": s.store.FirewallRuleHistory(r.PathValue("id"), limit)})
+}
+
+func (s *Server) ebpfRuleRollback(w http.ResponseWriter, r *http.Request) {
+	revID, err := strconv.ParseUint(r.PathValue("revision"), 10, 64)
+	if err != nil {
+		errorJSON(w, 400, "valid revision id required")
+		return
+	}
+	cfg, err := s.store.RollbackFirewallRule(r.PathValue("id"), revID, actor(r))
+	if err != nil {
+		if errors.Is(err, store.ErrPersistence) {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
+		errorJSON(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 200, cfg)

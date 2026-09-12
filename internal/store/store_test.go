@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -303,6 +304,238 @@ func TestStandaloneEBPFRules(t *testing.T) {
 	if c2.BlockedIPv6[0] == "mutated" || c2.BlockedUIDs[0] == 1 || c2.BlockedDNS[0] == "mutated.example" || c2.BlockedProcesses[0] == "mutated" || c2.BlockedSNI[0] == "mutated.example" {
 		t.Fatal("Config leaked mutable slices")
 	}
+}
+
+func TestRuleIndexAssignsStableIDs(t *testing.T) {
+	s := New()
+	if _, err := s.AddCIDR(models.EBPFCIDRRule{CIDR: "10.0.0.0/8", Direction: "egress"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDNS("tracker.example.com", "test"); err != nil {
+		t.Fatal(err)
+	}
+	rules := s.ListRules()
+	if len(rules) != 2 {
+		t.Fatalf("want 2 rules, got %d: %#v", len(rules), rules)
+	}
+	var cidrID, dnsID string
+	for _, r := range rules {
+		switch r.Type {
+		case "cidr":
+			cidrID = r.ID
+			if r.CIDR != "10.0.0.0/8" || r.Direction != "egress" {
+				t.Fatalf("cidr rule wrong: %#v", r)
+			}
+		case "dns":
+			dnsID = r.ID
+			if r.Value != "tracker.example.com" {
+				t.Fatalf("dns rule wrong: %#v", r)
+			}
+		}
+	}
+	if cidrID == "" || dnsID == "" || cidrID == dnsID {
+		t.Fatalf("expected distinct non-empty IDs, got cidr=%q dns=%q", cidrID, dnsID)
+	}
+
+	// Adding an unrelated rule must not disturb existing IDs.
+	if _, err := s.AddUID(1000, "test"); err != nil {
+		t.Fatal(err)
+	}
+	rules = s.ListRules()
+	for _, r := range rules {
+		if r.Type == "cidr" && r.ID != cidrID {
+			t.Fatalf("cidr ID changed after unrelated mutation: was %s now %s", cidrID, r.ID)
+		}
+		if r.Type == "dns" && r.ID != dnsID {
+			t.Fatalf("dns ID changed after unrelated mutation: was %s now %s", dnsID, r.ID)
+		}
+	}
+
+	// Deleting removes the index entry.
+	if _, err := s.DelDNS("tracker.example.com", "test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range s.ListRules() {
+		if r.Type == "dns" {
+			t.Fatalf("dns rule should have been removed from the index: %#v", r)
+		}
+	}
+	if typ, ok := s.RuleType(dnsID); ok {
+		t.Fatalf("RuleType should report the deleted ID as gone, got type=%s", typ)
+	}
+}
+
+func TestPatchRulePreservesIDAcrossKeyChange(t *testing.T) {
+	s := New()
+	if _, err := s.AddCIDR(models.EBPFCIDRRule{CIDR: "10.0.0.0/8", Direction: "egress"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	rules := s.ListRules()
+	if len(rules) != 1 {
+		t.Fatalf("want 1 rule, got %d", len(rules))
+	}
+	id := rules[0].ID
+
+	cfg, err := s.PatchRule(id, RuleEdit{CIDR: models.EBPFCIDRRule{CIDR: "10.0.0.0/16", Direction: "both"}}, "editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BlockedCIDRs) != 1 || cfg.BlockedCIDRs[0].CIDR != "10.0.0.0/16" || cfg.BlockedCIDRs[0].Direction != "both" {
+		t.Fatalf("config not updated: %#v", cfg.BlockedCIDRs)
+	}
+
+	rules = s.ListRules()
+	if len(rules) != 1 {
+		t.Fatalf("want 1 rule after edit, got %d", len(rules))
+	}
+	if rules[0].ID != id {
+		t.Fatalf("ID changed across edit: was %s now %s", id, rules[0].ID)
+	}
+	if rules[0].CIDR != "10.0.0.0/16" || rules[0].Direction != "both" || rules[0].UpdatedBy != "editor" {
+		t.Fatalf("rule not reflecting edit: %#v", rules[0])
+	}
+
+	hist := s.FirewallRuleHistory(id, 10)
+	if len(hist) != 1 || hist[0].Action != "update" || hist[0].Actor != "editor" {
+		t.Fatalf("expected one update revision, got %#v", hist)
+	}
+	var before, after models.EBPFCIDRRule
+	if err := jsonUnmarshalRuleEditCIDR(hist[0].Before, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := jsonUnmarshalRuleEditCIDR(hist[0].After, &after); err != nil {
+		t.Fatal(err)
+	}
+	if before.CIDR != "10.0.0.0/8" || after.CIDR != "10.0.0.0/16" {
+		t.Fatalf("before/after snapshot wrong: before=%#v after=%#v", before, after)
+	}
+
+	// Rollback should restore the original value under the same ID.
+	cfg, err = s.RollbackFirewallRule(id, hist[0].ID, "reverter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BlockedCIDRs) != 1 || cfg.BlockedCIDRs[0].CIDR != "10.0.0.0/8" {
+		t.Fatalf("rollback did not restore original value: %#v", cfg.BlockedCIDRs)
+	}
+	rules = s.ListRules()
+	if rules[0].ID != id {
+		t.Fatalf("rollback should preserve the ID: got %s want %s", rules[0].ID, id)
+	}
+}
+
+func TestPatchRulePersistenceFailureRestoresIndex(t *testing.T) {
+	s := New()
+	if _, err := s.AddCIDR(models.EBPFCIDRRule{CIDR: "10.0.0.0/8", Direction: "egress"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	id := s.ListRules()[0].ID
+
+	// Same deterministic-failure trick as TestPersistenceFailureRollsBackFastPathMutation.
+	s.backend = &fileBackend{path: t.TempDir()}
+	_, err := s.PatchRule(id, RuleEdit{CIDR: models.EBPFCIDRRule{CIDR: "10.0.0.0/16", Direction: "both"}}, "editor")
+	if err == nil || !errors.Is(err, ErrPersistence) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	rules := s.ListRules()
+	if len(rules) != 1 || rules[0].ID != id || rules[0].CIDR != "10.0.0.0/8" || rules[0].UpdatedBy != "" {
+		t.Fatalf("index not rolled back after persistence failure: %#v", rules)
+	}
+	if len(s.FirewallRuleHistory(id, 10)) != 0 {
+		t.Fatal("a revision should not have been recorded for a failed patch")
+	}
+}
+
+func TestDeleteRuleByID(t *testing.T) {
+	s := New()
+	if _, err := s.AddUID(1000, "test"); err != nil {
+		t.Fatal(err)
+	}
+	rules := s.ListRules()
+	if len(rules) != 1 {
+		t.Fatalf("want 1 rule, got %d", len(rules))
+	}
+	cfg, err := s.DeleteRule(rules[0].ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BlockedUIDs) != 0 {
+		t.Fatalf("UID not removed: %#v", cfg.BlockedUIDs)
+	}
+	if _, err := s.DeleteRule("nonexistent-id", "test"); err == nil {
+		t.Fatal("expected error deleting an unknown rule ID")
+	}
+}
+
+func TestRuleIndexPersistsAndMigrationBackfillsLegacyState(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDNS("tracker.example.com", "test"); err != nil {
+		t.Fatal(err)
+	}
+	rules := s.ListRules()
+	id := rules[0].ID
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restart: the real ID/actor must survive since it was already indexed.
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules = s.ListRules()
+	if len(rules) != 1 || rules[0].ID != id || rules[0].CreatedBy != "test" {
+		t.Fatalf("rule index did not survive restart: %#v", rules)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a pre-rule-ID state file (no ruleIndex/nextRuleSeq keys at
+	// all) by stripping them back out, then confirm load() backfills a
+	// working index rather than erroring or leaving rules unindexed.
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw, "ruleIndex")
+	delete(raw, "nextRuleSeq")
+	b, err = json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rules = s.ListRules()
+	if len(rules) != 1 || rules[0].Value != "tracker.example.com" {
+		t.Fatalf("migration backfill failed: %#v", rules)
+	}
+	if rules[0].CreatedBy != "system:migration" {
+		t.Fatalf("expected migration backfill actor, got %q", rules[0].CreatedBy)
+	}
+}
+
+func jsonUnmarshalRuleEditCIDR(raw []byte, out *models.EBPFCIDRRule) error {
+	var edit RuleEdit
+	if err := json.Unmarshal(raw, &edit); err != nil {
+		return err
+	}
+	*out = edit.CIDR
+	return nil
 }
 
 func TestSetShieldBumpsGenerationLastAndDeepCopies(t *testing.T) {

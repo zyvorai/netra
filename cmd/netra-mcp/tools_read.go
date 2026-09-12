@@ -172,8 +172,29 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_ebpf_capabilities", method: "GET", path: "/api/v1/ebpf/capabilities",
-			description: "Static manifest of this Netra deployment's eBPF hooks, observability signals, and enforcement capabilities.",
+			description: "Static manifest of this Netra deployment's eBPF hooks, observability signals, and enforcement capabilities, including per-rule-type map capacity limits.",
 			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_rules_list", method: "GET", path: "/api/v1/ebpf/rules",
+			description: "List every eBPF fast-path deny rule (exact IP, CIDR, port, UID, process, DNS, SNI, rate limit) with its stable ID, so it can be referenced by netra_ebpf_rules_patch/_delete/_history instead of the legacy value-keyed add/delete tools.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_rules_get", method: "GET", path: "/api/v1/ebpf/rules/{id}",
+			description: "Get one eBPF fast-path rule by its stable ID.",
+			schema:      objSchema(map[string]any{"id": strProp("Rule ID from netra_ebpf_rules_list.")}, "id"),
+			pathParams:  []string{"id"},
+		},
+		{
+			name: "netra_ebpf_rules_history", method: "GET", path: "/api/v1/ebpf/rules/{id}/history",
+			description: "Revision history for one eBPF fast-path rule's edits (via netra_ebpf_rules_patch), each with a before/after snapshot. Rule creation/deletion remain visible via netra_audit instead.",
+			schema: objSchema(map[string]any{
+				"id":    strProp("Rule ID from netra_ebpf_rules_list."),
+				"limit": intProp("Max revisions to return, 1-200. Default 50."),
+			}, "id"),
+			pathParams:  []string{"id"},
+			queryParams: []string{"limit"},
 		},
 		{
 			name: "netra_insights_summary", method: "GET", path: "/api/v1/insights/summary",

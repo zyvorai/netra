@@ -10,7 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,26 +29,130 @@ type preflight struct {
 	actor     string
 }
 
+// firewallRuleIndex gives one entry from EBPFFastPathConfig's flat rule
+// slices a stable identity across add/edit/delete. It is deliberately kept
+// out of EBPFFastPathConfig itself (see FirewallRule doc comment) — Key is
+// the same canonical string used as the map key in ruleIndexByKey, letting
+// both structures be rebuilt/verified against each other cheaply.
+type firewallRuleIndex struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Key       string    `json:"key"`
+	CreatedAt time.Time `json:"createdAt"`
+	CreatedBy string    `json:"createdBy,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy string    `json:"updatedBy,omitempty"`
+}
+
+// RuleEdit is a small tagged union carrying the new value for a PatchRule
+// call — exactly one field is meaningful, chosen by the target rule's Type.
+// Exported so internal/api can construct one after validating a PATCH body
+// the same way the corresponding Add* handler already validates its body.
+type RuleEdit struct {
+	Str  string // ip4, ip6, dns, sni, process
+	UID  uint32
+	CIDR models.EBPFCIDRRule
+	Port models.EBPFPortRule
+	Rate models.EBPFRateLimit
+}
+
 type Store struct {
-	mu              sync.RWMutex
-	config          models.EBPFFastPathConfig
-	agents          map[string]models.AgentReport
-	audit           []models.AuditEvent
-	policyRevisions []models.PolicyRevision
-	nextRevisionID  uint64
-	preflights      map[string]preflight
-	baseline        models.BehaviorBaseline
-	rateBaseline    models.RateBaseline
-	rateSamples     map[string][]rateSample
-	backend         *fileBackend
+	mu                    sync.RWMutex
+	config                models.EBPFFastPathConfig
+	agents                map[string]models.AgentReport
+	audit                 []models.AuditEvent
+	policyRevisions       []models.PolicyRevision
+	nextRevisionID        uint64
+	preflights            map[string]preflight
+	baseline              models.BehaviorBaseline
+	rateBaseline          models.RateBaseline
+	rateSamples           map[string][]rateSample
+	ruleIndex             map[string]firewallRuleIndex
+	ruleIndexByKey        map[string]string
+	nextRuleSeq           map[string]uint64
+	firewallRuleRevisions []models.FirewallRuleRevision
+	nextFirewallRevID     uint64
+	backend               *fileBackend
 }
 
 func New() *Store {
 	return &Store{
-		config:      models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
-		agents:      map[string]models.AgentReport{},
-		preflights:  map[string]preflight{},
-		rateSamples: map[string][]rateSample{},
+		config:         models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
+		agents:         map[string]models.AgentReport{},
+		preflights:     map[string]preflight{},
+		rateSamples:    map[string][]rateSample{},
+		ruleIndex:      map[string]firewallRuleIndex{},
+		ruleIndexByKey: map[string]string{},
+		nextRuleSeq:    map[string]uint64{},
+	}
+}
+
+// reconcileRuleIndexLocked keeps ruleIndex/ruleIndexByKey in sync with the
+// 9 flat rule slices on s.config, diffing against the current config rather
+// than being told what changed. This means every Add*/Del*/SetRateLimit
+// mutator only needs to call it once after mutating s.config — new values
+// get a freshly allocated sequential ID, values no longer present lose
+// their index entry, and values that already existed are left untouched
+// (so this must not be used for edits, which need to preserve an ID across
+// a key change — see PatchRule, which manages its own index entry instead).
+// It is also used, deliberately, as a cheap self-heal after a persistence
+// failure: calling it again once s.config has been rolled back to `before`
+// corrects any index entries the failed attempt had already added/removed.
+func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
+	if s.ruleIndex == nil {
+		s.ruleIndex = map[string]firewallRuleIndex{}
+	}
+	if s.ruleIndexByKey == nil {
+		s.ruleIndexByKey = map[string]string{}
+	}
+	if s.nextRuleSeq == nil {
+		s.nextRuleSeq = map[string]uint64{}
+	}
+	current := make(map[string]bool, len(s.ruleIndexByKey))
+	touch := func(typ, key string) {
+		compound := typ + "|" + key
+		current[compound] = true
+		if _, ok := s.ruleIndexByKey[compound]; ok {
+			return
+		}
+		s.nextRuleSeq[typ]++
+		id := typ + "-" + strconv.FormatUint(s.nextRuleSeq[typ], 10)
+		s.ruleIndex[id] = firewallRuleIndex{ID: id, Type: typ, Key: key, CreatedAt: now, CreatedBy: actor}
+		s.ruleIndexByKey[compound] = id
+	}
+	for _, v := range s.config.BlockedIPv4 {
+		touch("ip4", v)
+	}
+	for _, v := range s.config.BlockedIPv6 {
+		touch("ip6", v)
+	}
+	for _, v := range s.config.BlockedCIDRs {
+		touch("cidr", v.Direction+"|"+v.CIDR)
+	}
+	for _, v := range s.config.BlockedPorts {
+		touch("port", v.Direction+"|"+v.Protocol+"|"+strconv.FormatUint(uint64(v.Port), 10))
+	}
+	for _, v := range s.config.BlockedUIDs {
+		touch("uid", strconv.FormatUint(uint64(v), 10))
+	}
+	for _, v := range s.config.BlockedDNS {
+		touch("dns", v)
+	}
+	for _, v := range s.config.BlockedSNI {
+		touch("sni", v)
+	}
+	for _, v := range s.config.BlockedProcesses {
+		touch("process", v)
+	}
+	for _, v := range s.config.RateLimits {
+		touch("rate", v.Destination)
+	}
+	for compound, id := range s.ruleIndexByKey {
+		if current[compound] {
+			continue
+		}
+		delete(s.ruleIndex, id)
+		delete(s.ruleIndexByKey, compound)
 	}
 }
 
@@ -109,9 +216,11 @@ func (s *Store) AddBlocked(ip, actor string) (models.EBPFFastPathConfig, error) 
 	sort.Strings(s.config.BlockedIPv4)
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny.add", Target: ip})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -132,9 +241,11 @@ func (s *Store) DelBlocked(ip, actor string) (models.EBPFFastPathConfig, error) 
 		s.config.BlockedIPv4 = append([]string(nil), out...)
 		s.config.Revision++
 		s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny.delete", Target: ip})
+		s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 		if err := s.persistLocked(); err != nil {
 			s.config = before
 			s.audit = s.audit[:auditLen]
+			s.reconcileRuleIndexLocked("system", time.Now().UTC())
 			return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 		}
 	}
@@ -154,9 +265,11 @@ func (s *Store) AddBlockedIPv6(ip, actor string) (models.EBPFFastPathConfig, err
 	sort.Strings(s.config.BlockedIPv6)
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny6.add", Target: ip})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -178,9 +291,11 @@ func (s *Store) DelBlockedIPv6(ip, actor string) (models.EBPFFastPathConfig, err
 	s.config.BlockedIPv6 = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.deny6.delete", Target: ip})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -204,9 +319,11 @@ func (s *Store) AddCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFast
 	})
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.cidr.add", Target: rule.CIDR, Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -228,9 +345,11 @@ func (s *Store) DelCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFast
 	s.config.BlockedCIDRs = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.cidr.delete", Target: rule.CIDR, Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -258,9 +377,11 @@ func (s *Store) AddPortRule(rule models.EBPFPortRule, actor string) (models.EBPF
 	})
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.port.add", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -282,9 +403,11 @@ func (s *Store) DelPortRule(rule models.EBPFPortRule, actor string) (models.EBPF
 	s.config.BlockedPorts = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.port.delete", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -303,9 +426,11 @@ func (s *Store) AddUID(uid uint32, actor string) (models.EBPFFastPathConfig, err
 	sort.Slice(s.config.BlockedUIDs, func(i, j int) bool { return s.config.BlockedUIDs[i] < s.config.BlockedUIDs[j] })
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.uid.add", Target: fmt.Sprint(uid)})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -327,9 +452,11 @@ func (s *Store) DelUID(uid uint32, actor string) (models.EBPFFastPathConfig, err
 	s.config.BlockedUIDs = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.uid.delete", Target: fmt.Sprint(uid)})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -348,9 +475,11 @@ func (s *Store) AddDNS(name, actor string) (models.EBPFFastPathConfig, error) {
 	sort.Strings(s.config.BlockedDNS)
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.dns.add", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -371,9 +500,11 @@ func (s *Store) DelDNS(name, actor string) (models.EBPFFastPathConfig, error) {
 	s.config.BlockedDNS = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.dns.delete", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -391,9 +522,11 @@ func (s *Store) AddSNI(name, actor string) (models.EBPFFastPathConfig, error) {
 	sort.Strings(s.config.BlockedSNI)
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.sni.add", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -415,9 +548,11 @@ func (s *Store) DelSNI(name, actor string) (models.EBPFFastPathConfig, error) {
 	s.config.BlockedSNI = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.sni.delete", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -436,9 +571,11 @@ func (s *Store) AddProcess(name, actor string) (models.EBPFFastPathConfig, error
 	sort.Strings(s.config.BlockedProcesses)
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.process.add", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -459,9 +596,11 @@ func (s *Store) DelProcess(name, actor string) (models.EBPFFastPathConfig, error
 	s.config.BlockedProcesses = out
 	s.config.Revision++
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.process.delete", Target: name})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
@@ -508,12 +647,384 @@ func (s *Store) SetRateLimit(rule models.EBPFRateLimit, actor string) (models.EB
 		action = "ebpf.rate.delete"
 	}
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: rule.Destination, Details: map[string]any{"pps": rule.PPS}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
 		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
+}
+
+// RuleType returns the stable-ID rule index's Type for id, or false if no
+// such rule exists (already deleted, or never a flat-rule type — Shield and
+// NetPol rows in the unified table have no stable ID in this phase).
+func (s *Store) RuleType(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	idx, ok := s.ruleIndex[id]
+	return idx.Type, ok
+}
+
+// ListRules flattens the 9 indexed flat rule types into one summary view
+// for the unified Firewall table. Built from ruleIndex (identity/metadata)
+// cross-referenced against the live s.config values (current match data) —
+// the two are always in sync because every mutator calls
+// reconcileRuleIndexLocked before returning.
+func (s *Store) ListRules() []models.FirewallRule {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rateByDest := make(map[string]uint32, len(s.config.RateLimits))
+	for _, r := range s.config.RateLimits {
+		rateByDest[r.Destination] = r.PPS
+	}
+	out := make([]models.FirewallRule, 0, len(s.ruleIndex))
+	for id, idx := range s.ruleIndex {
+		fr := models.FirewallRule{ID: id, Type: idx.Type, CreatedAt: idx.CreatedAt, CreatedBy: idx.CreatedBy, UpdatedAt: idx.UpdatedAt, UpdatedBy: idx.UpdatedBy}
+		switch idx.Type {
+		case "ip4", "ip6", "dns", "sni", "process":
+			fr.Value = idx.Key
+			fr.Summary = idx.Key
+		case "uid":
+			fr.Value = idx.Key
+			fr.Summary = "uid " + idx.Key
+		case "cidr":
+			parts := strings.SplitN(idx.Key, "|", 2)
+			if len(parts) == 2 {
+				fr.Direction, fr.CIDR = parts[0], parts[1]
+			}
+			fr.Summary = fr.Direction + " · " + fr.CIDR
+		case "port":
+			parts := strings.SplitN(idx.Key, "|", 3)
+			if len(parts) == 3 {
+				fr.Direction, fr.Protocol = parts[0], parts[1]
+				if p, err := strconv.ParseUint(parts[2], 10, 16); err == nil {
+					fr.Port = uint16(p)
+				}
+			}
+			fr.Summary = fmt.Sprintf("%s · %s/%d", fr.Direction, fr.Protocol, fr.Port)
+		case "rate":
+			fr.Destination = idx.Key
+			fr.PPS = rateByDest[idx.Key]
+			fr.Summary = fmt.Sprintf("%s · %dpps", fr.Destination, fr.PPS)
+		default:
+			continue
+		}
+		out = append(out, fr)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		return out[i].Summary < out[j].Summary
+	})
+	return out
+}
+
+// DeleteRule resolves id to its current type/value and calls the same
+// Del*/SetRateLimit method the legacy value-keyed routes already use — this
+// is a thin ID-based wrapper, not a second deletion code path.
+func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) {
+	typ, ok := s.RuleType(id)
+	if !ok {
+		return s.Config(), fmt.Errorf("rule %s not found", id)
+	}
+	s.mu.RLock()
+	key := s.ruleIndex[id].Key
+	s.mu.RUnlock()
+	switch typ {
+	case "ip4":
+		return s.DelBlocked(key, actor)
+	case "ip6":
+		return s.DelBlockedIPv6(key, actor)
+	case "cidr":
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			return s.Config(), fmt.Errorf("corrupt cidr rule index entry")
+		}
+		return s.DelCIDR(models.EBPFCIDRRule{Direction: parts[0], CIDR: parts[1]}, actor)
+	case "port":
+		parts := strings.SplitN(key, "|", 3)
+		if len(parts) != 3 {
+			return s.Config(), fmt.Errorf("corrupt port rule index entry")
+		}
+		port, err := strconv.ParseUint(parts[2], 10, 16)
+		if err != nil {
+			return s.Config(), fmt.Errorf("corrupt port rule index entry")
+		}
+		return s.DelPortRule(models.EBPFPortRule{Direction: parts[0], Protocol: parts[1], Port: uint16(port)}, actor)
+	case "uid":
+		uid, err := strconv.ParseUint(key, 10, 32)
+		if err != nil {
+			return s.Config(), fmt.Errorf("corrupt uid rule index entry")
+		}
+		return s.DelUID(uint32(uid), actor)
+	case "dns":
+		return s.DelDNS(key, actor)
+	case "sni":
+		return s.DelSNI(key, actor)
+	case "process":
+		return s.DelProcess(key, actor)
+	case "rate":
+		return s.SetRateLimit(models.EBPFRateLimit{Destination: key, PPS: 0}, actor)
+	default:
+		return s.Config(), fmt.Errorf("rule type %s does not support delete-by-id", typ)
+	}
+}
+
+// PatchRule atomically replaces one rule's value while preserving its ID,
+// recording a before/after revision snapshot. Unlike the generic
+// Add*/Del*/SetRateLimit mutators, it manages ruleIndex/ruleIndexByKey
+// directly (not via reconcileRuleIndexLocked) so the same ID survives a key
+// change, and rolls both back explicitly on persistence failure since
+// reconcile's generic self-heal cannot tell "this ID's key changed" apart
+// from "this key was deleted and an unrelated new one was added".
+func (s *Store) PatchRule(id string, edit RuleEdit, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, ok := s.ruleIndex[id]
+	if !ok {
+		return cloneConfig(s.config), fmt.Errorf("rule %s not found", id)
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	beforeEntry := idx
+	oldCompound := idx.Type + "|" + idx.Key
+	beforeEdit, err := currentRuleEditLocked(s.config, idx)
+	if err != nil {
+		return cloneConfig(s.config), err
+	}
+
+	var newKey string
+	switch idx.Type {
+	case "ip4":
+		a, err := netip.ParseAddr(edit.Str)
+		if err != nil || !a.Is4() {
+			return cloneConfig(s.config), fmt.Errorf("valid IPv4 required")
+		}
+		newKey = a.String()
+		s.config.BlockedIPv4 = replaceStr(s.config.BlockedIPv4, idx.Key, newKey)
+		sort.Strings(s.config.BlockedIPv4)
+	case "ip6":
+		a, err := netip.ParseAddr(edit.Str)
+		if err != nil || !a.Is6() || a.Is4In6() {
+			return cloneConfig(s.config), fmt.Errorf("valid IPv6 required")
+		}
+		newKey = a.String()
+		s.config.BlockedIPv6 = replaceStr(s.config.BlockedIPv6, idx.Key, newKey)
+		sort.Strings(s.config.BlockedIPv6)
+	case "cidr":
+		newKey = edit.CIDR.Direction + "|" + edit.CIDR.CIDR
+		s.config.BlockedCIDRs = replaceCIDR(s.config.BlockedCIDRs, idx.Key, edit.CIDR)
+		sort.Slice(s.config.BlockedCIDRs, func(i, j int) bool {
+			if s.config.BlockedCIDRs[i].Direction == s.config.BlockedCIDRs[j].Direction {
+				return s.config.BlockedCIDRs[i].CIDR < s.config.BlockedCIDRs[j].CIDR
+			}
+			return s.config.BlockedCIDRs[i].Direction < s.config.BlockedCIDRs[j].Direction
+		})
+	case "port":
+		newKey = edit.Port.Direction + "|" + edit.Port.Protocol + "|" + strconv.FormatUint(uint64(edit.Port.Port), 10)
+		s.config.BlockedPorts = replacePort(s.config.BlockedPorts, idx.Key, edit.Port)
+		sort.Slice(s.config.BlockedPorts, func(i, j int) bool {
+			a, b := s.config.BlockedPorts[i], s.config.BlockedPorts[j]
+			if a.Direction != b.Direction {
+				return a.Direction < b.Direction
+			}
+			if a.Protocol != b.Protocol {
+				return a.Protocol < b.Protocol
+			}
+			return a.Port < b.Port
+		})
+	case "uid":
+		newKey = strconv.FormatUint(uint64(edit.UID), 10)
+		s.config.BlockedUIDs = replaceUID(s.config.BlockedUIDs, idx.Key, edit.UID)
+		sort.Slice(s.config.BlockedUIDs, func(i, j int) bool { return s.config.BlockedUIDs[i] < s.config.BlockedUIDs[j] })
+	case "dns":
+		newKey = edit.Str
+		s.config.BlockedDNS = replaceStr(s.config.BlockedDNS, idx.Key, newKey)
+		sort.Strings(s.config.BlockedDNS)
+	case "sni":
+		newKey = edit.Str
+		s.config.BlockedSNI = replaceStr(s.config.BlockedSNI, idx.Key, newKey)
+		sort.Strings(s.config.BlockedSNI)
+	case "process":
+		newKey = edit.Str
+		s.config.BlockedProcesses = replaceStr(s.config.BlockedProcesses, idx.Key, newKey)
+		sort.Strings(s.config.BlockedProcesses)
+	case "rate":
+		newKey = edit.Rate.Destination
+		s.config.RateLimits = replaceRate(s.config.RateLimits, idx.Key, edit.Rate)
+		sort.Slice(s.config.RateLimits, func(i, j int) bool { return s.config.RateLimits[i].Destination < s.config.RateLimits[j].Destination })
+	default:
+		return cloneConfig(s.config), fmt.Errorf("rule type %s does not support edit", idx.Type)
+	}
+
+	now := time.Now().UTC()
+	newCompound := idx.Type + "|" + newKey
+	delete(s.ruleIndexByKey, oldCompound)
+	idx.Key = newKey
+	idx.UpdatedAt = now
+	idx.UpdatedBy = actor
+	s.ruleIndex[id] = idx
+	s.ruleIndexByKey[newCompound] = id
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: now, Actor: actor, Action: "ebpf.rule.patch", Target: id, Details: map[string]any{"type": idx.Type}})
+	beforeJSON, _ := json.Marshal(beforeEdit)
+	afterJSON, _ := json.Marshal(edit)
+	s.recordFirewallRuleRevisionLocked(id, "update", actor, beforeJSON, afterJSON)
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		delete(s.ruleIndexByKey, newCompound)
+		s.ruleIndex[id] = beforeEntry
+		s.ruleIndexByKey[oldCompound] = id
+		if len(s.firewallRuleRevisions) > 0 {
+			s.firewallRuleRevisions = s.firewallRuleRevisions[:len(s.firewallRuleRevisions)-1]
+			s.nextFirewallRevID--
+		}
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+// RollbackFirewallRule undoes one specific edit by re-applying that
+// revision's Before value as a new PatchRule edit (never mutates history in
+// place — the rollback itself becomes a new "update" revision, exactly like
+// PolicyRevision rollback). Deliberately restores Before, not After:
+// "rollback revision N" means "undo the change revision N made", the
+// natural action for a history entry's rollback button, not "re-apply the
+// same edit again."
+func (s *Store) RollbackFirewallRule(ruleID string, revisionID uint64, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.RLock()
+	var target models.FirewallRuleRevision
+	found := false
+	for _, r := range s.firewallRuleRevisions {
+		if r.RuleID == ruleID && r.ID == revisionID {
+			target = r
+			found = true
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if !found {
+		return s.Config(), fmt.Errorf("revision %d not found for rule %s", revisionID, ruleID)
+	}
+	if len(target.Before) == 0 {
+		return s.Config(), fmt.Errorf("revision %d has no restorable prior state", revisionID)
+	}
+	var edit RuleEdit
+	if err := json.Unmarshal(target.Before, &edit); err != nil {
+		return s.Config(), fmt.Errorf("revision %d is not a restorable edit: %w", revisionID, err)
+	}
+	return s.PatchRule(ruleID, edit, actor)
+}
+
+func (s *Store) recordFirewallRuleRevisionLocked(ruleID, action, actor string, before, after []byte) {
+	s.nextFirewallRevID++
+	s.firewallRuleRevisions = append(s.firewallRuleRevisions, models.FirewallRuleRevision{
+		ID: s.nextFirewallRevID, RuleID: ruleID, At: time.Now().UTC(), Actor: actor, Action: action,
+		Before: append(json.RawMessage(nil), before...), After: append(json.RawMessage(nil), after...),
+	})
+	if len(s.firewallRuleRevisions) > 1000 {
+		s.firewallRuleRevisions = append([]models.FirewallRuleRevision(nil), s.firewallRuleRevisions[len(s.firewallRuleRevisions)-1000:]...)
+	}
+}
+
+// FirewallRuleHistory returns revisions newest-first, optionally filtered
+// to one rule ID.
+func (s *Store) FirewallRuleHistory(ruleID string, limit int) []models.FirewallRuleRevision {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 50
+	}
+	out := make([]models.FirewallRuleRevision, 0, limit)
+	for i := len(s.firewallRuleRevisions) - 1; i >= 0 && len(out) < limit; i-- {
+		r := s.firewallRuleRevisions[i]
+		if ruleID != "" && r.RuleID != ruleID {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func currentRuleEditLocked(cfg models.EBPFFastPathConfig, idx firewallRuleIndex) (RuleEdit, error) {
+	switch idx.Type {
+	case "ip4", "ip6", "dns", "sni", "process":
+		return RuleEdit{Str: idx.Key}, nil
+	case "uid":
+		uid, err := strconv.ParseUint(idx.Key, 10, 32)
+		if err != nil {
+			return RuleEdit{}, fmt.Errorf("corrupt uid rule index entry")
+		}
+		return RuleEdit{UID: uint32(uid)}, nil
+	case "cidr":
+		for _, r := range cfg.BlockedCIDRs {
+			if r.Direction+"|"+r.CIDR == idx.Key {
+				return RuleEdit{CIDR: r}, nil
+			}
+		}
+	case "port":
+		for _, r := range cfg.BlockedPorts {
+			if r.Direction+"|"+r.Protocol+"|"+strconv.FormatUint(uint64(r.Port), 10) == idx.Key {
+				return RuleEdit{Port: r}, nil
+			}
+		}
+	case "rate":
+		for _, r := range cfg.RateLimits {
+			if r.Destination == idx.Key {
+				return RuleEdit{Rate: r}, nil
+			}
+		}
+	}
+	return RuleEdit{}, fmt.Errorf("rule value for %s not found in current config", idx.ID)
+}
+
+func replaceStr(in []string, old, new string) []string {
+	out := make([]string, 0, len(in))
+	for _, x := range in {
+		if x != old {
+			out = append(out, x)
+		}
+	}
+	return append(out, new)
+}
+func replaceCIDR(in []models.EBPFCIDRRule, oldKey string, new models.EBPFCIDRRule) []models.EBPFCIDRRule {
+	out := make([]models.EBPFCIDRRule, 0, len(in))
+	for _, x := range in {
+		if x.Direction+"|"+x.CIDR != oldKey {
+			out = append(out, x)
+		}
+	}
+	return append(out, new)
+}
+func replacePort(in []models.EBPFPortRule, oldKey string, new models.EBPFPortRule) []models.EBPFPortRule {
+	out := make([]models.EBPFPortRule, 0, len(in))
+	for _, x := range in {
+		if x.Direction+"|"+x.Protocol+"|"+strconv.FormatUint(uint64(x.Port), 10) != oldKey {
+			out = append(out, x)
+		}
+	}
+	return append(out, new)
+}
+func replaceUID(in []uint32, oldKey string, new uint32) []uint32 {
+	out := make([]uint32, 0, len(in))
+	for _, x := range in {
+		if strconv.FormatUint(uint64(x), 10) != oldKey {
+			out = append(out, x)
+		}
+	}
+	return append(out, new)
+}
+func replaceRate(in []models.EBPFRateLimit, oldKey string, new models.EBPFRateLimit) []models.EBPFRateLimit {
+	out := make([]models.EBPFRateLimit, 0, len(in))
+	for _, x := range in {
+		if x.Destination != oldKey {
+			out = append(out, x)
+		}
+	}
+	return append(out, new)
 }
 
 // SetShield replaces the DDoS shield config wholesale. Generation is bumped

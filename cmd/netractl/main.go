@@ -82,6 +82,7 @@ func usage() {
   ebpf rate set IPv4 PPS | rate del IPv4
   ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
   ebpf netpol enable | disable
+  ebpf rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION
   ebpf workloads [node]
   ebpf scope show | scope all
   ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
@@ -628,6 +629,44 @@ func ebpf() error {
 			}
 			b, _ := json.Marshal(map[string]any{"destination": os.Args[4], "pps": uint32(pps)})
 			return request("PUT", "/api/v1/ebpf/rate", b)
+		}
+	case "rules":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION")
+		}
+		switch os.Args[3] {
+		case "list":
+			return request("GET", "/api/v1/ebpf/rules", nil)
+		case "get":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules get ID")
+			}
+			return request("GET", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), nil)
+		case "patch":
+			if len(os.Args) < 6 {
+				return fmt.Errorf("rules patch ID JSON")
+			}
+			if !json.Valid([]byte(os.Args[5])) {
+				return fmt.Errorf("JSON body is not valid")
+			}
+			return request("PATCH", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), []byte(os.Args[5]))
+		case "delete":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules delete ID")
+			}
+			return request("DELETE", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4]), nil)
+		case "history":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("rules history ID")
+			}
+			return request("GET", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4])+"/history", nil)
+		case "rollback":
+			if len(os.Args) < 6 {
+				return fmt.Errorf("rules rollback ID REVISION")
+			}
+			return request("POST", "/api/v1/ebpf/rules/"+url.PathEscape(os.Args[4])+"/rollback/"+url.PathEscape(os.Args[5]), nil)
+		default:
+			return fmt.Errorf("rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION")
 		}
 	}
 	return fmt.Errorf("unknown ebpf command")

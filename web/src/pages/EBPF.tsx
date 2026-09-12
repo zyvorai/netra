@@ -2,7 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import TerminalFrame from '../components/TerminalFrame';
 
-type UnifiedRule = { type: string; value: string; detail: string; extra: string; del?: () => void };
+type UnifiedRule = { id?: string; type: string; value: string; detail: string; extra: string; created?: string; raw?: any; del?: () => void };
+
+// Fields relevant to each rule type, used to build both the inline edit
+// form and the PATCH body — mirrors the shape internal/api/server.go's
+// ebpfRulePatch expects per type.
+const EDIT_FIELDS: Record<string, string[]> = {
+  ip4: ['ip'], ip6: ['ip'],
+  cidr: ['cidr', 'direction'],
+  port: ['protocol', 'port', 'direction'],
+  uid: ['uid'],
+  dns: ['name'], sni: ['name'], process: ['name'],
+  rate: ['destination', 'pps'],
+};
 
 export default function EBPF() {
   const [cfg, setCfg] = useState<any>();
@@ -40,6 +52,11 @@ export default function EBPF() {
   const [shieldOther, setShieldOther] = useState('0');
   const [shieldBurst, setShieldBurst] = useState('2');
   const [shieldIP, setShieldIP] = useState('');
+  const [ruleList, setRuleList] = useState<any[]>([]);
+  const [editingId, setEditingId] = useState('');
+  const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [historyId, setHistoryId] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
 
   const load = () => Promise.all([
     api<any>('/api/v1/ebpf/config'),
@@ -48,8 +65,9 @@ export default function EBPF() {
     api<any>('/api/v1/ebpf/workloads'),
     api<any>('/api/v1/ebpf/topology?limit=50'),
     api<any>('/api/v1/ebpf/shield?limit=1'),
-  ]).then(([c, a, k, w, t, sd]) => {
-    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setErr('');
+    api<any>('/api/v1/ebpf/rules'),
+  ]).then(([c, a, k, w, t, sd, rl]) => {
+    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setErr('');
   }).catch(e => setErr(String(e)));
 
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
@@ -125,6 +143,42 @@ export default function EBPF() {
     call('/api/v1/ebpf/netpol/config', 'PUT', { enabled: next });
   }
 
+  function startEdit(r: any) {
+    setHistoryId('');
+    setEditingId(r.id);
+    setEditForm({
+      ip: r.value || '', name: r.value || '', uid: r.value || '',
+      cidr: r.cidr || '', direction: r.direction || 'egress', protocol: r.protocol || 'TCP',
+      port: r.port ? String(r.port) : '', destination: r.destination || '', pps: r.pps ? String(r.pps) : '',
+    });
+  }
+  function cancelEdit() { setEditingId(''); }
+  async function saveEdit(type: string) {
+    const body: any = {};
+    for (const f of EDIT_FIELDS[type] || []) {
+      body[f] = (f === 'port' || f === 'pps' || f === 'uid') ? Number(editForm[f]) : editForm[f];
+    }
+    try {
+      await api(`/api/v1/ebpf/rules/${encodeURIComponent(editingId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      setEditingId('');
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  async function toggleHistory(id: string) {
+    if (historyId === id) { setHistoryId(''); return; }
+    setEditingId('');
+    setHistoryId(id);
+    try { setHistory((await api<any>(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/history`)).items || []); } catch (e) { setErr(String(e)); }
+  }
+  async function rollback(id: string, revision: number) {
+    if (!confirm('Undo this edit? This restores the value it had before this revision.')) return;
+    try {
+      await api(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/rollback/${revision}`, { method: 'POST' });
+      setHistory((await api<any>(`/api/v1/ebpf/rules/${encodeURIComponent(id)}/history`)).items || []);
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+
   const events = useMemo(() => agents
     .flatMap(a => (a.events || []).map((e: any) => ({ ...e, node: a.node })))
     .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))
@@ -135,21 +189,17 @@ export default function EBPF() {
     .sort((a, b) => (b.packets || 0) - (a.packets || 0)).slice(0, 160), [agents]);
 
   const rules = useMemo<UnifiedRule[]>(() => {
-    if (!cfg) return [];
-    const out: UnifiedRule[] = [];
-    (cfg.blockedIPv4 || []).forEach((x: string) => out.push({ type: 'ip', value: x, detail: 'egress', extra: '', del: () => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE') }));
-    (cfg.blockedIPv6 || []).forEach((x: string) => out.push({ type: 'ip6', value: x, detail: 'egress', extra: '', del: () => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE') }));
-    (cfg.blockedCidrs || []).forEach((x: any) => out.push({ type: 'cidr', value: x.cidr, detail: x.direction, extra: '', del: () => call('/api/v1/ebpf/cidr/delete', 'POST', x) }));
-    (cfg.blockedPorts || []).forEach((x: any) => out.push({ type: 'port', value: `${x.protocol}/${x.port}`, detail: x.direction, extra: '', del: () => call('/api/v1/ebpf/port/delete', 'POST', x) }));
-    (cfg.blockedUids || []).forEach((x: number) => out.push({ type: 'uid', value: String(x), detail: '', extra: '', del: () => call('/api/v1/ebpf/uid/' + x, 'DELETE') }));
-    (cfg.blockedProcesses || []).forEach((x: string) => out.push({ type: 'process', value: x, detail: '', extra: '', del: () => call('/api/v1/ebpf/process/delete', 'POST', { name: x }) }));
-    (cfg.blockedDns || []).forEach((x: string) => out.push({ type: 'dns', value: x, detail: '', extra: '', del: () => call('/api/v1/ebpf/dns/delete', 'POST', { name: x }) }));
-    (cfg.blockedSni || []).forEach((x: string) => out.push({ type: 'sni', value: x, detail: '', extra: '', del: () => call('/api/v1/ebpf/sni/delete', 'POST', { name: x }) }));
-    (cfg.rateLimits || []).forEach((x: any) => out.push({ type: 'rate', value: x.destination, detail: '', extra: `${x.pps}pps`, del: () => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE') }));
-    if (cfg.shield?.mode && cfg.shield.mode !== 'off') out.push({ type: 'shield', value: cfg.shield.protectAll ? 'all traffic' : `${(cfg.shield.protectedIpv4 || []).length} protected IPs`, detail: cfg.shield.mode, extra: '' });
-    if (cfg.netPolEnabled) out.push({ type: 'netpol', value: `${(cfg.netPolDenies || []).length} deny entries`, detail: 'enabled', extra: '' });
+    const out: UnifiedRule[] = ruleList.map((r: any) => ({
+      id: r.id, type: r.type, raw: r,
+      value: r.type === 'cidr' ? r.cidr : r.type === 'port' ? `${r.protocol}/${r.port}` : r.type === 'rate' ? r.destination : r.value,
+      detail: r.direction || '', extra: r.type === 'rate' ? `${r.pps}pps` : '',
+      created: r.createdBy ? `${r.createdBy} · ${new Date(r.createdAt).toLocaleString()}` : '',
+      del: () => { if (confirm(`Delete this ${r.type} rule?`)) call('/api/v1/ebpf/rules/' + encodeURIComponent(r.id), 'DELETE'); },
+    }));
+    if (cfg?.shield?.mode && cfg.shield.mode !== 'off') out.push({ type: 'shield', value: cfg.shield.protectAll ? 'all traffic' : `${(cfg.shield.protectedIpv4 || []).length} protected IPs`, detail: cfg.shield.mode, extra: '' });
+    if (cfg?.netPolEnabled) out.push({ type: 'netpol', value: `${(cfg.netPolDenies || []).length} deny entries`, detail: 'enabled', extra: '' });
     return out.sort((a, b) => a.type === b.type ? a.value.localeCompare(b.value) : a.type.localeCompare(b.type));
-  }, [cfg]);
+  }, [ruleList, cfg?.shield, cfg?.netPolEnabled, cfg?.netPolDenies]);
 
   function cap(count: number, limit: number | undefined) {
     if (!limit) return null;
@@ -158,9 +208,43 @@ export default function EBPF() {
 
   return <div className="grid">
     <div className="span3"><TerminalFrame title="all configured rules">
-      <div className="flowhead rules"><span>TYPE</span><span>VALUE</span><span>DIRECTION</span><span>DETAIL</span><span>ACTIONS</span></div>
+      <div className="flowhead rules"><span>TYPE</span><span>VALUE</span><span>DETAIL</span><span>CREATED</span><span>ACTIONS</span></div>
       {rules.length === 0 && <p style={{ padding: '9px 4px' }}>No firewall rules configured.</p>}
-      {rules.map((r, i) => <div className="flowrow rules" key={r.type + r.value + i}><span>{r.type}</span><span>{r.value}</span><span>{r.detail}</span><span>{r.extra}</span><span>{r.del && <button onClick={r.del}>delete</button>}</span></div>)}
+      {rules.map((r, i) => (
+        <div key={r.id || (r.type + r.value + i)}>
+          <div className="flowrow rules">
+            <span>{r.type}</span><span>{r.value}</span><span>{r.detail}{r.extra}</span><span>{r.created || '—'}</span>
+            <span>
+              {r.id && <button onClick={() => startEdit(r.raw)}>edit</button>}
+              {r.id && <button onClick={() => toggleHistory(r.id!)}>history</button>}
+              {r.del && <button onClick={r.del}>delete</button>}
+            </span>
+          </div>
+          {editingId === r.id && <div className="flowrow rules">
+            <div style={{ gridColumn: '1 / -1' }} className="ruleform">
+              {(EDIT_FIELDS[r.type] || []).map(f => {
+                if (f === 'direction') return <select key={f} value={editForm.direction} onChange={e => setEditForm({ ...editForm, direction: e.target.value })}><option>egress</option><option>ingress</option><option>both</option></select>;
+                if (f === 'protocol') return <select key={f} value={editForm.protocol} onChange={e => setEditForm({ ...editForm, protocol: e.target.value })}><option>TCP</option><option>UDP</option><option>ANY</option></select>;
+                return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} inputMode={(f === 'port' || f === 'pps' || f === 'uid') ? 'numeric' : undefined} />;
+              })}
+              <button className="primary" onClick={() => saveEdit(r.type)}>Save</button>
+              <button onClick={cancelEdit}>Cancel</button>
+            </div>
+          </div>}
+          {historyId === r.id && <div className="flowrow rules">
+            <div style={{ gridColumn: '1 / -1' }}>
+              {history.length === 0 && <p>No edit history for this rule.</p>}
+              {history.map((h: any) => (
+                <div key={h.id} className="agent wide">
+                  <b>{new Date(h.at).toLocaleString()}</b><span>{h.actor}</span>
+                  <small>{JSON.stringify(h.before)} → {JSON.stringify(h.after)}</small>
+                  <button onClick={() => rollback(r.id!, h.id)}>undo this edit</button>
+                </div>
+              ))}
+            </div>
+          </div>}
+        </div>
+      ))}
     </TerminalFrame></div>
 
     <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'primary' : ''} onClick={() => mode('observe')}>Observe</button><input value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : ''} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}{err && <p className="warning">{err}</p>}</section>

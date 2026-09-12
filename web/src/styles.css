@@ -692,7 +692,10 @@ code {
 }
 .flowhead.rules,
 .flowrow.rules {
-  grid-template-columns: 90px 1fr 110px 140px 70px;
+  grid-template-columns: 80px 1fr 100px 210px 230px;
+}
+.flowrow.rules .ruleform {
+  margin: 6px 0;
 }
 
 .chips {
@@ -708,7 +711,8 @@ code {
    button is the same size" — see .revisionrow button below, which
    shares it, and .theme-toggle, which is the same height but circular. */
 .chips button,
-.revisionrow button {
+.revisionrow button,
+.flowrow.rules button {
   border: 1px solid var(--border-strong);
   background: transparent;
   border-radius: 980px;
@@ -718,7 +722,13 @@ code {
   color: var(--text-primary);
 }
 .chips button:hover,
-.revisionrow button:hover { background: var(--hover-fill); }
+.revisionrow button:hover,
+.flowrow.rules button:hover { background: var(--hover-fill); }
+.flowrow.rules > span:last-child {
+  display: flex;
+  gap: 6px;
+  overflow: visible;
+}
 
 .agent {
   display: grid;

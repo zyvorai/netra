@@ -758,6 +758,45 @@ type PolicyRevision struct {
 	Manifest  json.RawMessage `json:"manifest"`
 }
 
+// FirewallRule is a flattened, stable-ID view over one entry from
+// EBPFFastPathConfig's flat rule slices (exact IP, CIDR, port, UID, DNS,
+// SNI, process, or rate limit). It exists purely as a read/edit
+// convenience layer — the underlying config wire shape is unchanged, so
+// older agents/CLIs/MCP clients that only know the legacy value-keyed
+// routes are unaffected. Only the fields relevant to Type are populated.
+type FirewallRule struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"` // ip4|ip6|cidr|port|uid|dns|sni|process|rate
+	Summary     string    `json:"summary"`
+	Value       string    `json:"value,omitempty"` // ip4/ip6/uid(as string)/dns/sni/process
+	CIDR        string    `json:"cidr,omitempty"`
+	Port        uint16    `json:"port,omitempty"`
+	Protocol    string    `json:"protocol,omitempty"`
+	Direction   string    `json:"direction,omitempty"`
+	Destination string    `json:"destination,omitempty"`
+	PPS         uint32    `json:"pps,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	CreatedBy   string    `json:"createdBy,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy   string    `json:"updatedBy,omitempty"`
+}
+
+// FirewallRuleRevision snapshots a single edit to one FirewallRule (not the
+// whole EBPFFastPathConfig — a full-config snapshot already exists
+// implicitly via Revision + persisted state, and would be far larger than
+// needed for "show me what changed on this one rule"). Before/After are
+// JSON-encoded store.RuleEdit values; a rollback re-applies After from an
+// earlier revision as a new edit rather than mutating history in place.
+type FirewallRuleRevision struct {
+	ID     uint64          `json:"id"`
+	RuleID string          `json:"ruleId"`
+	At     time.Time       `json:"at"`
+	Actor  string          `json:"actor"`
+	Action string          `json:"action"` // update (create/delete remain visible via the audit log)
+	Before json.RawMessage `json:"before,omitempty"`
+	After  json.RawMessage `json:"after,omitempty"`
+}
+
 type PolicyArchive struct {
 	SchemaVersion int              `json:"schemaVersion"`
 	ExportedAt    time.Time        `json:"exportedAt"`

@@ -1,24 +1,41 @@
 # Firewall dashboard page
 
 The dashboard's **Firewall** nav page (formerly labeled "eBPF") is the single
-place to see and edit every eBPF-enforced rule. This doc covers what's there
-today; it will grow as the remaining phases of the firewall work land (stable
-rule IDs with true in-place edit and revision history, then a NetPol
-allow-list/default-deny engine — see `docs/native-netpol.md`).
+place to see, edit, and audit every eBPF-enforced rule. This doc covers what's
+there today; it will grow further once the NetPol allow-list/default-deny
+engine lands (see `docs/native-netpol.md`).
 
 ## Unified rules table
 
 The table at the top of the page flattens every rule type into one view:
 exact IPv4/IPv6 deny, CIDR, port, UID, process, DNS, SNI, rate limit, plus a
 synthetic row each for the DDoS shield (when its mode isn't `off`) and NetPol
-(when enabled). Each row's delete action calls the same endpoint its
-individual card below already used — there is no new delete API, just a
-consolidated view over the existing ones.
+(when enabled).
 
-Rows don't yet carry a created-by/created-at column or support in-place
-editing; both need the rule-ID system planned as a later phase. Until then,
-"editing" a rule remains delete-the-old-value-then-add-the-new-value via the
-per-type cards below the table.
+Every real rule (the 9 flat types — not the Shield/NetPol synthetic rows) has
+a **stable ID** (e.g. `cidr-3`) assigned the first time it's created, tracked
+in a server-side index kept separate from `EBPFFastPathConfig` itself — the
+wire shape every existing agent/CLI/MCP caller already depends on is
+unchanged. The ID survives edits, so:
+
+- **Edit** opens an inline form (fields specific to that rule's type) and
+  sends `PATCH /api/v1/ebpf/rules/{id}` — this changes the rule's value in
+  place under the same ID and records a revision, rather than the
+  delete-old/add-new dance the per-type cards below the table still use.
+- **History** shows every edit to that rule (before/after, actor, time) via
+  `GET /api/v1/ebpf/rules/{id}/history`. Creating or deleting a rule remains
+  visible via the Audit page instead — only edits get their own revision
+  history, since that's the case a real before/after diff is useful for.
+- **Undo this edit** on a history entry rolls back to the value the rule had
+  *before* that edit (`POST /api/v1/ebpf/rules/{id}/rollback/{revision}`),
+  itself recorded as a new revision rather than rewriting history.
+- **Delete** on the unified table calls `DELETE /api/v1/ebpf/rules/{id}`, a
+  thin ID-based wrapper over the same store mutation the per-type card's
+  delete button already used — there's no second deletion code path.
+
+Rules created before this ID system shipped are backfilled on the
+controller's next restart, attributed to `system:migration` rather than a
+fabricated actor/timestamp.
 
 ## Capacity indicators
 
