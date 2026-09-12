@@ -1,0 +1,135 @@
+[
+  {
+    "check": "theme",
+    "colorScheme": "dark",
+    "rootColor": "rgb(245, 245, 247)",
+    "bodyBg": "rgb(0, 0, 0)",
+    "navBg": "rgba(0, 0, 0, 0.72)"
+  },
+  {
+    "page": "Overview",
+    "ok": true,
+    "fullHero": true,
+    "pageHero": true,
+    "primary": null,
+    "chars": 1818,
+    "shot": "00-overview.png",
+    "snippet": "STANDALONE EBPF \u00b7 OPTIONAL CILIUM |  | See the network. Diagnose it. Contain it. | "
+  },
+  {
+    "page": "Pods",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 213,
+    "shot": "01-pods.png",
+    "snippet": "WORKLOADS |  | Pods. | "
+  },
+  {
+    "page": "VMs",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 214,
+    "shot": "02-vms.png",
+    "snippet": "WORKLOADS |  | Virtual machines. | "
+  },
+  {
+    "page": "Network Health",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 984,
+    "shot": "03-network-health.png",
+    "snippet": "NETWORK HEALTH |  | TCP and DNS from the kernel. | "
+  },
+  {
+    "page": "Path Diagnostics",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 694,
+    "shot": "04-path-diagnostics.png",
+    "snippet": "PATH DIAGNOSTICS |  | Connect latency and pressure. | "
+  },
+  {
+    "page": "Drop Diagnostics",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 512,
+    "shot": "05-drop-diagnostics.png",
+    "snippet": "DROP DIAGNOSTICS |  | Where packets disappear. | "
+  },
+  {
+    "page": "L7 Metadata",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 793,
+    "shot": "06-l7-metadata.png",
+    "snippet": "L7 METADATA |  | TLS and cleartext HTTP context. | "
+  },
+  {
+    "page": "Insights",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 1221,
+    "shot": "07-insights.png",
+    "snippet": "INSIGHTS |  | Behavior, rates, and exposure. | "
+  },
+  {
+    "page": "eBPF",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": {
+      "text": "Observe",
+      "fontSize": "15px",
+      "padding": "10px 18px",
+      "minHeight": "40px",
+      "radius": "980px"
+    },
+    "chars": 2418,
+    "shot": "08-ebpf.png",
+    "snippet": "STANDALONE DATAPATH |  | Observe everywhere. Enforce when leased. | "
+  },
+  {
+    "page": "Hubble",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 825,
+    "shot": "09-hubble.png",
+    "snippet": "HUBBLE |  | Optional Cilium enrichment. | "
+  },
+  {
+    "page": "Policies",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 1014,
+    "shot": "10-policies.png",
+    "snippet": "POLICIES |  | Cilium workbench. | "
+  },
+  {
+    "page": "Audit",
+    "ok": true,
+    "fullHero": false,
+    "pageHero": true,
+    "primary": null,
+    "chars": 139,
+    "shot": "11-audit.png",
+    "snippet": "AUDIT |  | What changed. | "
+  }
+]

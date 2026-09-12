@@ -83,6 +83,8 @@ API_KEY_LOCAL="${NETRA_API_KEY:-$(openssl rand -hex 32)}"
 AGENT_KEY_LOCAL="${NETRA_AGENT_KEY:-$(openssl rand -hex 32)}"
 AGENT_ENABLED_LOCAL="${NETRA_AGENT_ENABLED:-false}"
 WORKLOAD_CONSOLE_ENABLED_LOCAL="${NETRA_WORKLOAD_CONSOLE_ENABLED:-false}"
+AGENT_INTERFACES_LOCAL="${NETRA_AGENT_INTERFACES:-}"
+AGENT_XDP_INTERFACES_LOCAL="${NETRA_AGENT_XDP_INTERFACES:-}"
 
 ssh_host() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 REMOTE_HOME="$(ssh_host 'printf %s "$HOME"')"
@@ -139,6 +141,8 @@ API_KEY="${API_KEY_LOCAL}"
 AGENT_KEY="${AGENT_KEY_LOCAL}"
 AGENT_ENABLED="${AGENT_ENABLED_LOCAL}"
 WORKLOAD_CONSOLE_ENABLED="${WORKLOAD_CONSOLE_ENABLED_LOCAL}"
+AGENT_INTERFACES="${AGENT_INTERFACES_LOCAL}"
+AGENT_XDP_INTERFACES="${AGENT_XDP_INTERFACES_LOCAL}"
 mkdir -p "\$HOME/.netra"
 printf '%s\n' "\$API_KEY" > "\$HOME/.netra/api-key"
 printf '%s\n' "\$AGENT_KEY" > "\$HOME/.netra/agent-key"
@@ -236,11 +240,20 @@ if [[ "\$WORKLOAD_CONSOLE_ENABLED" == "true" ]]; then
   CONSOLE_SET=(--set workloadConsole.enabled=true)
 fi
 
+IFACE_SET=()
+if [[ -n "\$AGENT_INTERFACES" ]]; then
+  IFACE_SET+=(--set "agent.interfaces=\$AGENT_INTERFACES")
+fi
+if [[ -n "\$AGENT_XDP_INTERFACES" ]]; then
+  IFACE_SET+=(--set "agent.xdpInterfaces=\$AGENT_XDP_INTERFACES")
+fi
+
 helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \
   "\${HELM_AUTH[@]}" \
   "\${AGENT_SET[@]}" \
   "\${CONSOLE_SET[@]}" \
+  "\${IFACE_SET[@]}" \
   --set image.repository=ghcr.io/zyvorai/netra \
   --set image.tag=0.22.0 \
   --set image.pullPolicy=IfNotPresent \
