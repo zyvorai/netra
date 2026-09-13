@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import ExplainFinding from '../components/ExplainFinding';
 import Reveal from '../components/Reveal';
 
 type Summary = {
@@ -97,20 +98,20 @@ export default function Insights() {
 
     <section className="card">
       <p className="eyebrow">EXPOSURE</p><h3>Highest-ranked workloads</h3>
-      {(exposure || []).slice(0, 8).map(x => <div className={`insightrow ${x.severity}`} key={x.source}><b>{x.score}/100 · {x.severity}</b><span className="truncate" title={x.source} aria-label={x.source}>{x.source}</span><small>{(x.reasons || []).join(' · ')}</small></div>)}
+      {(exposure || []).slice(0, 8).map(x => <div className={`insightrow ${x.severity}`} key={x.source}><b>{x.score}/100 · {x.severity}</b><span className="truncate" title={x.source} aria-label={x.source}>{x.source}</span><small>{(x.reasons || []).join(' · ')}</small><ExplainFinding page="insights" kind="exposure" subject={x.source} message={(x.reasons || []).join(' · ')} severity={x.severity} /></div>)}
       {!exposure.length && <p className="empty-state">No exposure signals yet.</p>}
     </section>
 
     <section className="card span2">
       <p className="eyebrow">RATE DRIFT</p><h3>Time-window anomalies</h3>
       {!rateDrift?.baselineCapturedAt && <p>Capture a rate baseline after warm-up to compare current traffic rates.</p>}
-      {(rateDrift?.findings || []).slice(0, 30).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.metric}-${i}`}><b>{f.metric}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.ratio ? `${f.ratio.toFixed(1)}×` : 'new'}</code><small>{(f.currentRate ?? 0).toFixed(2)}/s current · {(f.baselineRate ?? 0).toFixed(2)}/s baseline</small></div>)}
+      {(rateDrift?.findings || []).slice(0, 30).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.metric}-${i}`}><b>{f.metric}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.ratio ? `${f.ratio.toFixed(1)}×` : 'new'}</code><small>{(f.currentRate ?? 0).toFixed(2)}/s current · {(f.baselineRate ?? 0).toFixed(2)}/s baseline</small><ExplainFinding page="insights" kind={`rate-drift:${f.metric}`} subject={f.source} message={f.message || `${f.metric} rate drift`} severity={f.severity} /></div>)}
       {rateDrift?.baselineCapturedAt && !(rateDrift.findings || []).length && !rateDrift.window?.warming && <p className="empty-state">No rate changes crossed the deterministic thresholds.</p>}
     </section>
 
     <section className="card">
       <p className="eyebrow">BEHAVIOR DRIFT</p><h3>New inventory</h3>
-      {(drift?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${f.value}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code></div>)}
+      {(drift?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${f.value}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code><ExplainFinding page="insights" kind={f.kind} subject={f.source} message={f.message || f.value} severity={f.severity} /></div>)}
       {drift?.baselineCapturedAt && !(drift.findings || []).length && <p className="empty-state">No new behavior crossed noise thresholds.</p>}
     </section>
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.11 — 2026-09-13
+
+- **Extended the AI digest and Explain-button reach** (0.27.10) with a fourth external PR kit continuing the same feature — same recurring pattern once more (full loose-file snapshot, `explain` command deletion in `cmd/netractl/main.go` rejected, this project's already-more-complete `docs/ai.md`/`docs/mcp-integration.md`/`README.md`/`CHANGELOG.md` kept over the kit's stale copies), plus one packaging slip: the kit's real edit to `docs/alerting.md` landed as a stray, misnamed `alerting.md` at the repo root instead of `docs/alerting.md` — used its content at the correct path rather than creating the stray file.
+  - `webhook.Event` gains a `text` field (duplicating `card`) so a digest event posts as readable text on Slack incoming webhooks, which render the `text` key by default, instead of raw JSON.
+  - The **Explain** button (0.27.10) is now on Path and Insights' exposure/rate-drift/behavior-drift rows too, alongside Health and Drops.
+  - Caught and fixed a real gap from 0.27.10: its own `internal/alert/poller_test.go` addition (`TestEvaluateEmitsAIDigestOnCriticalHealth`) was reviewed at the time but never actually applied to the file — applied it now (this kit's copy is a superset, additionally asserting the new `text` field is populated).
+  - Rejected the same reverted-test-fix hunk in `mcpserver_test.go` as before.
+  - Verified: `go build/vet/test ./...`, `helm lint`, web typecheck/test (51/51)/build.
+- Version bumped to 0.27.11 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.10 — 2026-09-13
 
 - **Extended the AI layer again** (0.27.9) with a third external PR kit continuing the same feature — same recurring pattern (full loose-file snapshot, `cmd/netractl/main.go` would have deleted `explain` if applied as given; merged by hand) but only two real deltas this time, since almost everything else in the kit already matched what was already merged:

@@ -29,7 +29,7 @@ Netra can push existing anomaly findings to one or more HTTP webhook endpoints o
 }
 ```
 
-Digest events (only when the cluster is not quiet) add two optional fields:
+Digest events (only when the cluster is not quiet) add three optional fields — `text` duplicates `card` under the key Slack incoming webhooks render by default, so a digest posts as readable text there instead of raw JSON:
 
 ```json
 {
@@ -40,6 +40,7 @@ Digest events (only when the cluster is not quiet) add two optional fields:
   "message": "NETRA DIGEST · WARNING · health 72\nFingerprint a1b2c3d4e5f6\n...",
   "fingerprint": "a1b2c3d4e5f6",
   "card": "NETRA DIGEST · WARNING · health 72\n...",
+  "text": "NETRA DIGEST · WARNING · health 72\n...",
   "timestamp": "2026-09-13T02:40:00Z"
 }
 ```

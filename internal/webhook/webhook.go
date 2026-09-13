@@ -37,6 +37,9 @@ type Event struct {
 	// Optional AI digest fields. Empty on classic health/path/drop events.
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Card        string `json:"card,omitempty"`
+	// Text is a Slack incoming-webhook compatible body field. Set on
+	// digest events so hooks.slack.com renders the card instead of raw JSON keys.
+	Text string `json:"text,omitempty"`
 }
 
 // severityRank orders "info" < "warning" < "critical". Matches the plain-string

@@ -109,6 +109,41 @@ func TestEvaluateSkipsDeadAgentsImplicitlyViaSources(t *testing.T) {
 	}
 }
 
+func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
+	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
+	agents := []models.AgentStatus{{
+		AgentReport: models.AgentReport{
+			Node: "n1",
+			Mode: "observe",
+			TCPHealth: []models.TCPHealthStat{{
+				Namespace: "pay",
+				Pod:       "api",
+				SRTTUS:    800_000,
+			}},
+		},
+	}}
+	now := time.Unix(3000, 0)
+	evs := p.evaluate(now, agents)
+	var digest *webhook.Event
+	for i := range evs {
+		if evs[i].Source == "ai" && evs[i].Kind == "digest" {
+			digest = &evs[i]
+		}
+	}
+	if digest == nil {
+		t.Fatalf("expected an ai/digest event among %d events", len(evs))
+	}
+	if digest.Fingerprint == "" || digest.Card == "" || digest.Text == "" {
+		t.Fatalf("digest missing fingerprint/card/text: %+v", digest)
+	}
+	again := p.evaluate(now.Add(time.Second), agents)
+	for _, ev := range again {
+		if ev.Source == "ai" && ev.Kind == "digest" {
+			t.Fatal("digest should be deduped within cooldown while fingerprint is unchanged")
+		}
+	}
+}
+
 // TestEndToEndDispatch wires a real Poller to a real webhook.Dispatcher and
 // an httptest fake sink, confirming an event survives the full path with
 // the expected JSON body.

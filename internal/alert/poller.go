@@ -179,5 +179,6 @@ func digestEvent(now time.Time, agents []models.AgentStatus) (webhook.Event, boo
 		Timestamp:   now,
 		Fingerprint: d.Fingerprint,
 		Card:        d.Card,
+		Text:        d.Card,
 	}, true
 }
