@@ -51,6 +51,18 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			pathParams:  []string{"ip"},
 		},
 		{
+			name: "netra_ebpf_allow_add", method: "POST", path: "/api/v1/ebpf/allow",
+			description: "Add an exact IPv4 or IPv6 exception. Evaluated before deny/rate. Still requires an enforce lease to change verdicts. Returns the updated fast-path config.",
+			schema:      objSchema(map[string]any{"ip": strProp("IPv4 or IPv6 address that must never be denied by the flat lists.")}, "ip"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_allow_delete", method: "DELETE", path: "/api/v1/ebpf/allow/{ip}",
+			description: "Remove an allow-list exception.",
+			schema:      objSchema(map[string]any{"ip": strProp("IPv4 or IPv6 address to drop from the exception list.")}, "ip"),
+			pathParams:  []string{"ip"},
+		},
+		{
 			name: "netra_ebpf_cidr_add", method: "POST", path: "/api/v1/ebpf/cidr",
 			description: "Add a CIDR to the eBPF fast-path CIDR deny rule set. Returns the full updated fast-path config.",
 			schema: objSchema(map[string]any{

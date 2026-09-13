@@ -42,7 +42,6 @@ func TestDispatcherDropsWhenFullWithoutBlocking(t *testing.T) {
 
 func TestPublishReturnsFalseWhenQueueFull(t *testing.T) {
 	block := make(chan struct{})
-	defer close(block)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-block
 	}))
@@ -65,6 +64,9 @@ func TestPublishReturnsFalseWhenQueueFull(t *testing.T) {
 			break
 		}
 	}
+	// Unblock the in-flight handler before the deferred d.Stop()/srv.Close()
+	// run, or both deadlock waiting on the still-blocked worker request.
+	close(block)
 	if !sawFalse {
 		t.Fatal("expected Publish to return false once the queue filled up")
 	}

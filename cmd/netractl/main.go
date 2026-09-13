@@ -78,6 +78,7 @@ func usage() {
   ebpf stats | summary | health | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP | deny del IP
+  ebpf allow add IP | allow del IP
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
   ebpf uid add UID | uid del UID
@@ -653,6 +654,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/deny/"+url.PathEscape(os.Args[4]), nil)
+		}
+	case "allow":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("allow add|del IP")
+		}
+		if os.Args[3] == "add" {
+			b, _ := json.Marshal(map[string]string{"ip": os.Args[4]})
+			return request("POST", "/api/v1/ebpf/allow", b)
+		}
+		if os.Args[3] == "del" {
+			return request("DELETE", "/api/v1/ebpf/allow/"+url.PathEscape(os.Args[4]), nil)
 		}
 	case "cidr":
 		if len(os.Args) < 5 {

@@ -40,6 +40,13 @@ func TestDraftRuleDNSAndPortAndRate(t *testing.T) {
 	}
 }
 
+func TestDraftRuleAllowException(t *testing.T) {
+	d := DraftRule("allow 10.0.0.5")
+	if !d.Understood || d.Kind != "allow" || d.ApplyPath != "/api/v1/ebpf/allow" {
+		t.Fatalf("%+v", d)
+	}
+}
+
 func TestDraftRuleRefusesDiagnostics(t *testing.T) {
 	d := DraftRule("why is DNS failing?")
 	if d.Understood {

@@ -127,6 +127,12 @@ func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
 	for _, v := range s.config.BlockedIPv6 {
 		touch("ip6", v)
 	}
+	for _, v := range s.config.AllowedIPv4 {
+		touch("allow4", v)
+	}
+	for _, v := range s.config.AllowedIPv6 {
+		touch("allow6", v)
+	}
 	for _, v := range s.config.BlockedCIDRs {
 		touch("cidr", v.Direction+"|"+v.CIDR)
 	}
@@ -701,9 +707,12 @@ func (s *Store) ListRules() []models.FirewallRule {
 	for id, idx := range s.ruleIndex {
 		fr := models.FirewallRule{ID: id, Type: idx.Type, CreatedAt: idx.CreatedAt, CreatedBy: idx.CreatedBy, UpdatedAt: idx.UpdatedAt, UpdatedBy: idx.UpdatedBy}
 		switch idx.Type {
-		case "ip4", "ip6", "dns", "sni", "process":
+		case "ip4", "ip6", "allow4", "allow6", "dns", "sni", "process":
 			fr.Value = idx.Key
 			fr.Summary = idx.Key
+			if idx.Type == "allow4" || idx.Type == "allow6" {
+				fr.Summary = "allow " + idx.Key
+			}
 		case "uid":
 			fr.Value = idx.Key
 			fr.Summary = "uid " + idx.Key
@@ -756,6 +765,10 @@ func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) 
 		return s.DelBlocked(key, actor)
 	case "ip6":
 		return s.DelBlockedIPv6(key, actor)
+	case "allow4":
+		return s.DelAllowed(key, actor)
+	case "allow6":
+		return s.DelAllowedIPv6(key, actor)
 	case "cidr":
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) != 2 {
@@ -1501,6 +1514,8 @@ func cloneWorkloads(in []models.WorkloadIdentity) []models.WorkloadIdentity {
 func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedIPv4 = append([]string(nil), c.BlockedIPv4...)
 	c.BlockedIPv6 = append([]string(nil), c.BlockedIPv6...)
+	c.AllowedIPv4 = append([]string(nil), c.AllowedIPv4...)
+	c.AllowedIPv6 = append([]string(nil), c.AllowedIPv6...)
 	c.BlockedCIDRs = append([]models.EBPFCIDRRule(nil), c.BlockedCIDRs...)
 	c.BlockedPorts = append([]models.EBPFPortRule(nil), c.BlockedPorts...)
 	c.BlockedUIDs = append([]uint32(nil), c.BlockedUIDs...)

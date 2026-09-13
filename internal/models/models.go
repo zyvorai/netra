@@ -30,7 +30,7 @@ type EBPFPortRule struct {
 }
 
 type EBPFRateLimit struct {
-	Destination string `json:"destination"` // IPv4 exact destination in v0.7
+	Destination string `json:"destination"` // exact IPv4 or IPv6 destination
 	PPS         uint32 `json:"pps"`
 }
 
@@ -60,6 +60,8 @@ type EBPFFastPathConfig struct {
 	Mode             string              `json:"mode"`
 	BlockedIPv4      []string            `json:"blockedIPv4"`
 	BlockedIPv6      []string            `json:"blockedIPv6,omitempty"`
+	AllowedIPv4      []string            `json:"allowedIPv4,omitempty"`
+	AllowedIPv6      []string            `json:"allowedIPv6,omitempty"`
 	BlockedCIDRs     []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`
 	BlockedPorts     []EBPFPortRule      `json:"blockedPorts,omitempty"`
 	BlockedUIDs      []uint32            `json:"blockedUids,omitempty"`

@@ -149,8 +149,8 @@ var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
-	"blocked_v4", "blocked_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
-	"rate_v4", "rate_state_v4", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
+	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
+	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
 }
 
@@ -611,6 +611,12 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 	if err := a.replaceIPSet("blocked_v6", cfg.BlockedIPv6, 16); err != nil {
 		return err
 	}
+	if err := a.replaceIPSet("allowed_v4", cfg.AllowedIPv4, 4); err != nil {
+		return err
+	}
+	if err := a.replaceIPSet("allowed_v6", cfg.AllowedIPv6, 16); err != nil {
+		return err
+	}
 	if err := a.replaceCIDRs(cfg.BlockedCIDRs); err != nil {
 		return err
 	}
@@ -875,28 +881,61 @@ func (a *Agent) replaceStringMap(name string, values []string, size int) error {
 }
 
 func (a *Agent) replaceRates(values []models.EBPFRateLimit) error {
-	m := a.collection.Maps["rate_v4"]
+	m4 := a.collection.Maps["rate_v4"]
+	if m4 == nil {
+		return fmt.Errorf("map rate_v4 unavailable")
+	}
 	var k [4]byte
 	var v uint32
 	var keys [][4]byte
-	it := m.Iterate()
+	it := m4.Iterate()
 	for it.Next(&k, &v) {
 		keys = append(keys, k)
 	}
 	for _, x := range keys {
-		_ = m.Delete(x)
+		_ = m4.Delete(x)
 	}
 	if err := mapIterErr(it.Err()); err != nil {
 		return err
 	}
+	m6 := a.collection.Maps["rate_v6"]
+	if m6 != nil {
+		var k6 [16]byte
+		var v6 uint32
+		var keys6 [][16]byte
+		it6 := m6.Iterate()
+		for it6.Next(&k6, &v6) {
+			keys6 = append(keys6, k6)
+		}
+		for _, x := range keys6 {
+			_ = m6.Delete(x)
+		}
+		if err := mapIterErr(it6.Err()); err != nil {
+			return err
+		}
+	}
 	for _, r := range values {
-		ip := net.ParseIP(r.Destination).To4()
-		if ip == nil || r.PPS == 0 {
+		if r.PPS == 0 {
 			continue
 		}
-		var q [4]byte
-		copy(q[:], ip)
-		if err := m.Put(q, r.PPS); err != nil {
+		ip := net.ParseIP(r.Destination)
+		if ip == nil {
+			continue
+		}
+		if v4 := ip.To4(); v4 != nil {
+			var q [4]byte
+			copy(q[:], v4)
+			if err := m4.Put(q, r.PPS); err != nil {
+				return err
+			}
+			continue
+		}
+		if m6 == nil {
+			continue
+		}
+		var q6 [16]byte
+		copy(q6[:], ip.To16())
+		if err := m6.Put(q6, r.PPS); err != nil {
 			return err
 		}
 	}

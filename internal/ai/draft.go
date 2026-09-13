@@ -54,8 +54,8 @@ func DraftRule(question string) RuleDraft {
 		return out
 	}
 	ql := strings.ToLower(q)
-	if !containsAny(ql, "deny", "block", "drop", "rate", "limit", "throttle", "ban", "forbid") {
-		out.Summary = "That does not look like a deny/rate request. Ask a diagnostic question instead, or say “deny …” / “rate-limit …”."
+	if !containsAny(ql, "deny", "block", "drop", "rate", "limit", "throttle", "ban", "forbid", "allow", "except", "whitelist", "exception") {
+		out.Summary = "That does not look like a deny/rate/allow request. Ask a diagnostic question instead, or say “deny …” / “allow …” / “rate-limit …”."
 		return out
 	}
 
@@ -82,6 +82,18 @@ func DraftRule(question string) RuleDraft {
 
 	if m := reIPv4.FindString(q); m != "" {
 		if addr, err := netip.ParseAddr(m); err == nil && addr.Is4() {
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow"
+				out.Body = map[string]any{"ip": addr.String()}
+				out.CLI = "netractl ebpf allow add " + addr.String()
+				out.Summary = "Exact IP allow-exception " + addr.String()
+				out.Warnings = append(out.Warnings, "Allow is evaluated before deny/rate. It does not itself enable enforce mode.")
+				return out
+			}
 			if pps := parsePPS(ql); pps > 0 {
 				out.Understood = true
 				out.Confidence = "high"

@@ -20,12 +20,15 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `workload_flow_stats`: exact cgroup-attributed tuple counters used for namespace/pod/workload topology.
 - `dest_stats`: legacy v0.x egress destination counter retained for map compatibility.
 - `blocked_v4`, `blocked_v6`: exact egress IP denies.
+- `allowed_v4`, `allowed_v6`: exact-IP exceptions evaluated before deny/CIDR/port/rate.
 - `blocked_cidr_v4`, `blocked_cidr_v6`: directional LPM prefix denies.
 - `blocked_ports`: directional L4 destination-port denies.
 - `blocked_uids`: socket UID denies.
 - `blocked_comms`: exact Linux process `comm` denies.
 - `blocked_dns`: exact normalized DNS qname denies for cleartext UDP/53.
 - `rate_v4`, `rate_state_v4`: exact IPv4 destination fixed-window PPS control.
+- `rate_v6`, `rate_state_v6`: exact IPv6 destination PPS (parity with `rate_v4`).
+- `icmp_type_stats`: observe-only ICMPv4 type histogram.
 - `scope_config`: enforcement scope mode (`all` or `selected`).
 - `enforced_cgroups`: cgroup IDs currently selected for enforcement.
 - `config_map`: observe/enforce mode.

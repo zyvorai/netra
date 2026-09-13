@@ -28,7 +28,8 @@ Rules are staged in controller state and synchronized to every agent. Observe mo
 | process `comm` | n/a | n/a | — | new sockets | ✅ |
 | exact DNS qname | protocol-level | protocol-level | — | UDP/53 | packet hook |
 | exact TLS SNI | TLS metadata | TLS metadata | — | parsed ClientHello | cgroup packet hook |
-| destination PPS | ✅ exact IPv4 | — | — | ✅ | — |
+| destination PPS | ✅ exact IPv4 | ✅ exact IPv6 | — | ✅ | — |
+| exact IP allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/rate |
 
 ## DNS visibility
 

@@ -55,6 +55,8 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/ebpf/drops"},
 		{"GET", "/api/v1/ebpf/diagnose"},
 		{"POST", "/api/v1/ebpf/sni"},
+		{"POST", "/api/v1/ebpf/allow"},
+		{"DELETE", "/api/v1/ebpf/allow/1.2.3.4"},
 		{"PUT", "/api/v1/ebpf/shield"},
 		{"PUT", "/api/v1/ebpf/netpol/config"},
 		{"PUT", "/api/v1/ebpf/netpol/v2/config"},

@@ -164,6 +164,22 @@ struct {
     __type(value, __u8);
 } blocked_v6 SEC(".maps");
 
+// allowed_v4/v6 are exact-IP exceptions evaluated before any deny/rate.
+// Presence means "never block this peer" for this packet. Observe mode
+// still records the flow. Empty maps = no exceptions (fail-open elsewhere).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, __u8);
+} allowed_v4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct ip6_key);
+    __type(value, __u8);
+} allowed_v6 SEC(".maps");
+
 struct lpm4_key { __u32 prefixlen; __u8 data[5]; } __attribute__((packed));
 struct lpm6_key { __u32 prefixlen; __u8 data[17]; } __attribute__((packed));
 struct {
@@ -225,6 +241,26 @@ struct {
     __type(key, __u32);
     __type(value, struct rate_state);
 } rate_state_v4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct ip6_key);
+    __type(value, __u32);
+} rate_v6 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct ip6_key);
+    __type(value, struct rate_state);
+} rate_state_v6 SEC(".maps");
+
+// icmp_type_stats: observe-only ICMPv4 type histogram (key = ICMP type 0-255).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u8);
+    __type(value, __u64);
+} icmp_type_stats SEC(".maps");
 
 // key 0: 0=observe, 1=enforce.
 struct {
@@ -948,6 +984,44 @@ static __always_inline int blocked_cidr6(__u8 direction, const __u8 addr[16])
     return bpf_map_lookup_elem(&blocked_cidr_v6, &k) != 0;
 }
 
+static __always_inline int rate_limited6(const __u8 addr[16])
+{
+    struct ip6_key k = {};
+    __builtin_memcpy(k.addr, addr, 16);
+    __u32 *pps = bpf_map_lookup_elem(&rate_v6, &k);
+    if (!pps || !*pps) return 0;
+    __u64 sec = bpf_ktime_get_ns() / 1000000000ULL;
+    struct rate_state zero = {.second = sec, .count = 0, .dropped = 0};
+    struct rate_state *st = bpf_map_lookup_elem(&rate_state_v6, &k);
+    if (!st) {
+        bpf_map_update_elem(&rate_state_v6, &k, &zero, BPF_NOEXIST);
+        st = bpf_map_lookup_elem(&rate_state_v6, &k);
+        if (!st) return 0;
+    }
+    if (st->second != sec) {
+        st->second = sec;
+        st->count = 1;
+        return 0;
+    }
+    __u64 old = __sync_fetch_and_add(&st->count, 1);
+    if (old >= *pps) {
+        __sync_fetch_and_add(&st->dropped, 1);
+        return 1;
+    }
+    return 0;
+}
+
+static __always_inline void bump_icmp_type(__u8 typ)
+{
+    __u64 *n = bpf_map_lookup_elem(&icmp_type_stats, &typ);
+    if (n) {
+        __sync_fetch_and_add(n, 1);
+        return;
+    }
+    __u64 one = 1;
+    bpf_map_update_elem(&icmp_type_stats, &typ, &one, BPF_NOEXIST);
+}
+
 static __always_inline int rate_limited4(__u32 dst)
 {
     __u32 *pps = bpf_map_lookup_elem(&rate_v4, &dst);
@@ -1087,19 +1161,22 @@ static __always_inline void submit_socket_event(struct bpf_sock_addr *ctx, __u8 
 static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16 dport, __u8 *reason, int apply_rate, __u64 cgroup_id)
 {
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
+    if (bpf_map_lookup_elem(&allowed_v4, &addr)) return 0;
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr4(direction,addr)) { *reason=REASON_CIDR; return 1; }
     if (dport && blocked_port(direction,proto,dport)) { *reason=REASON_PORT; return 1; }
     if (apply_rate && direction==DIR_EGRESS && rate_limited4(addr)) { *reason=REASON_RATE; return 1; }
     return 0;
 }
-static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 proto, __u16 dport, __u8 *reason, __u64 cgroup_id)
+static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 proto, __u16 dport, __u8 *reason, int apply_rate, __u64 cgroup_id)
 {
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     struct ip6_key k={}; __builtin_memcpy(k.addr,addr,16);
+    if (bpf_map_lookup_elem(&allowed_v6, &k)) return 0;
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr6(direction,addr)) { *reason=REASON_CIDR; return 1; }
     if (dport && blocked_port(direction,proto,dport)) { *reason=REASON_PORT; return 1; }
+    if (apply_rate && direction==DIR_EGRESS && rate_limited6(addr)) { *reason=REASON_RATE; return 1; }
     return 0;
 }
 
@@ -1291,6 +1368,9 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
     } else if (proto==IPPROTO_UDP) {
         struct udphdr *udp=l4; if ((void *)(udp+1)>data_end) return allow_value;
         sport=udp->source; dport=udp->dest; payload=(void *)(udp+1);
+    } else if (proto==IPPROTO_ICMP) {
+        unsigned char *ic = l4;
+        if ((void *)(ic + 1) <= data_end) bump_icmp_type(ic[0]);
     }
     __u32 peer = direction==DIR_EGRESS ? daddr : saddr;
     __u16 policy_port = dport;
@@ -1404,7 +1484,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         ct_fill(FAMILY_V6, proto, sport, dport, sc->src, sc->dst, &sc->ct);
         int established = (l4_ok && !syn_new && ct_hit(&sc->ct));
         __u8 reason=0; int blocked=0;
-        if (!established) blocked=decide6(direction,peer,proto,dport,&reason,cgroup_id);
+        if (!established) blocked=decide6(direction,peer,proto,dport,&reason,1,cgroup_id);
         update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
         update_iface_flow(ifindex,FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
@@ -1429,7 +1509,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
     int established = (l4_ok && !syn_new && ct_hit(&sc->ct));
     __u8 reason=0;
     int blocked=0;
-    if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,cgroup_id);
+    if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,1,cgroup_id);
     update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if(blocked) {
         record_policy_drop(FAMILY_V6,proto,direction,reason,sport,dport,sc->src,sc->dst,len);
@@ -1675,7 +1755,7 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
-    int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,cgroup_id);
+    int blocked=0;if(enforcing()&&scope_allows(cgroup_id)&&bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}else if(enforcing()&&scope_allows(cgroup_id)){struct comm_key ck={};bpf_get_current_comm(ck.name,sizeof(ck.name));if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}}if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,0,cgroup_id);
     if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); struct connect_start_value cv={}; cv.start_ns=bpf_ktime_get_ns(); cv.key.cgroup_id=cgroup_id; cv.key.family=FAMILY_V6; cv.key.protocol=IPPROTO_TCP; cv.key.remote_port=dport; copy16(cv.key.remote,addr); bpf_map_update_elem(&connect_start,&cookie,&cv,BPF_ANY); } }
     track_connect_attempt(cgroup_id,FAMILY_V6,proto,addr,dport,blocked);
     submit_socket_event(ctx,FAMILY_V6,proto,blocked?ACT_BLOCK:ACT_ALLOW,reason,addr);return blocked?0:1;
@@ -1846,7 +1926,7 @@ SEC("xdp") int netra_xdp_ingress(struct xdp_md *ctx)
             struct udphdr*u=l4;if((void*)(u+1)<=end){sport=u->source;dport=u->dest;}
         }
         __u8 reason=0;
-        if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,walk.proto,dport,&reason,0)){
+        if(decide6(DIR_INGRESS,(const __u8*)&ip6->saddr,walk.proto,dport,&reason,0,0)){
             __u8 src[16],dst[16];copy16(src,&ip6->saddr);copy16(dst,&ip6->daddr);
             update_flow(FAMILY_V6,DIR_INGRESS,HOOK_XDP,walk.proto,sport,dport,src,dst,(__u32)((long)end-(long)data),1,0);
             submit_packet_event(FAMILY_V6,DIR_INGRESS,HOOK_XDP,walk.proto,ACT_BLOCK,EVT_BLOCK,reason,ctx->ingress_ifindex,(__u32)((long)end-(long)data),src,dst,sport,dport,0,0,0,0);
