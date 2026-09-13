@@ -153,6 +153,17 @@ func (s *Server) aiSnapshot(r *http.Request) (ai.Snapshot, error) {
 		TopProcesses:    toAICounts(obs.TopProcesses, 8),
 		BlockReasons:    toAICounts(obs.BlockReasons, 8),
 	}
+	for _, a := range agents {
+		for _, c := range a.ICMPTypes {
+			snap.TopICMP = append(snap.TopICMP, ai.NamedCount{Name: c.Name, Count: c.Count})
+		}
+		for _, c := range a.ICMP6Types {
+			snap.TopICMP = append(snap.TopICMP, ai.NamedCount{Name: "v6:" + c.Name, Count: c.Count})
+		}
+	}
+	if len(snap.TopICMP) > 8 {
+		snap.TopICMP = snap.TopICMP[:8]
+	}
 	for _, a := range hs.Summary.Anomalies {
 		if len(snap.Anomalies) >= 8 {
 			break

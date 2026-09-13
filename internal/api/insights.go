@@ -15,7 +15,12 @@ import (
 	"github.com/zyvorai/netra/internal/store"
 )
 
+var errKubeUnavailable = errors.New("kubernetes client unavailable")
+
 func (s *Server) dependencyGraph(r *http.Request, limit int) (models.DependencyGraph, error) {
+	if s.kube == nil {
+		return models.DependencyGraph{}, errKubeUnavailable
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	pods, err := s.kube.ListPods(ctx, "")

@@ -446,6 +446,53 @@ func TestPatchRulePersistenceFailureRestoresIndex(t *testing.T) {
 	}
 }
 
+func TestAllowCIDRAndIngressDeny(t *testing.T) {
+	s := New()
+	if _, err := s.AddAllowedCIDR(models.EBPFCIDRRule{CIDR: "10.1.0.0/16", Direction: "egress"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddBlockedIngress("203.0.113.5", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddBlockedIngressIPv6("2001:db8::5", "test"); err != nil {
+		t.Fatal(err)
+	}
+	c := s.Config()
+	if len(c.AllowedCIDRs) != 1 || len(c.BlockedIngressIPv4) != 1 || len(c.BlockedIngressIPv6) != 1 {
+		t.Fatalf("rules missing: %#v", c)
+	}
+	// Config must be a deep copy — the exact class of bug this project hit
+	// for real in 0.25.0 (forgetting to clone Shield/NetPolDenies).
+	c.AllowedCIDRs[0].CIDR = "mutated"
+	c.BlockedIngressIPv4[0] = "mutated"
+	c.BlockedIngressIPv6[0] = "mutated"
+	c2 := s.Config()
+	if c2.AllowedCIDRs[0].CIDR == "mutated" || c2.BlockedIngressIPv4[0] == "mutated" || c2.BlockedIngressIPv6[0] == "mutated" {
+		t.Fatal("Config leaked mutable slices")
+	}
+
+	// Each new rule type must be independently reachable through the
+	// unified rules table and deletable by stable ID.
+	rules := s.ListRules()
+	byType := map[string]models.FirewallRule{}
+	for _, r := range rules {
+		byType[r.Type] = r
+	}
+	for _, typ := range []string{"allow-cidr", "ip4-in", "ip6-in"} {
+		r, ok := byType[typ]
+		if !ok {
+			t.Fatalf("rule type %s missing from ListRules: %#v", typ, rules)
+		}
+		if _, err := s.DeleteRule(r.ID, "test"); err != nil {
+			t.Fatalf("DeleteRule(%s): %v", typ, err)
+		}
+	}
+	final := s.Config()
+	if len(final.AllowedCIDRs) != 0 || len(final.BlockedIngressIPv4) != 0 || len(final.BlockedIngressIPv6) != 0 {
+		t.Fatalf("rules not removed via DeleteRule: %#v", final)
+	}
+}
+
 func TestDeleteRuleByID(t *testing.T) {
 	s := New()
 	if _, err := s.AddUID(1000, "test"); err != nil {

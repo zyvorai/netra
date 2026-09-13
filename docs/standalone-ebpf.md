@@ -21,7 +21,7 @@ Rules are staged in controller state and synchronized to every agent. Observe mo
 
 | Control | IPv4 | IPv6 | ingress | egress | process-aware |
 |---|---:|---:|---:|---:|---:|
-| exact IP | ✅ | ✅ | — | ✅ | socket hook can apply |
+| exact IP | ✅ | ✅ | ✅ | ✅ | socket hook can apply egress |
 | CIDR LPM | ✅ | ✅ | ✅ | ✅ | socket hook can apply egress |
 | TCP/UDP/ANY port | ✅ | ✅ | ✅ | ✅ | ✅ egress |
 | UID | n/a | n/a | — | new sockets | ✅ |
@@ -30,6 +30,7 @@ Rules are staged in controller state and synchronized to every agent. Observe mo
 | exact TLS SNI | TLS metadata | TLS metadata | — | parsed ClientHello | cgroup packet hook |
 | destination PPS | ✅ exact IPv4 | ✅ exact IPv6 | — | ✅ | — |
 | exact IP allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/rate |
+| CIDR LPM allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/rate |
 
 ## DNS visibility
 

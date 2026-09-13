@@ -68,13 +68,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.20"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.21"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.20"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.21"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.20"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.21"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -112,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/ebpf/allow/{ip}", s.auth(http.HandlerFunc(s.ebpfAllowDelete)))
 	mux.Handle("POST /api/v1/ebpf/cidr", s.auth(http.HandlerFunc(s.ebpfCIDRAdd)))
 	mux.Handle("POST /api/v1/ebpf/cidr/delete", s.auth(http.HandlerFunc(s.ebpfCIDRDelete)))
+	mux.Handle("POST /api/v1/ebpf/allow-cidr", s.auth(http.HandlerFunc(s.ebpfAllowCIDRAdd)))
+	mux.Handle("POST /api/v1/ebpf/allow-cidr/delete", s.auth(http.HandlerFunc(s.ebpfAllowCIDRDelete)))
 	mux.Handle("POST /api/v1/ebpf/port", s.auth(http.HandlerFunc(s.ebpfPortAdd)))
 	mux.Handle("POST /api/v1/ebpf/port/delete", s.auth(http.HandlerFunc(s.ebpfPortDelete)))
 	mux.Handle("POST /api/v1/ebpf/uid", s.auth(http.HandlerFunc(s.ebpfUIDAdd)))
@@ -250,7 +252,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.20", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.21", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -878,7 +880,8 @@ func (s *Server) ebpfMode(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 	var x struct {
-		IP string `json:"ip"`
+		IP        string `json:"ip"`
+		Direction string `json:"direction"`
 	}
 	if err := decodeJSON(r, &x, 1<<16); err != nil {
 		errorJSON(w, 400, err.Error())
@@ -889,11 +892,34 @@ func (s *Server) ebpfDenyAdd(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "a valid IPv4 or IPv6 address is required")
 		return
 	}
+	dir := strings.ToLower(strings.TrimSpace(x.Direction))
+	if dir == "" {
+		dir = "egress"
+	}
+	if dir != "egress" && dir != "ingress" && dir != "both" {
+		errorJSON(w, 400, "direction must be egress, ingress, or both")
+		return
+	}
 	var cfg models.EBPFFastPathConfig
-	if a.Is4() {
-		cfg, err = s.store.AddBlocked(a.String(), actor(r))
-	} else {
-		cfg, err = s.store.AddBlockedIPv6(a.String(), actor(r))
+	act := actor(r)
+	if dir == "egress" || dir == "both" {
+		if a.Is4() {
+			cfg, err = s.store.AddBlocked(a.String(), act)
+		} else {
+			cfg, err = s.store.AddBlockedIPv6(a.String(), act)
+		}
+		if err != nil {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
+			return
+		}
+	}
+	if dir == "ingress" || dir == "both" {
+		if a.Is4() {
+			cfg, err = s.store.AddBlockedIngress(a.String(), act)
+		} else {
+			cfg, err = s.store.AddBlockedIngressIPv6(a.String(), act)
+		}
 	}
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
@@ -953,11 +979,28 @@ func (s *Server) ebpfDenyDelete(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "valid IPv4 or IPv6 required")
 		return
 	}
+	act := actor(r)
+	// An exact-IP deny may exist in the egress list, the ingress list, or
+	// both (added via "both" direction) — clear whichever this address
+	// is actually in, so callers can delete by IP alone without needing
+	// to know which direction it was added under.
 	var cfg models.EBPFFastPathConfig
 	if a.Is4() {
-		cfg, err = s.store.DelBlocked(a.String(), actor(r))
+		cfg, err = s.store.DelBlocked(a.String(), act)
+		if err != nil {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
+			return
+		}
+		cfg, err = s.store.DelBlockedIngress(a.String(), act)
 	} else {
-		cfg, err = s.store.DelBlockedIPv6(a.String(), actor(r))
+		cfg, err = s.store.DelBlockedIPv6(a.String(), act)
+		if err != nil {
+			s.metricsData.statePersistErrors.Add(1)
+			errorJSON(w, http.StatusInsufficientStorage, "could not persist deny map: "+err.Error())
+			return
+		}
+		cfg, err = s.store.DelBlockedIngressIPv6(a.String(), act)
 	}
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
@@ -1002,6 +1045,43 @@ func (s *Server) ebpfCIDRMutate(w http.ResponseWriter, r *http.Request, del bool
 	if err != nil {
 		s.metricsData.statePersistErrors.Add(1)
 		errorJSON(w, http.StatusInsufficientStorage, "could not persist CIDR rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+func (s *Server) ebpfAllowCIDRAdd(w http.ResponseWriter, r *http.Request) {
+	s.ebpfAllowCIDRMutate(w, r, false)
+}
+func (s *Server) ebpfAllowCIDRDelete(w http.ResponseWriter, r *http.Request) {
+	s.ebpfAllowCIDRMutate(w, r, true)
+}
+func (s *Server) ebpfAllowCIDRMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x models.EBPFCIDRRule
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	p, err := netip.ParsePrefix(strings.TrimSpace(x.CIDR))
+	if err != nil {
+		errorJSON(w, 400, "valid IPv4 or IPv6 CIDR required")
+		return
+	}
+	x.CIDR = p.Masked().String()
+	var ok bool
+	x.Direction, ok = normalizeDirection(x.Direction)
+	if !ok {
+		errorJSON(w, 400, "direction must be ingress, egress, or both")
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelAllowedCIDR(x, actor(r))
+	} else {
+		cfg, err = s.store.AddAllowedCIDR(x, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist allow CIDR: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, cfg)
@@ -1839,7 +1919,7 @@ var ebpfRuleLimits = map[string]int{
 }
 
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 egress deny", "IPv4/IPv6 CIDR ingress/egress deny", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters"}, "enforcement": []string{"exact IPv4/IPv6 deny (egress, ingress, or both)", "exact IPv4/IPv6 allow-exception (evaluated before deny/CIDR/port/rate)", "IPv4/IPv6 CIDR ingress/egress deny", "IPv4/IPv6 CIDR allow-exception (evaluated before deny/CIDR/port/rate)", "TCP/UDP/ANY port deny", "UID socket deny", "process-name (comm) socket deny", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4/IPv6 destination PPS limit", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

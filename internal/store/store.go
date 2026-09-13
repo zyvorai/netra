@@ -133,6 +133,15 @@ func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
 	for _, v := range s.config.AllowedIPv6 {
 		touch("allow6", v)
 	}
+	for _, v := range s.config.AllowedCIDRs {
+		touch("allow-cidr", v.Direction+"|"+v.CIDR)
+	}
+	for _, v := range s.config.BlockedIngressIPv4 {
+		touch("ip4-in", v)
+	}
+	for _, v := range s.config.BlockedIngressIPv6 {
+		touch("ip6-in", v)
+	}
 	for _, v := range s.config.BlockedCIDRs {
 		touch("cidr", v.Direction+"|"+v.CIDR)
 	}
@@ -707,12 +716,22 @@ func (s *Store) ListRules() []models.FirewallRule {
 	for id, idx := range s.ruleIndex {
 		fr := models.FirewallRule{ID: id, Type: idx.Type, CreatedAt: idx.CreatedAt, CreatedBy: idx.CreatedBy, UpdatedAt: idx.UpdatedAt, UpdatedBy: idx.UpdatedBy}
 		switch idx.Type {
-		case "ip4", "ip6", "allow4", "allow6", "dns", "sni", "process":
+		case "ip4", "ip6", "allow4", "allow6", "ip4-in", "ip6-in", "dns", "sni", "process":
 			fr.Value = idx.Key
 			fr.Summary = idx.Key
 			if idx.Type == "allow4" || idx.Type == "allow6" {
 				fr.Summary = "allow " + idx.Key
 			}
+			if idx.Type == "ip4-in" || idx.Type == "ip6-in" {
+				fr.Summary = "ingress deny " + idx.Key
+				fr.Direction = "ingress"
+			}
+		case "allow-cidr":
+			parts := strings.SplitN(idx.Key, "|", 2)
+			if len(parts) == 2 {
+				fr.Direction, fr.CIDR = parts[0], parts[1]
+			}
+			fr.Summary = "allow " + fr.Direction + " · " + fr.CIDR
 		case "uid":
 			fr.Value = idx.Key
 			fr.Summary = "uid " + idx.Key
@@ -769,6 +788,16 @@ func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) 
 		return s.DelAllowed(key, actor)
 	case "allow6":
 		return s.DelAllowedIPv6(key, actor)
+	case "allow-cidr":
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			return s.Config(), fmt.Errorf("corrupt allow-cidr rule index entry")
+		}
+		return s.DelAllowedCIDR(models.EBPFCIDRRule{Direction: parts[0], CIDR: parts[1]}, actor)
+	case "ip4-in":
+		return s.DelBlockedIngress(key, actor)
+	case "ip6-in":
+		return s.DelBlockedIngressIPv6(key, actor)
 	case "cidr":
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) != 2 {
@@ -1516,6 +1545,9 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedIPv6 = append([]string(nil), c.BlockedIPv6...)
 	c.AllowedIPv4 = append([]string(nil), c.AllowedIPv4...)
 	c.AllowedIPv6 = append([]string(nil), c.AllowedIPv6...)
+	c.AllowedCIDRs = append([]models.EBPFCIDRRule(nil), c.AllowedCIDRs...)
+	c.BlockedIngressIPv4 = append([]string(nil), c.BlockedIngressIPv4...)
+	c.BlockedIngressIPv6 = append([]string(nil), c.BlockedIngressIPv6...)
 	c.BlockedCIDRs = append([]models.EBPFCIDRRule(nil), c.BlockedCIDRs...)
 	c.BlockedPorts = append([]models.EBPFPortRule(nil), c.BlockedPorts...)
 	c.BlockedUIDs = append([]uint32(nil), c.BlockedUIDs...)

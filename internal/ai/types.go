@@ -39,6 +39,7 @@ type Snapshot struct {
 	TopDNS          []NamedCount `json:"topDns,omitempty"`
 	TopProcesses    []NamedCount `json:"topProcesses,omitempty"`
 	BlockReasons    []NamedCount `json:"blockReasons,omitempty"`
+	TopICMP         []NamedCount `json:"topIcmp,omitempty"`
 	Anomalies       []Finding    `json:"anomalies,omitempty"`
 	Drift           []Finding    `json:"drift,omitempty"`
 	Exposure        []Finding    `json:"exposure,omitempty"`

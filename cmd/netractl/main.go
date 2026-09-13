@@ -77,8 +77,9 @@ func usage() {
   drops [explain]
   ebpf stats | summary | health | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
-  ebpf deny add IP | deny del IP
+  ebpf deny add IP [egress|ingress|both] | deny del IP
   ebpf allow add IP | allow del IP
+  ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
   ebpf uid add UID | uid del UID
@@ -655,11 +656,30 @@ func ebpf() error {
 			return fmt.Errorf("deny add|del IP")
 		}
 		if os.Args[3] == "add" {
-			b, _ := json.Marshal(map[string]string{"ip": os.Args[4]})
+			dir := "egress"
+			if len(os.Args) > 5 {
+				dir = os.Args[5]
+			}
+			b, _ := json.Marshal(map[string]string{"ip": os.Args[4], "direction": dir})
 			return request("POST", "/api/v1/ebpf/deny", b)
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/deny/"+url.PathEscape(os.Args[4]), nil)
+		}
+	case "allow-cidr":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("allow-cidr add|del CIDR [direction]")
+		}
+		dir := "egress"
+		if len(os.Args) > 5 {
+			dir = os.Args[5]
+		}
+		b, _ := json.Marshal(map[string]any{"cidr": os.Args[4], "direction": dir})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/allow-cidr", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/allow-cidr/delete", b)
 		}
 	case "allow":
 		if len(os.Args) < 5 {

@@ -93,9 +93,10 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 
 ### Emergency enforcement
 
-- Exact IPv4 and IPv6 egress deny.
+- Exact IPv4 and IPv6 deny for egress, ingress, or both.
 - Exact IPv4/IPv6 allow-exception, evaluated before deny/CIDR/port/rate — does not itself enable enforce mode.
 - IPv4/IPv6 CIDR deny for ingress, egress or both using BPF LPM tries.
+- IPv4/IPv6 CIDR allow-exception for ingress, egress or both — same precedence as the exact-IP allow-exception.
 - TCP/UDP/ANY destination-port deny for ingress, egress or both.
 - Linux UID deny for new socket operations.
 - Linux process-`comm` deny for new socket operations.

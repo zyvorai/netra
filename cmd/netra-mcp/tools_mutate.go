@@ -41,8 +41,11 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 		{
 			name: "netra_ebpf_deny_add", method: "POST", path: "/api/v1/ebpf/deny",
 			description: "Add an exact IPv4 or IPv6 address to the eBPF deny list (blocks all traffic to/from it). Returns the full updated fast-path config.",
-			schema:      objSchema(map[string]any{"ip": strProp("IPv4 or IPv6 address to block.")}, "ip"),
-			bodyFields:  true,
+			schema: objSchema(map[string]any{
+				"ip":        strProp("IPv4 or IPv6 address to block."),
+				"direction": strProp("egress, ingress, or both. Defaults to egress."),
+			}, "ip"),
+			bodyFields: true,
 		},
 		{
 			name: "netra_ebpf_deny_delete", method: "DELETE", path: "/api/v1/ebpf/deny/{ip}",
@@ -61,6 +64,24 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			description: "Remove an allow-list exception.",
 			schema:      objSchema(map[string]any{"ip": strProp("IPv4 or IPv6 address to drop from the exception list.")}, "ip"),
 			pathParams:  []string{"ip"},
+		},
+		{
+			name: "netra_ebpf_allow_cidr_add", method: "POST", path: "/api/v1/ebpf/allow-cidr",
+			description: "Add a CIDR exception evaluated before deny/rate. Direction ingress|egress|both.",
+			schema: objSchema(map[string]any{
+				"cidr":      strProp("CIDR exception, e.g. \"10.0.0.0/24\"."),
+				"direction": strProp("ingress, egress, or both."),
+			}, "cidr"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_allow_cidr_delete", method: "POST", path: "/api/v1/ebpf/allow-cidr/delete",
+			description: "Remove a CIDR exception.",
+			schema: objSchema(map[string]any{
+				"cidr":      strProp("CIDR exception to remove."),
+				"direction": strProp("ingress, egress, or both."),
+			}, "cidr"),
+			bodyFields: true,
 		},
 		{
 			name: "netra_ebpf_cidr_add", method: "POST", path: "/api/v1/ebpf/cidr",

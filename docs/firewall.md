@@ -8,11 +8,12 @@ per-workload NetPol v2 allow-list/default-deny engine (see
 ## Unified rules table
 
 The table at the top of the page flattens every rule type into one view:
-exact IPv4/IPv6 deny, exact IPv4/IPv6 allow-exception, CIDR, port, UID,
-process, DNS, SNI, rate limit, plus a synthetic row each for the DDoS shield
-(when its mode isn't `off`) and NetPol (when enabled).
+exact IPv4/IPv6 deny (egress or ingress), exact IPv4/IPv6 allow-exception,
+CIDR deny, CIDR allow-exception, port, UID, process, DNS, SNI, rate limit,
+plus a synthetic row each for the DDoS shield (when its mode isn't `off`)
+and NetPol (when enabled).
 
-Every real rule (the 11 flat types — not the Shield/NetPol synthetic rows)
+Every real rule (the 14 flat types — not the Shield/NetPol synthetic rows)
 has a **stable ID** (e.g. `cidr-3`) assigned the first time it's created,
 tracked in a server-side index kept separate from `EBPFFastPathConfig`
 itself — the wire shape every existing agent/CLI/MCP caller already depends
@@ -22,9 +23,10 @@ on is unchanged. The ID survives edits, so:
   sends `PATCH /api/v1/ebpf/rules/{id}` — this changes the rule's value in
   place under the same ID and records a revision, rather than the
   delete-old/add-new dance the per-type cards below the table still use.
-  The two allow-exception types (`allow4`/`allow6`) are add/delete-only —
-  there is no in-place edit for them; the rules table's Edit action is not
-  offered for those rows.
+  The exact-IP and CIDR allow-exception types (`allow4`/`allow6`/`allow-cidr`)
+  and the ingress-deny types (`ip4-in`/`ip6-in`) are add/delete-only — there
+  is no in-place edit for them; the rules table's Edit action is not offered
+  for those rows.
 - **History** shows every edit to that rule (before/after, actor, time) via
   `GET /api/v1/ebpf/rules/{id}/history`. Creating or deleting a rule remains
   visible via the Audit page instead — only edits get their own revision

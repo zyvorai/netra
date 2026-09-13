@@ -196,6 +196,32 @@ struct {
     __type(key, struct lpm6_key);
     __type(value, __u8);
 } blocked_cidr_v6 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 8192);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm4_key);
+    __type(value, __u8);
+} allowed_cidr_v4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 8192);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm6_key);
+    __type(value, __u8);
+} allowed_cidr_v6 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, __u8);
+} blocked_ingress_v4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct ip6_key);
+    __type(value, __u8);
+} blocked_ingress_v6 SEC(".maps");
 
 struct port_key { __u8 direction; __u8 protocol; __u16 port; };
 struct {
@@ -261,6 +287,13 @@ struct {
     __type(key, __u8);
     __type(value, __u64);
 } icmp_type_stats SEC(".maps");
+// icmp6_type_stats: observe-only ICMPv6 type histogram (key = ICMPv6 type 0-255).
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u8);
+    __type(value, __u64);
+} icmp6_type_stats SEC(".maps");
 
 // key 0: 0=observe, 1=enforce.
 struct {
@@ -1018,15 +1051,32 @@ static __always_inline int rate_limited6(const __u8 addr[16])
     return 0;
 }
 
-static __always_inline void bump_icmp_type(__u8 typ)
+static __always_inline void bump_icmp_map(void *map, __u8 typ)
 {
-    __u64 *n = bpf_map_lookup_elem(&icmp_type_stats, &typ);
+    __u64 *n = bpf_map_lookup_elem(map, &typ);
     if (n) {
         __sync_fetch_and_add(n, 1);
         return;
     }
     __u64 one = 1;
-    bpf_map_update_elem(&icmp_type_stats, &typ, &one, BPF_NOEXIST);
+    bpf_map_update_elem(map, &typ, &one, BPF_NOEXIST);
+}
+static __always_inline void bump_icmp_type(__u8 typ) { bump_icmp_map(&icmp_type_stats, typ); }
+static __always_inline void bump_icmp6_type(__u8 typ) { bump_icmp_map(&icmp6_type_stats, typ); }
+
+static __always_inline int allowed_cidr4(__u8 direction, __u32 addr)
+{
+    struct lpm4_key k = {.prefixlen = 40};
+    k.data[0] = direction;
+    __builtin_memcpy(&k.data[1], &addr, 4);
+    return bpf_map_lookup_elem(&allowed_cidr_v4, &k) != 0;
+}
+static __always_inline int allowed_cidr6(__u8 direction, const __u8 addr[16])
+{
+    struct lpm6_key k = {.prefixlen = 136};
+    k.data[0] = direction;
+    __builtin_memcpy(&k.data[1], addr, 16);
+    return bpf_map_lookup_elem(&allowed_cidr_v6, &k) != 0;
 }
 
 static __always_inline int rate_limited4(__u32 dst)
@@ -1169,6 +1219,8 @@ static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16
 {
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     if (bpf_map_lookup_elem(&allowed_v4, &addr)) return 0;
+    if (allowed_cidr4(direction, addr)) return 0;
+    if (direction==DIR_INGRESS && bpf_map_lookup_elem(&blocked_ingress_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr4(direction,addr)) { *reason=REASON_CIDR; return 1; }
     if (dport && blocked_port(direction,proto,dport)) { *reason=REASON_PORT; return 1; }
@@ -1180,6 +1232,8 @@ static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 pro
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     struct ip6_key k={}; __builtin_memcpy(k.addr,addr,16);
     if (bpf_map_lookup_elem(&allowed_v6, &k)) return 0;
+    if (allowed_cidr6(direction, addr)) return 0;
+    if (direction==DIR_INGRESS && bpf_map_lookup_elem(&blocked_ingress_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr6(direction,addr)) { *reason=REASON_CIDR; return 1; }
     if (dport && blocked_port(direction,proto,dport)) { *reason=REASON_PORT; return 1; }
@@ -1481,6 +1535,9 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         if ((void *)(udp+1)<=data_end) {
             sport=udp->source; dport=udp->dest; payload=(void *)(udp+1); l4_ok=1;
         }
+    } else if (walk.l4_parseable && !walk.nonfirst_fragment && proto==IPPROTO_ICMPV6 && l4) {
+        unsigned char *ic = l4;
+        if ((void *)(ic + 1) <= data_end) bump_icmp6_type(ic[0]);
     }
     copy16(sc->src,&ip6->saddr); copy16(sc->dst,&ip6->daddr);
 

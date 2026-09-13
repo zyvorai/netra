@@ -149,8 +149,8 @@ var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_protected6", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
-	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
-	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
+	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
+	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
 }
 
@@ -485,6 +485,14 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	icmpTypes, err := a.readICMPTypeStats("icmp_type_stats")
+	if err != nil {
+		return err
+	}
+	icmp6Types, err := a.readICMPTypeStats("icmp6_type_stats")
+	if err != nil {
+		return err
+	}
 	ipv6ExtHeaders, err := a.readIPv6ExtStats()
 	if err != nil {
 		return err
@@ -541,7 +549,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
@@ -615,6 +623,15 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.replaceIPSet("allowed_v6", cfg.AllowedIPv6, 16); err != nil {
+		return err
+	}
+	if err := a.replaceIPSet("blocked_ingress_v4", cfg.BlockedIngressIPv4, 4); err != nil {
+		return err
+	}
+	if err := a.replaceIPSet("blocked_ingress_v6", cfg.BlockedIngressIPv6, 16); err != nil {
+		return err
+	}
+	if err := a.replaceAllowedCIDRs(cfg.AllowedCIDRs); err != nil {
 		return err
 	}
 	if err := a.replaceCIDRs(cfg.BlockedCIDRs); err != nil {
@@ -715,7 +732,13 @@ func dirs(s string) []byte {
 	}
 }
 func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
-	m4, m6 := a.collection.Maps["blocked_cidr_v4"], a.collection.Maps["blocked_cidr_v6"]
+	return a.replaceCIDRMaps(a.collection.Maps["blocked_cidr_v4"], a.collection.Maps["blocked_cidr_v6"], rules)
+}
+
+func (a *Agent) replaceCIDRMaps(m4, m6 *ebpf.Map, rules []models.EBPFCIDRRule) error {
+	if m4 == nil || m6 == nil {
+		return fmt.Errorf("cidr maps unavailable")
+	}
 	var k4 [9]byte
 	var k6 [21]byte
 	var v uint8
@@ -769,6 +792,15 @@ func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
 	}
 	return nil
 }
+
+func (a *Agent) replaceAllowedCIDRs(rules []models.EBPFCIDRRule) error {
+	m4, m6 := a.collection.Maps["allowed_cidr_v4"], a.collection.Maps["allowed_cidr_v6"]
+	if m4 == nil || m6 == nil {
+		return nil
+	}
+	return a.replaceCIDRMaps(m4, m6, rules)
+}
+
 func protoNum(s string) byte {
 	switch strings.ToUpper(s) {
 	case "TCP":
@@ -1488,6 +1520,58 @@ func (a *Agent) readKernelDrops() ([]models.KernelDropStat, error) {
 	for it.Next(&k, &v) {
 		out = append(out, models.KernelDropStat{Reason: k.Reason, Count: v.Count, LastSeenNS: v.LastNS})
 		if len(out) >= 4096 {
+			break
+		}
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
+func icmpTypeName(v4 bool, typ uint8) string {
+	if v4 {
+		switch typ {
+		case 0:
+			return "echo-reply"
+		case 3:
+			return "dest-unreach"
+		case 8:
+			return "echo-request"
+		case 11:
+			return "time-exceeded"
+		}
+		return fmt.Sprintf("icmp-%d", typ)
+	}
+	switch typ {
+	case 1:
+		return "dest-unreach"
+	case 2:
+		return "pkt-too-big"
+	case 3:
+		return "time-exceeded"
+	case 128:
+		return "echo-request"
+	case 129:
+		return "echo-reply"
+	}
+	return fmt.Sprintf("icmp6-%d", typ)
+}
+
+func (a *Agent) readICMPTypeStats(mapName string) ([]models.NamedCount, error) {
+	m := a.collection.Maps[mapName]
+	if m == nil {
+		return nil, nil
+	}
+	var k uint8
+	var v uint64
+	out := make([]models.NamedCount, 0, 16)
+	it := m.Iterate()
+	v4 := mapName == "icmp_type_stats"
+	for it.Next(&k, &v) {
+		out = append(out, models.NamedCount{Name: icmpTypeName(v4, k), Count: v})
+		if len(out) >= 32 {
 			break
 		}
 	}
