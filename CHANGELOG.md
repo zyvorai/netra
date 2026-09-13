@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.24 — 2026-09-13
+
+- **Found and fixed a real display bug while live-verifying 0.27.23 on the secondary host**, in the exact same class as the `allow-cidr` blank-value bug fixed in kit #3 (0.27.22): `web/src/pages/EBPF.tsx`'s unified Firewall rules table `value` extraction handled `cidr`/`allow-cidr`, `port`, and `rate` types but not the just-added `allow-port` type, so it fell through to the unset `r.value` field and rendered a blank value column instead of `TCP/8443`. Reproduced live: added a test allow-port rule via the API, confirmed the table showed an empty value cell, fixed the ternary to also match `allow-port` for the `protocol/port` format, confirmed the table now shows `TCP/8443` correctly, then deleted the test rule.
+  - Verified: `go build/vet/test ./...`, `helm lint`, web typecheck/test (56/56)/build.
+- Version bumped to 0.27.24 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.23 — 2026-09-13
 
 - **Merged a fourth external eBPF PR kit** (`netra-ebpf-pr 4`) — its `PR_EBPF_FEATURES.md` described "allow-list exceptions, IPv6 PPS, ICMP type histogram" as new work, but all three were already fully merged (0.27.15/0.27.21). Diffed every file by hand against current `main` per this session's standing discipline; almost the entire kit was stale regression — `internal/ai/draft.go`/`draft_test.go` predated the IPv6 draft-rule support entirely (rejected outright, no change needed); `decide6()`'s `apply_rate int` parameter was missing again (4th occurrence — fixed identically); Shield IPv6 (`ProtectedIPv6`, `shield_protected6`) and dual-stack rate limiting (API, CLI, and MCP schema) were all reverted to IPv4-only again and rejected; a hardcoded stale `"0.27.6"` version string appeared in three places in `server.go`; `bpf/README.md`/`docs/standalone-ebpf.md` diffs tried to regress documentation back to a pre-Shield-IPv6/pre-allow-CIDR state (rejected); and — for the 11th+ time this session — `cmd/netractl/main.go`'s raw diff tried to delete `case "explain":`. The kit's `ebpfDenyDelete`/CLI `deny del` diff also reverted the "clear both directions in one call" fix (0.27.21) back to a caller-supplied `?direction=` query parameter; rejected, kept the existing behavior.

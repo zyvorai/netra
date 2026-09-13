@@ -298,7 +298,7 @@ export default function EBPF() {
   const rules = useMemo<UnifiedRule[]>(() => {
     const out: UnifiedRule[] = ruleList.map((r: any) => ({
       id: r.id, type: r.type, raw: r,
-      value: r.type === 'cidr' || r.type === 'allow-cidr' ? r.cidr : r.type === 'port' ? `${r.protocol}/${r.port}` : r.type === 'rate' ? r.destination : r.value,
+      value: r.type === 'cidr' || r.type === 'allow-cidr' ? r.cidr : r.type === 'port' || r.type === 'allow-port' ? `${r.protocol}/${r.port}` : r.type === 'rate' ? r.destination : r.value,
       detail: r.direction || '', extra: r.type === 'rate' ? `${r.pps}pps` : '',
       created: r.createdBy ? `${r.createdBy} · ${new Date(r.createdAt).toLocaleString()}` : '',
       del: () => { if (confirm(`Delete this ${r.type} rule?`)) call('/api/v1/ebpf/rules/' + encodeURIComponent(r.id), 'DELETE'); },
