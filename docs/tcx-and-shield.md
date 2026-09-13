@@ -25,6 +25,7 @@ Opt-in per-source PPS protection for dedicated ingress interfaces.
   "mode": "enforce",
   "generation": 1,
   "protectedIpv4": ["10.66.0.10"],
+  "protectedIpv6": ["2001:db8::10"],
   "synPps": 5000,
   "udpPps": 20000,
   "icmpPps": 2000,
@@ -41,7 +42,7 @@ Generation is published last so protected-IP maps can be filled before the confi
 
 - Shield refuses to be useful on empty interface lists.
 - Default agent still uses observe-first Netra policy; shield is an additional emergency layer.
-- IPv6 protected-IP set is limited to `protectAll` in this version.
+- Exact-IP protection covers both `protectedIpv4` and `protectedIpv6` (`shield_protected4`/`shield_protected6`); `protectAll` remains the blanket, non-selective option for either family.
 
 ## Per-class and per-source diagnostics
 

@@ -1529,6 +1529,7 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	if c.Shield != nil {
 		sh := *c.Shield
 		sh.ProtectedIPv4 = append([]string(nil), c.Shield.ProtectedIPv4...)
+		sh.ProtectedIPv6 = append([]string(nil), c.Shield.ProtectedIPv6...)
 		c.Shield = &sh
 	}
 	c.NetPolRules = cloneNetPolRules(c.NetPolRules)

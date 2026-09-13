@@ -35,6 +35,9 @@ export default function EBPF() {
   const [processName, setProcessName] = useState('');
   const [rateIP, setRateIP] = useState('');
   const [pps, setPPS] = useState('1000');
+  const [allowIP, setAllowIP] = useState('');
+  const [ipv6Diag, setIpv6Diag] = useState<any>();
+  const [ifaceFlows, setIfaceFlows] = useState<any[]>([]);
   const [eventType, setEventType] = useState('all');
   const [workloads, setWorkloads] = useState<any[]>([]);
   const [scopeNS, setScopeNS] = useState('');
@@ -52,6 +55,7 @@ export default function EBPF() {
   const [shieldOther, setShieldOther] = useState('0');
   const [shieldBurst, setShieldBurst] = useState('2');
   const [shieldIP, setShieldIP] = useState('');
+  const [shieldIPv6, setShieldIPv6] = useState('');
   const [npSelNS, setNpSelNS] = useState('');
   const [npSelPod, setNpSelPod] = useState('');
   const [npSelLabel, setNpSelLabel] = useState('');
@@ -79,8 +83,10 @@ export default function EBPF() {
     api<any>('/api/v1/ebpf/topology?limit=50'),
     api<any>('/api/v1/ebpf/shield?limit=1'),
     api<any>('/api/v1/ebpf/rules'),
-  ]).then(([c, a, k, w, t, sd, rl]) => {
-    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setErr('');
+    api<any>('/api/v1/ebpf/ipv6?limit=50'),
+    api<any>('/api/v1/ebpf/interfaces?limit=10'),
+  ]).then(([c, a, k, w, t, sd, rl, i6, ifl]) => {
+    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setIpv6Diag(i6); setIfaceFlows(ifl.nodes || []); setErr('');
   }).catch(e => setErr(String(e)));
 
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
@@ -133,6 +139,7 @@ export default function EBPF() {
   function shieldBody(overrides: any = {}) {
     return {
       mode: shieldMode, protectAll: shieldProtectAll, protectedIpv4: cfg?.shield?.protectedIpv4 || [],
+      protectedIpv6: cfg?.shield?.protectedIpv6 || [],
       synPps: Number(shieldSyn) || 0, udpPps: Number(shieldUdp) || 0, icmpPps: Number(shieldIcmp) || 0,
       otherPps: Number(shieldOther) || 0, burstSeconds: Number(shieldBurst) || 0, ...overrides,
     };
@@ -149,6 +156,15 @@ export default function EBPF() {
   }
   function delShieldIP(x: string) {
     call('/api/v1/ebpf/shield', 'PUT', shieldBody({ protectedIpv4: (cfg?.shield?.protectedIpv4 || []).filter((y: string) => y !== x) }));
+  }
+  function addShieldIPv6() {
+    if (!shieldIPv6.trim()) return;
+    const ips = Array.from(new Set([...(cfg?.shield?.protectedIpv6 || []), shieldIPv6.trim()]));
+    call('/api/v1/ebpf/shield', 'PUT', shieldBody({ protectedIpv6: ips }));
+    setShieldIPv6('');
+  }
+  function delShieldIPv6(x: string) {
+    call('/api/v1/ebpf/shield', 'PUT', shieldBody({ protectedIpv6: (cfg?.shield?.protectedIpv6 || []).filter((y: string) => y !== x) }));
   }
   function toggleNetPol() {
     const next = !cfg?.netPolEnabled;
@@ -342,6 +358,7 @@ export default function EBPF() {
     </Reveal>
 
     <section className="card"><p className="eyebrow">EXACT IP</p><h3>IPv4 + IPv6 egress deny</h3>{cap((cfg?.blockedIPv4?.length||0), caps?.limits?.exactIPv4)}<div className="toolbar"><input aria-label="IP address" value={ip} onChange={e => setIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/deny', 'POST', { ip })}>Add</button></div><div className="chips">{[...(cfg?.blockedIPv4 || []), ...(cfg?.blockedIPv6 || [])].map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">EXACT IP</p><h3>Allow-exception</h3><p>Wins over the deny-list, CIDR, port, and rate controls above for a matching destination. Does not itself enable enforce mode.</p><div className="toolbar"><input aria-label="Allow-exception IP address" value={allowIP} onChange={e => setAllowIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/allow', 'POST', { ip: allowIP })}>Add</button></div><div className="chips">{[...(cfg?.allowedIPv4 || []), ...(cfg?.allowedIPv6 || [])].map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/allow/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">CIDR</p><h3>Ingress / egress prefixes</h3>{cap((cfg?.blockedCidrs?.length||0), caps?.limits?.cidr)}<div className="ruleform"><input aria-label="CIDR" value={cidr} onChange={e => setCIDR(e.target.value)} placeholder="10.0.0.0/8 or 2001:db8::/32"/><select aria-label="CIDR direction" value={cidrDir} onChange={e => setCIDRDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/cidr', 'POST', { cidr, direction: cidrDir })}>Add CIDR</button></div><div className="chips">{(cfg?.blockedCidrs || []).map((x: any) => <button key={x.cidr + x.direction} aria-label={`Remove ${x.direction} ${x.cidr}`} onClick={() => call('/api/v1/ebpf/cidr/delete', 'POST', x)}>{x.direction} · {x.cidr} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">L4</p><h3>Port controls</h3>{cap((cfg?.blockedPorts?.length||0), caps?.limits?.ports)}<div className="ruleform"><select aria-label="Protocol" value={proto} onChange={e => setProto(e.target.value)}><option>TCP</option><option>UDP</option><option>ANY</option></select><input aria-label="Port number" value={port} onChange={e => setPort(e.target.value)} inputMode="numeric"/><select aria-label="Port direction" value={portDir} onChange={e => setPortDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/port', 'POST', { protocol: proto, port: Number(port), direction: portDir })}>Add port</button></div><div className="chips">{(cfg?.blockedPorts || []).map((x: any) => <button key={x.protocol + x.port + x.direction} aria-label={`Remove ${x.direction} ${x.protocol}/${x.port}`} onClick={() => call('/api/v1/ebpf/port/delete', 'POST', x)}>{x.direction} · {x.protocol}/{x.port} ×</button>)}</div></section>
 
@@ -350,14 +367,14 @@ export default function EBPF() {
     <section className="card"><p className="eyebrow">DNS</p><h3>Exact DNS-name deny</h3><p>Parses and blocks exact cleartext DNS queries over UDP/53. This does not inspect TCP DNS, DoT, or DoH.</p>{cap((cfg?.blockedDns?.length||0), caps?.limits?.dns)}<div className="toolbar"><input aria-label="DNS name" value={dns} onChange={e => setDNS(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/dns', 'POST', { name: dns })}>Add DNS</button></div><div className="chips">{(cfg?.blockedDns || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/dns/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">SNI</p><h3>Exact TLS SNI deny</h3><p>Blocks connections whose TLS ClientHello Server Name Indication matches exactly. Best-effort parsing only.</p>{cap((cfg?.blockedSni?.length||0), caps?.limits?.sni)}<div className="toolbar"><input aria-label="SNI hostname" value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/sni', 'POST', { name: sni })}>Add SNI</button></div><div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/sni/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
 
-    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input aria-label="Rate limit destination IP" value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20"/><input aria-label="Packets per second" value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} aria-label={`Remove ${x.destination}`} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 or IPv6 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input aria-label="Rate limit destination IP" value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20 or 2001:db8::1"/><input aria-label="Packets per second" value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} aria-label={`Remove ${x.destination}`} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
 
     <Reveal className="section-divider">
       <h2>Advanced engines</h2>
       <p>DDoS shield and the two independent NetworkPolicy-style engines — each has its own enable toggle and state.</p>
     </Reveal>
 
-    <section className="card span3"><p className="eyebrow">SHIELD</p><h3>DDoS per-source-class PPS shield</h3><p>Independent XDP-layer token-bucket limiter for SYN/UDP/ICMP/other floods, decoupled from the enforcement lease above. {shieldDiag?.summary && <>Live: {shieldDiag.summary.allowed||0} allowed · {shieldDiag.summary.dropped||0} dropped · {shieldDiag.summary.audited||0} audited.</>}</p><div className="ruleform"><select aria-label="Shield mode" value={shieldMode} onChange={e => setShieldMode(e.target.value)}><option value="off">off</option><option value="audit">audit</option><option value="enforce">enforce</option></select><label><input type="checkbox" checked={shieldProtectAll} onChange={e => setShieldProtectAll(e.target.checked)}/> protect all</label><input aria-label="SYN packets per second" value={shieldSyn} onChange={e => setShieldSyn(e.target.value)} inputMode="numeric" placeholder="SYN pps"/><input aria-label="UDP packets per second" value={shieldUdp} onChange={e => setShieldUdp(e.target.value)} inputMode="numeric" placeholder="UDP pps"/><input aria-label="ICMP packets per second" value={shieldIcmp} onChange={e => setShieldIcmp(e.target.value)} inputMode="numeric" placeholder="ICMP pps"/><input aria-label="Other packets per second" value={shieldOther} onChange={e => setShieldOther(e.target.value)} inputMode="numeric" placeholder="other pps"/><input aria-label="Burst seconds" value={shieldBurst} onChange={e => setShieldBurst(e.target.value)} inputMode="numeric" placeholder="burst s"/><button className="primary" onClick={applyShield}>Apply shield config</button></div>{!shieldProtectAll && <div className="toolbar"><input aria-label="Protected IPv4 address" value={shieldIP} onChange={e => setShieldIP(e.target.value)} placeholder="protected IPv4"/><button className="primary" onClick={addShieldIP}>Add protected IP</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv4 || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => delShieldIP(x)}>{x} ×</button>)}</div></section>
+    <section className="card span3"><p className="eyebrow">SHIELD</p><h3>DDoS per-source-class PPS shield</h3><p>Independent XDP-layer token-bucket limiter for SYN/UDP/ICMP/other floods, decoupled from the enforcement lease above. {shieldDiag?.summary && <>Live: {shieldDiag.summary.allowed||0} allowed · {shieldDiag.summary.dropped||0} dropped · {shieldDiag.summary.audited||0} audited.</>}</p><div className="ruleform"><select aria-label="Shield mode" value={shieldMode} onChange={e => setShieldMode(e.target.value)}><option value="off">off</option><option value="audit">audit</option><option value="enforce">enforce</option></select><label><input type="checkbox" checked={shieldProtectAll} onChange={e => setShieldProtectAll(e.target.checked)}/> protect all</label><input aria-label="SYN packets per second" value={shieldSyn} onChange={e => setShieldSyn(e.target.value)} inputMode="numeric" placeholder="SYN pps"/><input aria-label="UDP packets per second" value={shieldUdp} onChange={e => setShieldUdp(e.target.value)} inputMode="numeric" placeholder="UDP pps"/><input aria-label="ICMP packets per second" value={shieldIcmp} onChange={e => setShieldIcmp(e.target.value)} inputMode="numeric" placeholder="ICMP pps"/><input aria-label="Other packets per second" value={shieldOther} onChange={e => setShieldOther(e.target.value)} inputMode="numeric" placeholder="other pps"/><input aria-label="Burst seconds" value={shieldBurst} onChange={e => setShieldBurst(e.target.value)} inputMode="numeric" placeholder="burst s"/><button className="primary" onClick={applyShield}>Apply shield config</button></div>{!shieldProtectAll && <div className="toolbar"><input aria-label="Protected IPv4 address" value={shieldIP} onChange={e => setShieldIP(e.target.value)} placeholder="protected IPv4"/><button className="primary" onClick={addShieldIP}>Add protected IP</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv4 || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => delShieldIP(x)}>{x} ×</button>)}</div>{!shieldProtectAll && <div className="toolbar"><input aria-label="Protected IPv6 address" value={shieldIPv6} onChange={e => setShieldIPv6(e.target.value)} placeholder="protected IPv6"/><button className="primary" onClick={addShieldIPv6}>Add protected IPv6</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv6 || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => delShieldIPv6(x)}>{x} ×</button>)}</div></section>
 
     <section className="card span3"><p className="eyebrow">NETPOL</p><h3>Per-workload NetworkPolicy-style deny</h3><p>Legacy per-cgroup peer-deny engine, independent from the rules above and from NetPol v2 below. Rule authoring has no UI — toggle enforcement and review existing entries here.</p><div className="toolbar"><button className={cfg?.netPolEnabled ? 'danger' : 'btn-success'} onClick={toggleNetPol}>{cfg?.netPolEnabled ? 'Disable NetPol' : 'Enable NetPol'}</button></div><div className="chips">{(cfg?.netPolDenies || []).length === 0 && <span>No NetPol deny entries.</span>}{(cfg?.netPolDenies || []).map((x: any, i: number) => <span key={i}>{x.direction || 'both'} · cgroup {x.cgroupId} → {x.peerIpv4}{x.port ? ':' + x.port : ''} {x.protocol || ''}</span>)}</div></section>
 
@@ -454,6 +471,29 @@ export default function EBPF() {
           const who = `${e.namespace}/${e.pod}${e.workloadName ? ` · ${e.workloadKind}/${e.workloadName}` : ''}`;
           return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{e.node}</span><span>{e.destination}</span><span>{e.protocol}</span><span>{e.packets} / {e.bytes} / {e.blocked}</span></div>;
         })}
+      </div>}
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">IPV6 DIAGNOSTICS</p>
+      <h3>Extension-header &amp; fragmentation visibility</h3>
+      {ipv6Diag?.summary && <p>{ipv6Diag.summary.packets||0} IPv6 packets · {ipv6Diag.summary.extHeaderPackets||0} with extension headers · {ipv6Diag.summary.fragmented||0} fragmented · {ipv6Diag.summary.nonFirstFragments||0} non-first fragments · {ipv6Diag.summary.chainTruncated||0} chain-truncated.</p>}
+      {(!ipv6Diag?.nodes || ipv6Diag.nodes.length === 0) && <p className="empty-state">No IPv6 extension-header activity observed yet.</p>}
+      {ipv6Diag?.nodes?.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>NODE</span><span>DIRECTION / HOOK</span><span>PACKETS</span><span>EXT-HDR PKTS</span><span>FRAGMENTED / NON-FIRST / TRUNCATED</span></div>
+        {ipv6Diag.nodes.flatMap((n: any) => (n.extHeaders || []).map((h: any, i: number) =>
+          <div className="datarow obs" key={n.node + i}><span>{n.node}</span><span>{h.direction} / {h.hook}</span><span>{h.packets}</span><span>{h.extHeaderPackets}</span><span>{h.fragmented} / {h.nonFirstFragments} / {h.chainTruncated}</span></div>
+        ))}
+      </div>}
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">INTERFACE FLOW ATTRIBUTION</p>
+      <h3>Per-interface packet/byte/blocked counters</h3>
+      {ifaceFlows.length === 0 && <p className="empty-state">No per-interface flow attribution observed yet.</p>}
+      {ifaceFlows.length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>NODE</span><span>INTERFACE</span><span>PACKETS / BYTES / BLOCKED</span><span>TOP DESTINATIONS</span></div>
+        {ifaceFlows.flatMap((n: any) => (n.interfaces || []).map((ifc: any, i: number) =>
+          <div className="datarow obs" key={n.node + i}><span>{n.node}</span><span>{ifc.interface}</span><span>{ifc.packets} / {ifc.bytes} / {ifc.blocked}</span><span className="truncate">{(ifc.topDestinations || []).map((d: any) => `${d.name} (${d.count})`).join(', ') || '—'}</span></div>
+        ))}
       </div>}
     </section>
     <section className="card span3"><p className="eyebrow">NODE COVERAGE</p><h3>Attached hooks</h3>{agents.map(a => <div className="agent wide" key={a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : a.mode}</span><span>{(a.hooks || []).join(', ') || '—'}</span><small>{(a.workloads || []).length} workload cgroups · {a.scopeMode || 'all'} scope ({a.selectedCgroups || 0} selected) · {a.cgroupPath || 'no cgroup'} · interfaces: {(a.interfaces || []).join(', ') || 'cgroup-only'} · XDP: {(a.xdpInterfaces || []).join(', ') || 'off'}</small></div>)}</section>

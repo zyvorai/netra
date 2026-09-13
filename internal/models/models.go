@@ -622,6 +622,7 @@ type ShieldConfig struct {
 	Mode          string   `json:"mode"` // off|audit|enforce
 	ProtectAll    bool     `json:"protectAll,omitempty"`
 	ProtectedIPv4 []string `json:"protectedIpv4,omitempty"`
+	ProtectedIPv6 []string `json:"protectedIpv6,omitempty"`
 	SynPPS        uint32   `json:"synPps,omitempty"`
 	UDPPPS        uint32   `json:"udpPps,omitempty"`
 	ICMPPPS       uint32   `json:"icmpPps,omitempty"`

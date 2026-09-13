@@ -85,8 +85,8 @@ func usage() {
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
   ebpf sni add NAME | sni del NAME
-  ebpf rate set IPv4 PPS | rate del IPv4
-  ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
+  ebpf rate set IP PPS | rate del IP
+  ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
   ebpf netpol enable | disable
   ebpf netpol v2 enable | disable
   ebpf netpol rule add --peer IP --action allow|deny [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--port N] [--protocol P] [--direction D]
@@ -404,10 +404,11 @@ func ebpf() error {
 			return request("GET", "/api/v1/ebpf/shield", nil)
 		}
 		if os.Args[3] != "set" {
-			return fmt.Errorf("shield [set --mode off|audit|enforce] [--protect-all] [--ip IPv4]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]")
+			return fmt.Errorf("shield [set --mode off|audit|enforce] [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]")
 		}
 		cfg := map[string]any{}
 		var ips []string
+		var ips6 []string
 		for i := 4; i < len(os.Args); i++ {
 			flag := os.Args[i]
 			if flag == "--protect-all" {
@@ -424,6 +425,8 @@ func ebpf() error {
 				cfg["mode"] = value
 			case "--ip":
 				ips = append(ips, value)
+			case "--ip6":
+				ips6 = append(ips6, value)
 			case "--syn-pps":
 				n, err := strconv.ParseUint(value, 10, 32)
 				if err != nil {
@@ -463,6 +466,9 @@ func ebpf() error {
 		}
 		if len(ips) > 0 {
 			cfg["protectedIpv4"] = ips
+		}
+		if len(ips6) > 0 {
+			cfg["protectedIpv6"] = ips6
 		}
 		b, _ := json.Marshal(cfg)
 		return request("PUT", "/api/v1/ebpf/shield", b)
@@ -820,14 +826,14 @@ func ebpf() error {
 		}
 	case "rate":
 		if len(os.Args) < 5 {
-			return fmt.Errorf("rate set IPv4 PPS | rate del IPv4")
+			return fmt.Errorf("rate set IP PPS | rate del IP")
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/rate/"+url.PathEscape(os.Args[4]), nil)
 		}
 		if os.Args[3] == "set" {
 			if len(os.Args) < 6 {
-				return fmt.Errorf("rate set IPv4 PPS")
+				return fmt.Errorf("rate set IP PPS")
 			}
 			pps, err := strconv.ParseUint(os.Args[5], 10, 32)
 			if err != nil || pps == 0 {

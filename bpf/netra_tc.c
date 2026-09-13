@@ -630,6 +630,13 @@ struct {
     __type(key, struct shield_ip4_key);
     __type(value, __u8);
 } shield_protected4 SEC(".maps");
+struct shield_ip6_key { __u32 generation; __u8 addr[16]; };
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct shield_ip6_key);
+    __type(value, __u8);
+} shield_protected6 SEC(".maps");
 struct shield_src_key { __u8 family; __u8 class_id; __u16 pad; __u8 addr[16]; };
 struct shield_src_state {
     __u64 last_refill_ns;
@@ -1972,7 +1979,12 @@ int netra_xdp_shield(struct xdp_md *ctx)
         struct ipv6hdr *ip6 = (void *)(eth + 1);
         if ((void *)(ip6 + 1) > end) return XDP_PASS;
         family = FAMILY_V6; copy16(src, &ip6->saddr);
-        if (!cfg->protect_all) return XDP_PASS; /* v6 protected set omitted in v1 */
+        if (!protected) {
+            struct shield_ip6_key pk6 = {.generation = cfg->generation};
+            copy16(pk6.addr, &ip6->daddr);
+            protected = bpf_map_lookup_elem(&shield_protected6, &pk6) != 0;
+        }
+        if (!protected) return XDP_PASS;
         if (ip6->nexthdr == IPPROTO_UDP) class_id = 2;
         else if (ip6->nexthdr == IPPROTO_ICMPV6) class_id = 3;
         else if (ip6->nexthdr == IPPROTO_TCP) class_id = 1;

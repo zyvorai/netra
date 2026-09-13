@@ -68,13 +68,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.15"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.16"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.15"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.16"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.15"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.16"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -250,7 +250,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.15", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.16", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -1204,8 +1204,8 @@ func (s *Server) ebpfRateSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := netip.ParseAddr(strings.TrimSpace(x.Destination))
-	if err != nil || !a.Is4() {
-		errorJSON(w, 400, "rate limiting currently requires an exact IPv4 destination")
+	if err != nil {
+		errorJSON(w, 400, "rate limiting requires an exact IPv4 or IPv6 destination")
 		return
 	}
 	if x.PPS < 1 || x.PPS > 10000000 {
@@ -1223,8 +1223,8 @@ func (s *Server) ebpfRateSet(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) ebpfRateDelete(w http.ResponseWriter, r *http.Request) {
 	a, err := netip.ParseAddr(r.PathValue("ip"))
-	if err != nil || !a.Is4() {
-		errorJSON(w, 400, "valid IPv4 required")
+	if err != nil {
+		errorJSON(w, 400, "valid IPv4 or IPv6 address required")
 		return
 	}
 	cfg, err := s.store.SetRateLimit(models.EBPFRateLimit{Destination: a.String()}, actor(r))
@@ -1251,6 +1251,13 @@ func (s *Server) ebpfShieldSet(w http.ResponseWriter, r *http.Request) {
 		a, err := netip.ParseAddr(strings.TrimSpace(ip))
 		if err != nil || !a.Is4() {
 			errorJSON(w, 400, "protectedIpv4 entries must be exact IPv4 addresses: "+ip)
+			return
+		}
+	}
+	for _, ip := range x.ProtectedIPv6 {
+		a, err := netip.ParseAddr(strings.TrimSpace(ip))
+		if err != nil || a.Is4() {
+			errorJSON(w, 400, "protectedIpv6 entries must be exact IPv6 addresses: "+ip)
 			return
 		}
 	}
@@ -1673,8 +1680,8 @@ func (s *Server) ebpfRulePatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a, err := netip.ParseAddr(strings.TrimSpace(x.Destination))
-		if err != nil || !a.Is4() {
-			errorJSON(w, 400, "rate limiting currently requires an exact IPv4 destination")
+		if err != nil {
+			errorJSON(w, 400, "rate limiting requires an exact IPv4 or IPv6 destination")
 			return
 		}
 		if x.PPS < 1 || x.PPS > 10000000 {

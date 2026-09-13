@@ -147,7 +147,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
-	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
+	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_protected6", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
@@ -1837,6 +1837,39 @@ func (a *Agent) applyShield(cfg *models.ShieldConfig) error {
 		q.Addr = native.Uint32(ip.To4())
 		if err := pm.Put(q, uint8(1)); err != nil {
 			return err
+		}
+	}
+	if pm6 := a.collection.Maps["shield_protected6"]; pm6 != nil {
+		var k6 struct {
+			Generation uint32
+			Addr       [16]byte
+		}
+		var v6 uint8
+		var keys6 []struct {
+			Generation uint32
+			Addr       [16]byte
+		}
+		it6 := pm6.Iterate()
+		for it6.Next(&k6, &v6) {
+			keys6 = append(keys6, k6)
+		}
+		for _, x := range keys6 {
+			_ = pm6.Delete(x)
+		}
+		for _, s := range cfg.ProtectedIPv6 {
+			ip := net.ParseIP(s)
+			if ip == nil || ip.To4() != nil {
+				continue
+			}
+			var q6 struct {
+				Generation uint32
+				Addr       [16]byte
+			}
+			q6.Generation = r.Generation
+			copy(q6.Addr[:], ip.To16())
+			if err := pm6.Put(q6, uint8(1)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
