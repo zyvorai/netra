@@ -154,6 +154,18 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			pathParams:  []string{"uid"},
 		},
 		{
+			name: "netra_ebpf_allow_uid_add", method: "POST", path: "/api/v1/ebpf/allow-uid",
+			description: "Add a Linux UID exception evaluated before UID/comm deny at the socket hook. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"uid": intProp("Linux UID to except.")}, "uid"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_allow_uid_delete", method: "DELETE", path: "/api/v1/ebpf/allow-uid/{uid}",
+			description: "Remove a UID exception. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"uid": strProp("Linux UID exception to remove.")}, "uid"),
+			pathParams:  []string{"uid"},
+		},
+		{
 			name: "netra_ebpf_dns_add", method: "POST", path: "/api/v1/ebpf/dns",
 			description: "Add an exact plain-DNS query name (over UDP/53) to the eBPF deny rule set. Returns the full updated fast-path config.",
 			schema:      objSchema(map[string]any{"name": strProp("DNS name to block, e.g. \"evil.example.com\". No wildcards.")}, "name"),
@@ -175,6 +187,18 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			name: "netra_ebpf_process_delete", method: "POST", path: "/api/v1/ebpf/process/delete",
 			description: "Remove a process name from the eBPF deny rule set. Returns the full updated fast-path config.",
 			schema:      objSchema(map[string]any{"name": strProp("Process comm name to unblock.")}, "name"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_allow_process_add", method: "POST", path: "/api/v1/ebpf/allow-process",
+			description: "Add a process name (Linux \"comm\", up to 15 bytes) exception evaluated before UID/comm deny at the socket hook. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"name": strProp("Process comm name to except, e.g. \"coredns\".")}, "name"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_allow_process_delete", method: "POST", path: "/api/v1/ebpf/allow-process/delete",
+			description: "Remove a process name exception. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"name": strProp("Process comm name exception to remove.")}, "name"),
 			bodyFields:  true,
 		},
 		{

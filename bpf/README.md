@@ -28,7 +28,9 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `blocked_ports`: directional L4 destination-port denies.
 - `allowed_ports`: directional L4 destination-port exceptions, mirror of `blocked_ports` but evaluated before deny/CIDR/port/rate.
 - `blocked_uids`: socket UID denies.
+- `allowed_uids`: socket UID exceptions, evaluated before UID/comm deny at the socket hook.
 - `blocked_comms`: exact Linux process `comm` denies.
+- `allowed_comms`: exact Linux process `comm` exceptions, evaluated before UID/comm deny at the socket hook.
 - `blocked_dns`: exact normalized DNS qname denies for cleartext UDP/53.
 - `rate_v4`, `rate_state_v4`: exact IPv4 destination fixed-window PPS control.
 - `rate_v6`, `rate_state_v6`: exact IPv6 destination PPS (parity with `rate_v4`).

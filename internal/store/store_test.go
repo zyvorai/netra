@@ -532,6 +532,46 @@ func TestAllowedPort(t *testing.T) {
 	}
 }
 
+func TestAllowedUIDAndProcess(t *testing.T) {
+	s := New()
+	if _, err := s.AddAllowedUID(1000, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddAllowedProcess("coredns", "test"); err != nil {
+		t.Fatal(err)
+	}
+	c := s.Config()
+	if len(c.AllowedUIDs) != 1 || c.AllowedUIDs[0] != 1000 || len(c.AllowedProcesses) != 1 || c.AllowedProcesses[0] != "coredns" {
+		t.Fatalf("rules missing: %#v", c)
+	}
+	// Config must be a deep copy.
+	c.AllowedUIDs[0] = 1
+	c.AllowedProcesses[0] = "mutated"
+	c2 := s.Config()
+	if c2.AllowedUIDs[0] == 1 || c2.AllowedProcesses[0] == "mutated" {
+		t.Fatal("Config leaked mutable slices")
+	}
+
+	rules := s.ListRules()
+	byType := map[string]models.FirewallRule{}
+	for _, r := range rules {
+		byType[r.Type] = r
+	}
+	for _, typ := range []string{"allow-uid", "allow-process"} {
+		r, ok := byType[typ]
+		if !ok {
+			t.Fatalf("rule type %s missing from ListRules: %#v", typ, rules)
+		}
+		if _, err := s.DeleteRule(r.ID, "test"); err != nil {
+			t.Fatalf("DeleteRule(%s): %v", typ, err)
+		}
+	}
+	final := s.Config()
+	if len(final.AllowedUIDs) != 0 || len(final.AllowedProcesses) != 0 {
+		t.Fatalf("rules not removed via DeleteRule: %#v", final)
+	}
+}
+
 func TestDeleteRuleByID(t *testing.T) {
 	s := New()
 	if _, err := s.AddUID(1000, "test"); err != nil {

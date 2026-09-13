@@ -64,6 +64,8 @@ type EBPFFastPathConfig struct {
 	AllowedIPv6        []string            `json:"allowedIPv6,omitempty"`
 	AllowedCIDRs       []EBPFCIDRRule      `json:"allowedCidrs,omitempty"`
 	AllowedPorts       []EBPFPortRule      `json:"allowedPorts,omitempty"`
+	AllowedUIDs        []uint32            `json:"allowedUids,omitempty"`
+	AllowedProcesses   []string            `json:"allowedProcesses,omitempty"`
 	BlockedIngressIPv4 []string            `json:"blockedIngressIPv4,omitempty"`
 	BlockedIngressIPv6 []string            `json:"blockedIngressIPv6,omitempty"`
 	BlockedCIDRs       []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`

@@ -84,8 +84,10 @@ func usage() {
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
   ebpf allow-port add TCP|UDP|ANY PORT [direction] | allow-port del ...
   ebpf uid add UID | uid del UID
+  ebpf allow-uid add UID | allow-uid del UID
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
+  ebpf allow-process add COMM | allow-process del COMM
   ebpf sni add NAME | sni del NAME
   ebpf rate set IP PPS | rate del IP
   ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
@@ -761,6 +763,21 @@ func ebpf() error {
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/uid/"+strconv.FormatUint(uid, 10), nil)
 		}
+	case "allow-uid":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("allow-uid add|del UID")
+		}
+		uid, err := strconv.ParseUint(os.Args[4], 10, 32)
+		if err != nil {
+			return fmt.Errorf("valid UID required")
+		}
+		if os.Args[3] == "add" {
+			b, _ := json.Marshal(map[string]any{"uid": uint32(uid)})
+			return request("POST", "/api/v1/ebpf/allow-uid", b)
+		}
+		if os.Args[3] == "del" {
+			return request("DELETE", "/api/v1/ebpf/allow-uid/"+strconv.FormatUint(uid, 10), nil)
+		}
 	case "dns":
 		if len(os.Args) < 5 {
 			return fmt.Errorf("dns add|del NAME")
@@ -793,6 +810,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/process/delete", b)
+		}
+	case "allow-process":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("allow-process add|del COMM")
+		}
+		b, _ := json.Marshal(map[string]string{"name": os.Args[4]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/allow-process", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/allow-process/delete", b)
 		}
 	case "workloads":
 		p := "/api/v1/ebpf/workloads"

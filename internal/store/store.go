@@ -139,6 +139,12 @@ func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
 	for _, v := range s.config.AllowedPorts {
 		touch("allow-port", v.Direction+"|"+v.Protocol+"|"+strconv.FormatUint(uint64(v.Port), 10))
 	}
+	for _, v := range s.config.AllowedUIDs {
+		touch("allow-uid", strconv.FormatUint(uint64(v), 10))
+	}
+	for _, v := range s.config.AllowedProcesses {
+		touch("allow-process", v)
+	}
 	for _, v := range s.config.BlockedIngressIPv4 {
 		touch("ip4-in", v)
 	}
@@ -719,7 +725,7 @@ func (s *Store) ListRules() []models.FirewallRule {
 	for id, idx := range s.ruleIndex {
 		fr := models.FirewallRule{ID: id, Type: idx.Type, CreatedAt: idx.CreatedAt, CreatedBy: idx.CreatedBy, UpdatedAt: idx.UpdatedAt, UpdatedBy: idx.UpdatedBy}
 		switch idx.Type {
-		case "ip4", "ip6", "allow4", "allow6", "ip4-in", "ip6-in", "dns", "sni", "process":
+		case "ip4", "ip6", "allow4", "allow6", "ip4-in", "ip6-in", "dns", "sni", "process", "allow-process":
 			fr.Value = idx.Key
 			fr.Summary = idx.Key
 			if idx.Type == "allow4" || idx.Type == "allow6" {
@@ -729,15 +735,21 @@ func (s *Store) ListRules() []models.FirewallRule {
 				fr.Summary = "ingress deny " + idx.Key
 				fr.Direction = "ingress"
 			}
+			if idx.Type == "allow-process" {
+				fr.Summary = "allow " + idx.Key
+			}
 		case "allow-cidr":
 			parts := strings.SplitN(idx.Key, "|", 2)
 			if len(parts) == 2 {
 				fr.Direction, fr.CIDR = parts[0], parts[1]
 			}
 			fr.Summary = "allow " + fr.Direction + " · " + fr.CIDR
-		case "uid":
+		case "uid", "allow-uid":
 			fr.Value = idx.Key
 			fr.Summary = "uid " + idx.Key
+			if idx.Type == "allow-uid" {
+				fr.Summary = "allow uid " + idx.Key
+			}
 		case "cidr":
 			parts := strings.SplitN(idx.Key, "|", 2)
 			if len(parts) == 2 {
@@ -816,6 +828,14 @@ func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) 
 			return s.Config(), fmt.Errorf("corrupt allow-port rule index entry")
 		}
 		return s.DelAllowedPort(models.EBPFPortRule{Direction: parts[0], Protocol: parts[1], Port: uint16(port)}, actor)
+	case "allow-uid":
+		uid, err := strconv.ParseUint(key, 10, 32)
+		if err != nil {
+			return s.Config(), fmt.Errorf("corrupt allow-uid rule index entry")
+		}
+		return s.DelAllowedUID(uint32(uid), actor)
+	case "allow-process":
+		return s.DelAllowedProcess(key, actor)
 	case "ip4-in":
 		return s.DelBlockedIngress(key, actor)
 	case "ip6-in":
@@ -1569,6 +1589,8 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.AllowedIPv6 = append([]string(nil), c.AllowedIPv6...)
 	c.AllowedCIDRs = append([]models.EBPFCIDRRule(nil), c.AllowedCIDRs...)
 	c.AllowedPorts = append([]models.EBPFPortRule(nil), c.AllowedPorts...)
+	c.AllowedUIDs = append([]uint32(nil), c.AllowedUIDs...)
+	c.AllowedProcesses = append([]string(nil), c.AllowedProcesses...)
 	c.BlockedIngressIPv4 = append([]string(nil), c.BlockedIngressIPv4...)
 	c.BlockedIngressIPv6 = append([]string(nil), c.BlockedIngressIPv6...)
 	c.BlockedCIDRs = append([]models.EBPFCIDRRule(nil), c.BlockedCIDRs...)

@@ -149,7 +149,7 @@ var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_protected6", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
-	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
+	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "allowed_uids", "allowed_comms", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors",
 }
@@ -654,10 +654,16 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 	if err := a.replaceUIDs(cfg.BlockedUIDs); err != nil {
 		return err
 	}
+	if err := a.replaceUIDMap("allowed_uids", cfg.AllowedUIDs); err != nil {
+		return err
+	}
 	if err := a.replaceStringMap("blocked_dns", cfg.BlockedDNS, 96); err != nil {
 		return err
 	}
 	if err := a.replaceStringMap("blocked_comms", cfg.BlockedProcesses, 16); err != nil {
+		return err
+	}
+	if err := a.replaceStringMap("allowed_comms", cfg.AllowedProcesses, 16); err != nil {
 		return err
 	}
 	if err := a.replaceStringMap("blocked_sni", cfg.BlockedSNI, 96); err != nil {
@@ -861,7 +867,17 @@ func (a *Agent) replacePortMap(name string, rules []models.EBPFPortRule) error {
 	return nil
 }
 func (a *Agent) replaceUIDs(values []uint32) error {
-	m := a.collection.Maps["blocked_uids"]
+	return a.replaceUIDMap("blocked_uids", values)
+}
+
+func (a *Agent) replaceUIDMap(name string, values []uint32) error {
+	m := a.collection.Maps[name]
+	if m == nil {
+		if name != "blocked_uids" {
+			return nil
+		}
+		return fmt.Errorf("map %s unavailable", name)
+	}
 	var k uint32
 	var v uint8
 	var keys []uint32

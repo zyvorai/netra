@@ -102,6 +102,7 @@ func Run(opts Options) Report {
 		checkCgroupV2(root),
 		checkCgroupMembership(root),
 		checkBPFFS(root),
+		checkNetraPins(root),
 		checkBTF(root),
 		checkTraceFS(root),
 		checkDropReasons(root, opts.RequireDropReasons),
@@ -218,6 +219,25 @@ func checkBPFFS(root string) Check {
 		}
 	}
 	return Check{ID: "bpffs", Title: "bpffs mount", Status: StatusFail, Detail: "no bpf filesystem mounted at /sys/fs/bpf", Remediation: "mount -t bpf bpf /sys/fs/bpf"}
+}
+
+func checkNetraPins(root string) Check {
+	dir := rooted(root, "/sys/fs/bpf/netra")
+	st, err := os.Stat(dir)
+	if err != nil || !st.IsDir() {
+		return Check{ID: "netra-pins", Title: "Netra pinned maps", Status: StatusInfo, Detail: "/sys/fs/bpf/netra not present (agent has not pinned maps on this host)", Remediation: "start netra-agent once, then rebuild the BPF object if allow/rate/icmp maps are missing"}
+	}
+	need := []string{"allowed_v4", "allowed_ports", "allowed_uids", "allowed_comms", "rate_v6", "icmp_type_stats", "blocked_ingress_v4"}
+	var missing []string
+	for _, n := range need {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) == 0 {
+		return Check{ID: "netra-pins", Title: "Netra pinned maps", Status: StatusPass, Detail: dir}
+	}
+	return Check{ID: "netra-pins", Title: "Netra pinned maps", Status: StatusWarn, Detail: "missing " + strings.Join(missing, ", "), Remediation: "rebuild bpf/netra_tc.o, roll the agent, and let it re-pin maps under /sys/fs/bpf/netra"}
 }
 
 func checkBTF(root string) Check {

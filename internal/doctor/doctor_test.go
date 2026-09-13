@@ -61,6 +61,28 @@ func TestTetragonDetected(t *testing.T) {
 	}
 }
 
+func TestCheckNetraPins(t *testing.T) {
+	root := t.TempDir()
+	if got := checkNetraPins(root); got.Status != StatusInfo {
+		t.Fatalf("no pin dir: status=%s want=info", got.Status)
+	}
+
+	need := []string{"allowed_v4", "allowed_ports", "allowed_uids", "allowed_comms", "rate_v6", "icmp_type_stats", "blocked_ingress_v4"}
+	for _, n := range need[:len(need)-1] {
+		write(t, root, "/sys/fs/bpf/netra/"+n, "")
+	}
+	if got := checkNetraPins(root); got.Status != StatusWarn || !strings.Contains(got.Detail, "blocked_ingress_v4") {
+		t.Fatalf("partial pins: %#v", got)
+	}
+
+	for _, n := range need {
+		write(t, root, "/sys/fs/bpf/netra/"+n, "")
+	}
+	if got := checkNetraPins(root); got.Status != StatusPass {
+		t.Fatalf("all pins present: %#v", got)
+	}
+}
+
 func TestRunMissingRequiredOptionalFeatures(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/proc/sys/kernel/osrelease", "5.15.0\n")
