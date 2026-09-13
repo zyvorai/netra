@@ -738,6 +738,45 @@ func TestSetRateLimitPPSAndBPSIndependent(t *testing.T) {
 	}
 }
 
+func TestSynDropCRUD(t *testing.T) {
+	s := New()
+	entry := models.EBPFSynDropEntry{Address: "203.0.113.5", Direction: "egress"}
+	cfg, err := s.AddSynDrop(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDrop) != 1 || cfg.SynDrop[0] != entry {
+		t.Fatalf("unexpected syndrop entries: %#v", cfg.SynDrop)
+	}
+
+	// Adding the identical entry again must be a no-op, not a duplicate.
+	cfg, err = s.AddSynDrop(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDrop) != 1 {
+		t.Fatalf("expected no duplicate entry: %#v", cfg.SynDrop)
+	}
+
+	// Same address, different direction is a distinct entry.
+	other := models.EBPFSynDropEntry{Address: "203.0.113.5", Direction: "ingress"}
+	cfg, err = s.AddSynDrop(other, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDrop) != 2 {
+		t.Fatalf("expected the ingress entry to be distinct: %#v", cfg.SynDrop)
+	}
+
+	cfg, err = s.DelSynDrop(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDrop) != 1 || cfg.SynDrop[0] != other {
+		t.Fatalf("delete did not remove the right entry: %#v", cfg.SynDrop)
+	}
+}
+
 func TestConnRateLimitCRUD(t *testing.T) {
 	s := New()
 	rule := models.EBPFConnRateLimit{

@@ -81,6 +81,7 @@ func usage() {
   ebpf allow add IP | allow del IP
   ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
+  ebpf syn-drop add IP egress|ingress | syn-drop del IP egress|ingress
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
   ebpf allow-port add TCP|UDP|ANY PORT [direction] | allow-port del ...
   ebpf uid add UID | uid del UID
@@ -933,6 +934,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/cidr/delete", b)
+		}
+	case "syn-drop":
+		if len(os.Args) < 6 {
+			return fmt.Errorf("syn-drop add|del IP egress|ingress")
+		}
+		b, _ := json.Marshal(map[string]any{"address": os.Args[4], "direction": os.Args[5]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/syn-drop", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/syn-drop/delete", b)
 		}
 	case "port":
 		if len(os.Args) < 6 {

@@ -788,6 +788,33 @@ struct {
     __type(value, struct ct_state);
 } conntrack SEC(".maps");
 
+// SYN-drop mode: an exact-IP deny rule (blocked_v4/blocked_ingress_v4,
+// REASON_EXACT) can be additionally flagged here so only a genuinely new
+// TCP connection attempt (SYN set, ACK clear) is actually dropped for that
+// address+direction — any other TCP packet (including traffic on a
+// connection Netra's own `conntrack` never saw the handshake for, e.g. one
+// open before this rule was added, or before the agent attached) is
+// allowed through instead of unconditionally dropped. Deliberately a
+// separate side-map rather than widening blocked_v4/blocked_ingress_v4's
+// pinned __u8 value ABI. CIDR-matched deny (REASON_CIDR) is not covered —
+// see docs/syn-drop.md. UDP/other protocols are unaffected (there is no
+// "new connection" concept for them); the deny rule behaves exactly as
+// before for non-TCP traffic even when flagged here.
+struct syndrop_key4 { __u32 addr; __u8 direction; __u8 pad[3]; };
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct syndrop_key4);
+    __type(value, __u8);
+} syndrop_v4 SEC(".maps");
+struct syndrop_key6 { __u8 addr[16]; __u8 direction; __u8 pad[3]; };
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct syndrop_key6);
+    __type(value, __u8);
+} syndrop_v6 SEC(".maps");
+
 struct policy_drop_key {
     __u8 family;
     __u8 protocol;
@@ -1588,6 +1615,22 @@ static __always_inline void submit_socket_event(struct bpf_sock_addr *ctx, __u8 
     bpf_ringbuf_submit(e,0);
 }
 
+// Only ever called from inside handle_v4/handle_v6's existing blocked==1
+// branch, for an exact-IP-matched (REASON_EXACT) TCP packet that is not a
+// new-connection SYN — never on the common allow path. One extra hash
+// lookup, gated behind three cheap comparisons the caller already made.
+static __always_inline int syndrop_allows4(__u32 addr, __u8 direction)
+{
+    struct syndrop_key4 k = {.addr = addr, .direction = direction};
+    return bpf_map_lookup_elem(&syndrop_v4, &k) != 0;
+}
+static __always_inline int syndrop_allows6(const __u8 addr[16], __u8 direction)
+{
+    struct syndrop_key6 k = {.direction = direction};
+    __builtin_memcpy(k.addr, addr, 16);
+    return bpf_map_lookup_elem(&syndrop_v6, &k) != 0;
+}
+
 static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16 dport, __u8 *reason, int apply_rate, __u64 cgroup_id, __u32 len)
 {
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
@@ -1830,6 +1873,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
         if (!established) {
             blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id,len);
         }
+        if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && !syn_new && syndrop_allows4(peer,direction)) blocked=0;
         update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
         update_iface_flow(ifindex,FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
@@ -1865,6 +1909,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
             if (!blocked && netpol_v2_default_deny4(cgroup_id)) { blocked=1; reason=REASON_NETPOL_DEFAULT_DENY; }
         }
     }
+    if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && !syn_new && syndrop_allows4(peer,direction)) blocked=0;
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);
@@ -1941,6 +1986,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         int established = (l4_ok && !syn_new && ct_hit(&sc->ct));
         __u8 reason=0; int blocked=0;
         if (!established) blocked=decide6(direction,peer,proto,dport,&reason,1,cgroup_id,len);
+        if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && l4_ok && !syn_new && syndrop_allows6(peer,direction)) blocked=0;
         update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
         update_iface_flow(ifindex,FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
@@ -1966,6 +2012,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
     __u8 reason=0;
     int blocked=0;
     if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,1,cgroup_id,len);
+    if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && l4_ok && !syn_new && syndrop_allows6(peer,direction)) blocked=0;
     update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);

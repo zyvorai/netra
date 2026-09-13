@@ -23,6 +23,23 @@ type EBPFCIDRRule struct {
 	Direction string `json:"direction"` // egress, ingress, both
 }
 
+// EBPFSynDropEntry flags an existing exact-IP deny entry (BlockedIPv4/
+// BlockedIPv6 for egress, BlockedIngressIPv4/BlockedIngressIPv6 for
+// ingress) so only a genuinely new TCP connection attempt (SYN, not ACK)
+// is dropped for that address+direction — any other TCP packet is allowed
+// through instead of unconditionally dropped. Additive and separate from
+// the deny lists themselves (not a field on them): an entry here has no
+// effect unless the same address+direction is also present in the
+// matching BlockedIPv4/BlockedIPv6/BlockedIngressIPv4/BlockedIngressIPv6
+// list. CIDR-matched deny is not covered. Unlike EBPFCIDRRule, Direction
+// here is exactly "egress" or "ingress" — never "both", since the
+// underlying kernel maps are inherently per-direction. See
+// docs/syn-drop.md.
+type EBPFSynDropEntry struct {
+	Address   string `json:"address"`
+	Direction string `json:"direction"` // egress or ingress
+}
+
 type EBPFPortRule struct {
 	Protocol  string `json:"protocol"` // TCP, UDP, ANY
 	Port      uint16 `json:"port"`
@@ -97,9 +114,12 @@ type EBPFFastPathConfig struct {
 	// ConnRateLimits caps new TCP connection attempts per second per
 	// matching workload — see EBPFConnRateLimit.
 	ConnRateLimits []EBPFConnRateLimit `json:"connRateLimits,omitempty"`
-	Revision       uint64              `json:"revision"`
-	EnforceUntil   *time.Time          `json:"enforceUntil,omitempty"`
-	LeaseSeconds   int64               `json:"leaseSeconds,omitempty"`
+	// SynDrop lists exact-IP deny entries flagged for SYN-drop mode — see
+	// EBPFSynDropEntry.
+	SynDrop      []EBPFSynDropEntry `json:"synDrop,omitempty"`
+	Revision     uint64             `json:"revision"`
+	EnforceUntil *time.Time         `json:"enforceUntil,omitempty"`
+	LeaseSeconds int64              `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {

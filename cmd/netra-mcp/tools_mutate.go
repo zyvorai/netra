@@ -102,6 +102,24 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			bodyFields: true,
 		},
 		{
+			name: "netra_ebpf_syn_drop_add", method: "POST", path: "/api/v1/ebpf/syn-drop",
+			description: "Flag an exact-IP deny entry (blockedIPv4/blockedIPv6 for egress, blockedIngressIPv4/blockedIngressIPv6 for ingress) for SYN-drop mode: only a genuinely new TCP connection attempt is dropped for that address+direction; any other TCP packet is allowed through instead of unconditionally dropped. Has no effect unless a matching exact-IP deny entry for the same address+direction already exists (does not itself create one) — add that first with netra_ebpf_deny_add. CIDR-matched deny is not covered. Returns the full updated fast-path config.",
+			schema: objSchema(map[string]any{
+				"address":   strProp("Exact IPv4 or IPv6 address — must match an existing exact-IP deny entry to have any effect."),
+				"direction": enumProp("Direction it was denied in. Unlike CIDR rules, \"both\" is not valid — the underlying kernel maps are per-direction; add two entries for both.", "egress", "ingress"),
+			}, "address", "direction"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_syn_drop_delete", method: "POST", path: "/api/v1/ebpf/syn-drop/delete",
+			description: "Remove a SYN-drop-mode flag, reverting that exact-IP deny entry to dropping every packet (not just new SYNs). Returns the full updated fast-path config.",
+			schema: objSchema(map[string]any{
+				"address":   strProp("Exact IPv4 or IPv6 address."),
+				"direction": enumProp("Direction it was flagged in.", "egress", "ingress"),
+			}, "address", "direction"),
+			bodyFields: true,
+		},
+		{
 			name: "netra_ebpf_port_add", method: "POST", path: "/api/v1/ebpf/port",
 			description: "Add a port to the eBPF fast-path port deny rule set. Returns the full updated fast-path config.",
 			schema: objSchema(map[string]any{

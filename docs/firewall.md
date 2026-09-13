@@ -131,6 +131,16 @@ live cluster server-side — they require a working Kubernetes client
 (`s.kube`) and will show a plain error if run against a controller instance
 without one (e.g. a local, non-cluster test run).
 
+## SYN-drop mode
+
+The SYN-DROP MODE card flags an *existing* exact-IP deny entry (from the
+EXACT IP card above) so only a genuinely new TCP connection attempt is
+dropped for that address+direction, not every packet — see
+[SYN-drop mode](syn-drop.md) for the full design, its scope (exact-IP and
+TCP only, not CIDR or UDP), and the kernel-verifier risk this carries as
+the first change to add a conditional branch directly in the hot
+`handle_v4`/`handle_v6` packet path.
+
 ## Byte-rate (BPS) cap
 
 The RATE CONTROL card's per-destination cap was PPS-only until this

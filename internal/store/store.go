@@ -344,6 +344,61 @@ func (s *Store) DelBlockedIPv6(ip, actor string) (models.EBPFFastPathConfig, err
 	return cloneConfig(s.config), nil
 }
 
+// AddSynDrop/DelSynDrop manage EBPFSynDropEntry entries directly (equality
+// comparison, no generated ID) — mirroring AddCIDR/DelCIDR's shape but,
+// like AddNetPolRule/AddConnRateLimit, deliberately outside the generic
+// ruleIndex/ListRules/PatchRule system: this is a low-cardinality flag
+// list, not a primary rule type, and doesn't need edit-in-place/history.
+func (s *Store) AddSynDrop(entry models.EBPFSynDropEntry, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.SynDrop {
+		if x == entry {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.SynDrop = append(s.config.SynDrop, entry)
+	sort.Slice(s.config.SynDrop, func(i, j int) bool {
+		if s.config.SynDrop[i].Direction == s.config.SynDrop[j].Direction {
+			return s.config.SynDrop[i].Address < s.config.SynDrop[j].Address
+		}
+		return s.config.SynDrop[i].Direction < s.config.SynDrop[j].Direction
+	})
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.syndrop.add", Target: entry.Address, Details: map[string]any{"direction": entry.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelSynDrop(entry models.EBPFSynDropEntry, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFSynDropEntry, 0, len(s.config.SynDrop))
+	for _, x := range s.config.SynDrop {
+		if x != entry {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.SynDrop) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.SynDrop = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.syndrop.delete", Target: entry.Address, Details: map[string]any{"direction": entry.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) AddCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFastPathConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1672,6 +1727,7 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.NetPolRules = cloneNetPolRules(c.NetPolRules)
 	c.NetPolDefaultDenies = cloneNetPolDefaultDenies(c.NetPolDefaultDenies)
 	c.ConnRateLimits = cloneConnRateLimits(c.ConnRateLimits)
+	c.SynDrop = append([]models.EBPFSynDropEntry(nil), c.SynDrop...)
 	return c
 }
 

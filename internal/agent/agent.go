@@ -154,6 +154,7 @@ var mapNames = []string{
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health", "quic_observed",
 	"conn_rate_limits", "conn_rate_state",
 	"rate_bps_v4", "rate_byte_state_v4", "rate_bps_v6", "rate_byte_state_v6",
+	"syndrop_v4", "syndrop_v6",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -666,6 +667,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 	if err := a.replaceCIDRs(cfg.BlockedCIDRs); err != nil {
 		return err
 	}
+	if err := a.applySynDrop(cfg.SynDrop); err != nil {
+		return err
+	}
 	if err := a.replacePorts(cfg.BlockedPorts); err != nil {
 		return err
 	}
@@ -772,6 +776,74 @@ func dirs(s string) []byte {
 		return []byte{2}
 	}
 }
+
+// applySynDrop clears and rewrites syndrop_v4/v6 from cfg.SynDrop — same
+// full clear-then-rewrite convention as replaceCIDRMaps. Key layout
+// matches struct syndrop_key4/syndrop_key6 in bpf/netra_tc.c: address
+// bytes (network order, same raw copy replaceIPSet already uses for
+// blocked_v4/v6), then a 1-byte direction (1=ingress, 2=egress, matching
+// dirs()), then zero-padding — direction is always exactly one value here
+// (validated server-side to be "egress" or "ingress", never "both"), so
+// dirs()[0] is always safe.
+func (a *Agent) applySynDrop(entries []models.EBPFSynDropEntry) error {
+	m4 := a.collection.Maps["syndrop_v4"]
+	if m4 == nil {
+		return fmt.Errorf("map syndrop_v4 unavailable")
+	}
+	m6 := a.collection.Maps["syndrop_v6"]
+	if m6 == nil {
+		return fmt.Errorf("map syndrop_v6 unavailable")
+	}
+	var k4 [8]byte
+	var k6 [20]byte
+	var v uint8
+	var ks4 [][8]byte
+	var ks6 [][20]byte
+	i4 := m4.Iterate()
+	for i4.Next(&k4, &v) {
+		ks4 = append(ks4, k4)
+	}
+	for _, k := range ks4 {
+		_ = m4.Delete(k)
+	}
+	if err := mapIterErr(i4.Err()); err != nil {
+		return err
+	}
+	i6 := m6.Iterate()
+	for i6.Next(&k6, &v) {
+		ks6 = append(ks6, k6)
+	}
+	for _, k := range ks6 {
+		_ = m6.Delete(k)
+	}
+	if err := mapIterErr(i6.Err()); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		ip := net.ParseIP(e.Address)
+		if ip == nil {
+			continue
+		}
+		d := dirs(e.Direction)[0]
+		if v4 := ip.To4(); v4 != nil {
+			var k [8]byte
+			copy(k[0:4], v4)
+			k[4] = d
+			if err := m4.Put(k, uint8(1)); err != nil {
+				return err
+			}
+			continue
+		}
+		var k [20]byte
+		copy(k[0:16], ip.To16())
+		k[16] = d
+		if err := m6.Put(k, uint8(1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
 	return a.replaceCIDRMaps(a.collection.Maps["blocked_cidr_v4"], a.collection.Maps["blocked_cidr_v6"], rules)
 }
