@@ -447,6 +447,39 @@ struct {
     __type(value, struct tcp_signal_value);
 } tcp_signals SEC(".maps");
 
+// UDP flow health beyond DNS: packets/bytes per cgroup+remote-endpoint UDP
+// flow, mirroring tcp_health_key's shape so the two are easy to reason about
+// together. No send_errors/failure field: unlike DNS (which pairs its own
+// query/response and can therefore call a query "failed"), a bare UDP
+// sendmsg() has no in-kernel signal available to any hook Netra attaches —
+// cgroup/sendmsg4/6 runs before the packet is even queued, so it can't see a
+// later ICMP port-unreachable, and the interface-level icmp_errors map
+// (docs/icmp-diagnostics.md) isn't keyed per-flow. Documented honestly in
+// docs/udp-flow-health.md rather than inventing a counter with no real
+// signal behind it — same standard as the QUIC-observed reframe.
+struct udp_flow_key {
+    __u64 cgroup_id;
+    __u8 family;
+    __u8 pad[3];
+    __u32 local_ip4;
+    __u32 remote_ip4;
+    __u8 local_ip6[16];
+    __u8 remote_ip6[16];
+    __u16 local_port;
+    __u16 remote_port;
+};
+struct udp_flow_value {
+    __u64 packets;
+    __u64 bytes;
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 131072);
+    __type(key, struct udp_flow_key);
+    __type(value, struct udp_flow_value);
+} udp_flow_health SEC(".maps");
+
 struct dns_pending_key {
     __u64 cgroup_id;
     __u8 family;
@@ -839,6 +872,8 @@ struct netra_pkt_scratch {
     struct flow_value flowv;
     struct workload_flow_key wflowk;
     struct iface_flow_key ifk;
+    struct udp_flow_key ufk;
+    struct udp_flow_value ufv;
     struct tls_meta_key tlsk;
     struct tls_meta_value tlsv;
     struct http_meta_key httpk;
@@ -1261,6 +1296,48 @@ static __always_inline void update_iface_flow(__u32 ifindex, __u8 family, __u8 d
     }
 }
 
+// Only ever called from the cgroup_skb (HOOK_CGROUP) branch of
+// handle_v4/handle_v6 for unblocked IPPROTO_UDP packets, where cgroup_id
+// is real (bpf_get_current_cgroup_id(), not the TC branch's hardcoded 0)
+// and full packet length is available — unlike cgroup/sendmsg4/6, which
+// only sees per-syscall send attempts, not per-packet bytes. Local/remote
+// are normalized by direction so both halves of a flow land in one entry,
+// matching tcp_health's convention.
+static __always_inline void update_udp_flow_health(__u8 family, __u8 direction, __u16 sport, __u16 dport,
+                                                    const __u8 src[16], const __u8 dst[16], __u32 len,
+                                                    __u64 cgroup_id)
+{
+    if (!cgroup_id) return;
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return;
+    __builtin_memset(&sc->ufk, 0, sizeof(sc->ufk));
+    sc->ufk.cgroup_id = cgroup_id;
+    sc->ufk.family = family;
+    const __u8 *local = direction == DIR_EGRESS ? src : dst;
+    const __u8 *remote = direction == DIR_EGRESS ? dst : src;
+    __u16 local_port = direction == DIR_EGRESS ? sport : dport;
+    __u16 remote_port = direction == DIR_EGRESS ? dport : sport;
+    if (family == FAMILY_V4) {
+        __builtin_memcpy(&sc->ufk.local_ip4, local, 4);
+        __builtin_memcpy(&sc->ufk.remote_ip4, remote, 4);
+    } else {
+        __builtin_memcpy(sc->ufk.local_ip6, local, 16);
+        __builtin_memcpy(sc->ufk.remote_ip6, remote, 16);
+    }
+    sc->ufk.local_port = local_port;
+    sc->ufk.remote_port = remote_port;
+    __builtin_memset(&sc->ufv, 0, sizeof(sc->ufv));
+    struct udp_flow_value *v = bpf_map_lookup_elem(&udp_flow_health, &sc->ufk);
+    if (!v) {
+        bpf_map_update_elem(&udp_flow_health, &sc->ufk, &sc->ufv, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&udp_flow_health, &sc->ufk);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->packets, 1);
+    __sync_fetch_and_add(&v->bytes, len);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
 static __always_inline struct obs_event *new_event(__u8 family, __u8 direction, __u8 hook, __u8 proto,
                                                     __u8 action, __u8 type, __u8 reason)
 {
@@ -1581,6 +1658,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
         }
     }
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
+    if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if (direction==DIR_EGRESS) {
         sc->destk.dst_ip=daddr; sc->destk.dst_port=dport; sc->destk.protocol=proto; sc->destk.pad=0;
         __builtin_memset(&sc->destv, 0, sizeof(sc->destv));
@@ -1680,6 +1758,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
     int blocked=0;
     if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,1,cgroup_id);
     update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
+    if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if(blocked) {
         record_policy_drop(FAMILY_V6,proto,direction,reason,sport,dport,sc->src,sc->dst,len);
         submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,sc->src,sc->dst,sport,dport,flags,0,0,cgroup_id);

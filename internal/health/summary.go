@@ -25,6 +25,12 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 		resp.TCP = append(resp.TCP, a.TCPHealth...)
 		resp.DNS = append(resp.DNS, a.DNSHealth...)
 		resp.Signals = append(resp.Signals, a.TCPSignals...)
+		resp.UDP = append(resp.UDP, a.UDPFlowHealth...)
+		for _, u := range a.UDPFlowHealth {
+			resp.Summary.UDPFlows++
+			resp.Summary.UDPPackets += u.Packets
+			resp.Summary.UDPBytes += u.Bytes
+		}
 		for _, t := range a.TCPHealth {
 			connections := t.ActiveEstablished + t.PassiveEstablished
 			activeEstablished[t.CgroupID] += t.ActiveEstablished
@@ -76,11 +82,15 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 
 	sort.Slice(resp.TCP, func(i, j int) bool { return tcpScore(resp.TCP[i]) > tcpScore(resp.TCP[j]) })
 	sort.Slice(resp.DNS, func(i, j int) bool { return dnsScore(resp.DNS[i]) > dnsScore(resp.DNS[j]) })
+	sort.Slice(resp.UDP, func(i, j int) bool { return resp.UDP[i].Bytes > resp.UDP[j].Bytes })
 	if len(resp.TCP) > topN {
 		resp.TCP = resp.TCP[:topN]
 	}
 	if len(resp.DNS) > topN {
 		resp.DNS = resp.DNS[:topN]
+	}
+	if len(resp.UDP) > topN {
+		resp.UDP = resp.UDP[:topN]
 	}
 
 	resp.Summary.TopTCPProblems = append([]models.TCPHealthStat(nil), resp.TCP...)

@@ -48,6 +48,16 @@ export default function Health() {
       <p>Failure rate: <b>{pct(s.dnsFailures || 0, s.dnsResponses || 0)}</b>. DNS timing covers matched plain UDP/53 transactions only; DoH, DoT and TCP DNS are intentionally not inferred.</p>
     </section>
 
+    <section className="card span3">
+      <p className="eyebrow">UDP PULSE</p>
+      <div className="metrics">
+        <div><b>{s.udpFlows || 0}</b><span>flows</span></div>
+        <div><b>{s.udpPackets || 0}</b><span>packets</span></div>
+        <div><b>{s.udpBytes || 0}</b><span>bytes</span></div>
+      </div>
+      <p>Cgroup-attributed UDP flow counters beyond DNS. No send-failure signal is tracked: no BPF hook Netra attaches can see a UDP send fail after the fact.</p>
+    </section>
+
     <DNSDiagnostics agents={agents} />
 
     {agents.some((a: any) => (a.missingMaps || []).length) && (
@@ -142,6 +152,24 @@ export default function Health() {
             <span>{d.queries} / {d.responses} matched</span>
             <span>{d.failures} · {pct(d.failures, d.responses)}</span>
             <span>avg {ms(d.responses ? d.totalLatencyUs / d.responses : 0)} ms · max {ms(d.maxLatencyUs)} ms</span>
+          </div>;
+        })}
+      </div>}
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">UDP FLOW HEALTH</p>
+      <h3>Packets/bytes per remote endpoint</h3>
+      {(data?.udp || []).length === 0 && <p className="empty-state">No cgroup-attributed UDP flows observed yet.</p>}
+      {(data?.udp || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>PACKETS</span><span>BYTES</span></div>
+        {(data?.udp || []).map((u:any, i:number) => {
+          const who = u.namespace ? `${u.namespace}/${u.pod}` : `cgroup ${u.cgroupId || 0}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
+            <span>{u.remoteIp}:{u.remotePort}</span>
+            <span>{u.packets}</span>
+            <span>{u.bytes}</span>
           </div>;
         })}
       </div>}

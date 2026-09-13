@@ -151,7 +151,7 @@ var mapNames = []string{
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "allowed_uids", "allowed_comms", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
-	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors",
+	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -529,6 +529,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	udpFlowHealth, err := a.readUDPFlowHealth()
+	if err != nil {
+		return err
+	}
 	stack := a.readNodeStack()
 	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
 	histJSON := models.NetworkHistogramReport{
@@ -558,7 +562,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
-		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, ProcessMeta: processMeta,
+		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
@@ -1110,6 +1114,14 @@ func (a *Agent) enrichTCPHealth(st *models.TCPHealthStat) {
 		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName, st.ContainerID = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName, w.ContainerID
 	}
 }
+func (a *Agent) enrichUDPFlowHealth(st *models.UDPFlowHealthStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
 func (a *Agent) enrichTCPPressure(st *models.TCPPressureStat) {
 	if st.CgroupID == 0 {
 		return
@@ -1267,6 +1279,48 @@ func (a *Agent) readTCPHealth() ([]models.TCPHealthStat, error) {
 		aj := out[j].Retransmissions*1000 + out[j].RTOs*10000 + out[j].SRTTUS/1000
 		return ai > aj
 	})
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func decodeUDPFlowHealth(k [56]byte, v [24]byte) models.UDPFlowHealthStat {
+	family := k[8]
+	localIP, remoteIP := "", ""
+	if family == 4 {
+		localIP = net.IP(k[12:16]).String()
+		remoteIP = net.IP(k[16:20]).String()
+	}
+	if family == 6 {
+		localIP = net.IP(k[20:36]).String()
+		remoteIP = net.IP(k[36:52]).String()
+	}
+	return models.UDPFlowHealthStat{
+		CgroupID: native.Uint64(k[0:8]), Family: familyName(family), LocalIP: localIP, RemoteIP: remoteIP,
+		LocalPort: native.Uint16(k[52:54]), RemotePort: native.Uint16(k[54:56]),
+		Packets: native.Uint64(v[0:8]), Bytes: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24]),
+	}
+}
+
+func (a *Agent) readUDPFlowHealth() ([]models.UDPFlowHealthStat, error) {
+	m := a.collection.Maps["udp_flow_health"]
+	if m == nil {
+		return nil, fmt.Errorf("udp_flow_health unavailable")
+	}
+	it := m.Iterate()
+	var k [56]byte
+	var v [24]byte
+	out := make([]models.UDPFlowHealthStat, 0, 256)
+	for it.Next(&k, &v) {
+		st := decodeUDPFlowHealth(k, v)
+		a.enrichUDPFlowHealth(&st)
+		out = append(out, st)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Bytes > out[j].Bytes })
 	if len(out) > 1000 {
 		out = out[:1000]
 	}

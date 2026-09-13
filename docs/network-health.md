@@ -12,6 +12,14 @@ The controller joins cgroup IDs to the existing Kubernetes workload inventory wh
 
 For ordinary UDP/53 only, Netra correlates DNS transaction IDs between egress queries and ingress responses. It records query/response counts, response code, failures, average latency and maximum latency per cgroup and qname. It does not inspect DoH, DoT or arbitrary application payloads.
 
+## UDP flow health
+
+Beyond DNS's matched UDP/53 transactions, Netra now tracks cgroup-attributed
+packet/byte counters for every other UDP flow — see
+[UDP flow health beyond DNS](udp-flow-health.md) for the attach point, the
+`udpFlows`/`udpPackets`/`udpBytes` summary counters, and why no send-failure
+signal is tracked.
+
 ## Health signals
 
 `GET /api/v1/ebpf/health`, `netractl ebpf health`, and the Network Health dashboard expose deterministic signals. These are operational thresholds, not machine learning or root-cause claims:

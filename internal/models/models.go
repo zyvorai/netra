@@ -244,6 +244,26 @@ type TCPHealthStat struct {
 	ContainerID    string `json:"containerId,omitempty"`
 }
 
+// UDPFlowHealthStat is a cgroup-attributed UDP flow's packet/byte counters,
+// keyed like TCPHealthStat but without a send-failure signal: no BPF hook
+// Netra attaches can see a UDP sendmsg() fail after the fact (see
+// docs/udp-flow-health.md).
+type UDPFlowHealthStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	Family       string `json:"family"`
+	LocalIP      string `json:"localIp"`
+	RemoteIP     string `json:"remoteIp"`
+	LocalPort    uint16 `json:"localPort"`
+	RemotePort   uint16 `json:"remotePort"`
+	Packets      uint64 `json:"packets"`
+	Bytes        uint64 `json:"bytes"`
+	LastSeenNS   uint64 `json:"lastSeenNs"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
 // BPFProgramStat is per-program attach + optional kernel run stats from the agent.
 type BPFProgramStat struct {
 	Name            string `json:"name"`
@@ -343,6 +363,9 @@ type NetworkHealthSummary struct {
 	MaxDNSLatencyUS          uint64                 `json:"maxDnsLatencyUs"`
 	ConnectionAttempts       uint64                 `json:"connectionAttempts"`
 	EstimatedConnectFailures uint64                 `json:"estimatedConnectFailures"`
+	UDPFlows                 uint64                 `json:"udpFlows"`
+	UDPPackets               uint64                 `json:"udpPackets"`
+	UDPBytes                 uint64                 `json:"udpBytes"`
 	HealthScore              int                    `json:"healthScore"`
 	TopTCPProblems           []TCPHealthStat        `json:"topTcpProblems"`
 	TopDNSProblems           []DNSHealthStat        `json:"topDnsProblems"`
@@ -354,6 +377,7 @@ type NetworkHealthResponse struct {
 	TCP     []TCPHealthStat      `json:"tcp"`
 	DNS     []DNSHealthStat      `json:"dns"`
 	Signals []TCPSignalStat      `json:"signals"`
+	UDP     []UDPFlowHealthStat  `json:"udp"`
 }
 
 type TCPPressureStat struct {
@@ -731,6 +755,7 @@ type AgentReport struct {
 	ShieldClasses      []ShieldClassStat       `json:"shieldClasses,omitempty"`
 	ShieldSources      []ShieldSourceStat      `json:"shieldSources,omitempty"`
 	InterfaceFlows     []InterfaceFlowStat     `json:"interfaceFlows,omitempty"`
+	UDPFlowHealth      []UDPFlowHealthStat     `json:"udpFlowHealth,omitempty"`
 	// ProcessMeta is /proc-derived process metadata for PIDs observed in
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
