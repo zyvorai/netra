@@ -50,11 +50,10 @@ Every rule-type card shows a live `count / limit` line. The limits are the
 real, hardcoded BPF map sizes compiled into `bpf/netra_tc.c` (4096 entries
 for most rule types, 8192 for CIDR's LPM tries, 65536 for the legacy NetPol
 deny map, 65536 for NetPol v2 allow/deny rules, 16384 for NetPol v2
-default-deny postures) — see `ebpfRuleLimits` in `internal/api/server.go`,
-also returned as `limits` on `GET /api/v1/ebpf/capabilities`. These are
-compile-time constants; raising one requires a source change and a program
-rebuild, not a
-runtime setting.
+default-deny postures, 4096 for connection-rate-limit rules) — see
+`ebpfRuleLimits` in `internal/api/server.go`, also returned as `limits` on
+`GET /api/v1/ebpf/capabilities`. These are compile-time constants; raising
+one requires a source change and a program rebuild, not a runtime setting.
 
 ## Bulk deny-list import
 
@@ -130,3 +129,26 @@ Both the rule-add and default-deny forms resolve their selector against the
 live cluster server-side — they require a working Kubernetes client
 (`s.kube`) and will show a plain error if run against a controller instance
 without one (e.g. a local, non-cluster test run).
+
+## Connection-rate limit
+
+The CONNECTION-RATE LIMIT card caps new TCP connection attempts per second
+for every workload matching a selector — the same compound
+namespace/pod/kind/name/labels shape NetPol v2 rules use, not a scalar key,
+so it has its own dedicated add/delete endpoints
+(`POST`/`DELETE /api/v1/ebpf/conn-rate-limit[/{id}]`) rather than living in
+the unified rules table above. **Not part of NetPol** — it's a separate
+enforcement primitive, checked on TCP `connect()` attempts only
+(`cgroup/connect4`/`cgroup/connect6`); UDP `sendmsg()` is connectionless and
+excluded. When more than one rule matches the same workload, the strictest
+(lowest) `perSecond` applies — these are caps, not quotas that sum.
+
+The agent resolves each rule's selector against its own cgroup→workload
+table every sync (the same `workload.Match` mechanism NetPol v2 and
+workload-scoped enforcement already use, so it degrades the same way
+without a Kubernetes client — cgroup-only identity, no namespace/pod
+labels) and writes the strictest matching `perSecond` into a per-cgroup BPF
+map, `conn_rate_limits`. Drops surface in `GET /api/v1/agents`'
+`connRateDrops` (Health page's CONNECTION-RATE DROPS card) and use a new
+BPF reason code (`conn-rate-limit`) distinct from the existing
+per-destination `rate-limit` reason.

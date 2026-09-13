@@ -98,6 +98,8 @@ func usage() {
   ebpf netpol default-deny plan [--namespace NS] ... [--disable] [--allow-no-rules]
   ebpf netpol default-deny set --token TOKEN [--confirm-risk RISK] [--namespace NS] ... [--disable] [--lease DURATION]
   ebpf netpol quarantine [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--allow-peer IP[:PORT[/PROTO]]]... [--lease DURATION] [--confirm-risk RISK] [--allow-no-rules]
+  ebpf conn-rate-limit add --per-second N [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v]
+  ebpf conn-rate-limit del ID
   ebpf rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION
   ebpf workloads [node]
   ebpf scope show | scope all
@@ -797,6 +799,59 @@ func ebpf() error {
 			return netpolQuarantine(os.Args[4:])
 		default:
 			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set | netpol quarantine")
+		}
+	case "conn-rate-limit":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("conn-rate-limit add --per-second N [selector flags] | conn-rate-limit del ID")
+		}
+		switch os.Args[3] {
+		case "del":
+			if len(os.Args) < 5 {
+				return fmt.Errorf("conn-rate-limit del ID")
+			}
+			return request("DELETE", "/api/v1/ebpf/conn-rate-limit/"+url.PathEscape(os.Args[4]), nil)
+		case "add":
+			selector, labels := map[string]any{}, map[string]string{}
+			body := map[string]any{}
+			for i := 4; i < len(os.Args); i++ {
+				if i+1 >= len(os.Args) {
+					return fmt.Errorf("%s requires a value", os.Args[i])
+				}
+				flag, value := os.Args[i], os.Args[i+1]
+				i++
+				switch flag {
+				case "--namespace":
+					selector["namespace"] = value
+				case "--pod":
+					selector["pod"] = value
+				case "--kind":
+					selector["workloadKind"] = value
+				case "--workload":
+					selector["workloadName"] = value
+				case "--label":
+					parts := strings.SplitN(value, "=", 2)
+					if len(parts) != 2 || parts[0] == "" {
+						return fmt.Errorf("label must be key=value")
+					}
+					labels[parts[0]] = parts[1]
+				case "--per-second":
+					pps, err := strconv.ParseUint(value, 10, 32)
+					if err != nil || pps == 0 {
+						return fmt.Errorf("--per-second must be a positive integer")
+					}
+					body["perSecond"] = uint32(pps)
+				default:
+					return fmt.Errorf("unknown conn-rate-limit flag %s", flag)
+				}
+			}
+			if len(labels) > 0 {
+				selector["labels"] = labels
+			}
+			body["selector"] = selector
+			b, _ := json.Marshal(body)
+			return request("POST", "/api/v1/ebpf/conn-rate-limit", b)
+		default:
+			return fmt.Errorf("conn-rate-limit add|del")
 		}
 	case "interfaces":
 		return request("GET", "/api/v1/ebpf/interfaces", nil)

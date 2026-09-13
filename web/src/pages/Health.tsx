@@ -96,6 +96,18 @@ export default function Health() {
       </div>
     </section>
     <section className="card span3">
+      <p className="eyebrow">CONNECTION-RATE DROPS</p>
+      <h3>New-TCP-connection caps that actually fired</h3>
+      <div className="list">
+        {agents.flatMap((a: any) => (a.connRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No workload has hit its connection-rate cap yet.</p>}
+        {agents.flatMap((a: any) => (a.connRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
+          <div className="agent wide" key={i}>
+            <b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small>
+          </div>
+        ))}
+      </div>
+    </section>
+    <section className="card span3">
       <p className="eyebrow">ICMP PULSE</p>
       <h3>Type histogram from the packet path</h3>
       <p>Observe-only. Cumulative since the map was last created. No ICMP payload is exported.</p>

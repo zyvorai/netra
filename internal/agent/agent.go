@@ -152,6 +152,7 @@ var mapNames = []string{
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "allowed_uids", "allowed_comms", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health", "quic_observed",
+	"conn_rate_limits", "conn_rate_state",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -441,6 +442,9 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err := a.applyNetPolV2(cfg); err != nil {
 		return err
 	}
+	if err := a.applyConnRateLimits(cfg); err != nil {
+		return err
+	}
 	a.lastSync = time.Now()
 	stats, err := a.readStats()
 	if err != nil {
@@ -494,6 +498,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	rateDrops, err := a.readRateDrops()
+	if err != nil {
+		return err
+	}
+	connRateDrops, err := a.readConnRateDrops()
 	if err != nil {
 		return err
 	}
@@ -565,7 +573,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
@@ -1070,6 +1078,66 @@ func (a *Agent) applyWorkloadScopes(cfg models.EBPFFastPathConfig) error {
 	return nil
 }
 
+// applyConnRateLimits resolves every EBPFConnRateLimit.Selector against the
+// node's live cgroup→workload table (populated by applyWorkloadScopes,
+// called just before this every sync) and pushes the resulting per-cgroup
+// PPS ceiling into conn_rate_limits — a full clear-then-rewrite each sync,
+// same convention as replaceRates. When more than one rule matches a
+// cgroup, the strictest (lowest) PerSecond wins, consistent with "these are
+// caps, not quotas that sum."
+func (a *Agent) applyConnRateLimits(cfg models.EBPFFastPathConfig) error {
+	m := a.collection.Maps["conn_rate_limits"]
+	if m == nil {
+		return fmt.Errorf("conn_rate_limits unavailable")
+	}
+	var oldKey uint64
+	var oldVal uint32
+	var stale []uint64
+	it := m.Iterate()
+	for it.Next(&oldKey, &oldVal) {
+		stale = append(stale, oldKey)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return err
+	}
+	for _, k := range stale {
+		_ = m.Delete(k)
+	}
+	if len(cfg.ConnRateLimits) == 0 {
+		return nil
+	}
+	a.workloadMu.RLock()
+	byCgroup := a.workloadByCgroup
+	a.workloadMu.RUnlock()
+	effective := effectiveConnRateLimits(byCgroup, cfg.ConnRateLimits)
+	for cgroupID, pps := range effective {
+		if err := m.Put(cgroupID, pps); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// effectiveConnRateLimits matches every rule's Selector against every
+// cgroup's resolved workload identity, keeping the strictest (lowest)
+// PerSecond when more than one rule matches a cgroup. Pulled out of
+// applyConnRateLimits so the matching/min-selection logic is unit-testable
+// without a live BPF map.
+func effectiveConnRateLimits(byCgroup map[uint64]models.WorkloadIdentity, rules []models.EBPFConnRateLimit) map[uint64]uint32 {
+	effective := make(map[uint64]uint32, len(byCgroup))
+	for cgroupID, w := range byCgroup {
+		for _, rule := range rules {
+			if rule.PerSecond == 0 || !workload.Match(rule.Selector, w) {
+				continue
+			}
+			if cur, ok := effective[cgroupID]; !ok || rule.PerSecond < cur {
+				effective[cgroupID] = rule.PerSecond
+			}
+		}
+	}
+	return effective
+}
+
 func (a *Agent) scanCgroups() (map[uint64]cgroupmeta.Identity, error) {
 	if a.cgroupCache != nil && a.cgroupScanEvery > 0 && time.Since(a.lastCgroupScan) < a.cgroupScanEvery {
 		return a.cgroupCache, nil
@@ -1346,7 +1414,7 @@ func decodeQUICObserved(k [32]byte, v [24]byte) models.QUICObservedStat {
 	return models.QUICObservedStat{
 		CgroupID: native.Uint64(k[0:8]), Family: familyName(family), RemoteIP: remoteIP,
 		RemotePort: native.Uint16(k[28:30]),
-		Packets: native.Uint64(v[0:8]), LongHeaderPackets: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24]),
+		Packets:    native.Uint64(v[0:8]), LongHeaderPackets: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24]),
 	}
 }
 
@@ -1785,6 +1853,43 @@ func (a *Agent) readRateDrops() ([]models.NamedCount, error) {
 		if err := mapIterErr(it.Err()); err != nil {
 			return nil, err
 		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
+// readConnRateDrops names entries by workload identity when resolvable
+// (mirroring every other cgroup-keyed reader's enrichment), falling back to
+// "cgroup N" — unlike readRateDrops, an IP string isn't meaningful here
+// since conn_rate_state is keyed by cgroup_id, not destination address.
+func (a *Agent) readConnRateDrops() ([]models.NamedCount, error) {
+	m := a.collection.Maps["conn_rate_state"]
+	if m == nil {
+		return nil, fmt.Errorf("conn_rate_state unavailable")
+	}
+	out := make([]models.NamedCount, 0, 16)
+	var k uint64
+	var v struct {
+		Second  uint64
+		Count   uint64
+		Dropped uint64
+	}
+	it := m.Iterate()
+	for it.Next(&k, &v) {
+		if v.Dropped == 0 {
+			continue
+		}
+		name := fmt.Sprintf("cgroup %d", k)
+		if w, ok := a.workloadIdentity(k); ok && w.Namespace != "" {
+			name = w.Namespace + "/" + w.Pod
+		}
+		out = append(out, models.NamedCount{Name: name, Count: v.Dropped})
+		if len(out) >= 32 {
+			break
+		}
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
 	return out, nil
@@ -2509,6 +2614,12 @@ func reasonName(v byte) string {
 		return "tls-sni"
 	case 9:
 		return "netpol"
+	case 10:
+		return "netpol-rule"
+	case 11:
+		return "netpol-default-deny"
+	case 12:
+		return "conn-rate-limit"
 	default:
 		return ""
 	}

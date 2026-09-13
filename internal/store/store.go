@@ -73,6 +73,7 @@ type Store struct {
 	firewallRuleRevisions []models.FirewallRuleRevision
 	nextFirewallRevID     uint64
 	nextNetPolRuleSeq     uint64
+	nextConnRateLimitSeq  uint64
 	backend               *fileBackend
 }
 
@@ -1249,6 +1250,61 @@ func (s *Store) DelNetPolRule(id, actor string) (models.EBPFFastPathConfig, erro
 	return cloneConfig(s.config), nil
 }
 
+// AddConnRateLimit caps new TCP connection attempts per second for every
+// workload matching rule.Selector. Mirrors AddNetPolRule's generated-ID
+// pattern (compound selector, not a scalar key) rather than allow-uid's
+// scalar add/delete pattern.
+func (s *Store) AddConnRateLimit(rule models.EBPFConnRateLimit, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rule.PerSecond == 0 {
+		return cloneConfig(s.config), fmt.Errorf("perSecond must be greater than zero")
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.nextConnRateLimitSeq++
+	rule.ID = "connratelimit-" + strconv.FormatUint(s.nextConnRateLimitSeq, 10)
+	rule.CreatedAt = time.Now().UTC()
+	rule.CreatedBy = actor
+	rule.Selector = cloneScopes([]models.EBPFWorkloadScope{rule.Selector})[0]
+	s.config.ConnRateLimits = append(s.config.ConnRateLimits, rule)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: rule.CreatedAt, Actor: actor, Action: "ebpf.connratelimit.add", Target: rule.ID, Details: map[string]any{"perSecond": rule.PerSecond}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		s.nextConnRateLimitSeq--
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelConnRateLimit(id, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFConnRateLimit, 0, len(s.config.ConnRateLimits))
+	found := false
+	for _, r := range s.config.ConnRateLimits {
+		if r.ID == id {
+			found = true
+			continue
+		}
+		out = append(out, r)
+	}
+	if !found {
+		return cloneConfig(s.config), fmt.Errorf("conn rate limit %s not found", id)
+	}
+	s.config.ConnRateLimits = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.connratelimit.delete", Target: id})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 // SetNetPolDefaultDeny activates (enabled=true) or deactivates
 // (enabled=false) default-deny posture for every workload matching
 // selector, replacing any prior entry for the identical selector (compared
@@ -1611,11 +1667,21 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	}
 	c.NetPolRules = cloneNetPolRules(c.NetPolRules)
 	c.NetPolDefaultDenies = cloneNetPolDefaultDenies(c.NetPolDefaultDenies)
+	c.ConnRateLimits = cloneConnRateLimits(c.ConnRateLimits)
 	return c
 }
 
 func cloneNetPolRules(in []models.NetPolRule) []models.NetPolRule {
 	out := make([]models.NetPolRule, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Selector = cloneScopes([]models.EBPFWorkloadScope{in[i].Selector})[0]
+	}
+	return out
+}
+
+func cloneConnRateLimits(in []models.EBPFConnRateLimit) []models.EBPFConnRateLimit {
+	out := make([]models.EBPFConnRateLimit, len(in))
 	for i := range in {
 		out[i] = in[i]
 		out[i].Selector = cloneScopes([]models.EBPFWorkloadScope{in[i].Selector})[0]

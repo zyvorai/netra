@@ -91,9 +91,12 @@ type EBPFFastPathConfig struct {
 	NetPolV2Enabled     bool                `json:"netPolV2Enabled,omitempty"`
 	NetPolRules         []NetPolRule        `json:"netPolRules,omitempty"`
 	NetPolDefaultDenies []NetPolDefaultDeny `json:"netPolDefaultDenies,omitempty"`
-	Revision            uint64              `json:"revision"`
-	EnforceUntil        *time.Time          `json:"enforceUntil,omitempty"`
-	LeaseSeconds        int64               `json:"leaseSeconds,omitempty"`
+	// ConnRateLimits caps new TCP connection attempts per second per
+	// matching workload — see EBPFConnRateLimit.
+	ConnRateLimits []EBPFConnRateLimit `json:"connRateLimits,omitempty"`
+	Revision       uint64              `json:"revision"`
+	EnforceUntil   *time.Time          `json:"enforceUntil,omitempty"`
+	LeaseSeconds   int64               `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
@@ -717,6 +720,23 @@ type NetPolRule struct {
 	CreatedBy string            `json:"createdBy,omitempty"`
 }
 
+// EBPFConnRateLimit caps new TCP connection attempts per second for every
+// workload matching Selector. Checked only on cgroup/connect4|connect6
+// (TCP connect() attempts) — cgroup/sendmsg4|6 (UDP, connectionless) is
+// deliberately excluded, since there is no "new connection" concept there.
+// Selector reuses EBPFWorkloadScope (the same compound
+// namespace/pod/kind/name/labels shape NetPolRule and workload scoping
+// already use) rather than a scalar key, so this mirrors NetPolRule's
+// generated-ID add/delete pattern, not the scalar allow/deny-list pattern
+// (allow-uid, rate-limit-by-destination, etc).
+type EBPFConnRateLimit struct {
+	ID        string            `json:"id"`
+	Selector  EBPFWorkloadScope `json:"selector"`
+	PerSecond uint32            `json:"perSecond"`
+	CreatedAt time.Time         `json:"createdAt"`
+	CreatedBy string            `json:"createdBy,omitempty"`
+}
+
 // NetPolDefaultDeny activates default-deny posture for every workload
 // matching Selector: absent from this list means fail-open (default-allow)
 // for that workload, mirroring real Kubernetes NetworkPolicy semantics.
@@ -778,6 +798,10 @@ type AgentReport struct {
 	InterfaceFlows     []InterfaceFlowStat     `json:"interfaceFlows,omitempty"`
 	UDPFlowHealth      []UDPFlowHealthStat     `json:"udpFlowHealth,omitempty"`
 	QUICObserved       []QUICObservedStat      `json:"quicObserved,omitempty"`
+	// ConnRateDrops names workloads (or "cgroup N" when identity isn't yet
+	// resolved) whose new-TCP-connection-rate cap (EBPFConnRateLimit) has
+	// actually fired, mirroring RateDrops' shape/semantics.
+	ConnRateDrops []NamedCount `json:"connRateDrops,omitempty"`
 	// ProcessMeta is /proc-derived process metadata for PIDs observed in
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to

@@ -706,6 +706,52 @@ func TestNetPolRuleCRUD(t *testing.T) {
 	}
 }
 
+func TestConnRateLimitCRUD(t *testing.T) {
+	s := New()
+	rule := models.EBPFConnRateLimit{
+		Selector:  models.EBPFWorkloadScope{Namespace: "payments"},
+		PerSecond: 50,
+	}
+	cfg, err := s.AddConnRateLimit(rule, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ConnRateLimits) != 1 {
+		t.Fatalf("want 1 rule, got %#v", cfg.ConnRateLimits)
+	}
+	added := cfg.ConnRateLimits[0]
+	if added.ID == "" || added.CreatedBy != "test" || added.CreatedAt.IsZero() {
+		t.Fatalf("rule metadata not set: %#v", added)
+	}
+	if added.Selector.Namespace != "payments" || added.PerSecond != 50 {
+		t.Fatalf("rule not preserved: %#v", added)
+	}
+
+	// A second rule must get a distinct, sequential ID.
+	cfg, err = s.AddConnRateLimit(models.EBPFConnRateLimit{Selector: models.EBPFWorkloadScope{Namespace: "checkout"}, PerSecond: 10}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ConnRateLimits) != 2 || cfg.ConnRateLimits[0].ID == cfg.ConnRateLimits[1].ID {
+		t.Fatalf("expected 2 distinct rule IDs: %#v", cfg.ConnRateLimits)
+	}
+
+	if _, err := s.AddConnRateLimit(models.EBPFConnRateLimit{Selector: models.EBPFWorkloadScope{Namespace: "x"}, PerSecond: 0}, "test"); err == nil {
+		t.Fatal("expected error adding a zero-PerSecond conn rate limit")
+	}
+
+	cfg, err = s.DelConnRateLimit(added.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ConnRateLimits) != 1 || cfg.ConnRateLimits[0].Selector.Namespace != "checkout" {
+		t.Fatalf("delete did not remove the right rule: %#v", cfg.ConnRateLimits)
+	}
+	if _, err := s.DelConnRateLimit("nonexistent", "test"); err == nil {
+		t.Fatal("expected error deleting an unknown conn rate limit id")
+	}
+}
+
 func TestSetNetPolDefaultDenyActivateAndExpire(t *testing.T) {
 	s := New()
 	selector := models.EBPFWorkloadScope{Namespace: "payments", Pod: "api-1"}

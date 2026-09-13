@@ -72,6 +72,10 @@ export default function EBPF() {
   const [npProto, setNpProto] = useState('TCP');
   const [npDir, setNpDir] = useState('egress');
   const [npAction, setNpAction] = useState('allow');
+  const [crlSelNS, setCrlSelNS] = useState('');
+  const [crlSelPod, setCrlSelPod] = useState('');
+  const [crlSelLabel, setCrlSelLabel] = useState('');
+  const [crlPerSecond, setCrlPerSecond] = useState('');
   const [ddSelNS, setDdSelNS] = useState('');
   const [ddSelPod, setDdSelPod] = useState('');
   const [ddSelLabel, setDdSelLabel] = useState('');
@@ -210,6 +214,19 @@ export default function EBPF() {
   }
   function delNetPolRule(id: string) {
     call('/api/v1/ebpf/netpol/rules/' + encodeURIComponent(id), 'DELETE');
+  }
+  async function addConnRateLimit() {
+    try {
+      await api('/api/v1/ebpf/conn-rate-limit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selector: selectorFrom(crlSelNS, crlSelPod, crlSelLabel), perSecond: Number(crlPerSecond) }),
+      });
+      setCrlPerSecond('');
+      await load();
+    } catch (e) { setErr(String(e)); }
+  }
+  function delConnRateLimit(id: string) {
+    call('/api/v1/ebpf/conn-rate-limit/' + encodeURIComponent(id), 'DELETE');
   }
   async function planDefaultDeny(enabled: boolean) {
     const body: any = { selector: selectorFrom(ddSelNS, ddSelPod, ddSelLabel), enabled };
@@ -444,6 +461,28 @@ export default function EBPF() {
         {(cfg?.netPolDefaultDenies || []).map((x: any, i: number) => (
           <button key={i} aria-label={`Deactivate default-deny for ${x.selector?.namespace || '*'}/${x.selector?.pod || '*'}`} onClick={() => deactivateDefaultDeny(x.selector)}>
             {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} · until {x.enabledUntil ? new Date(x.enabledUntil).toLocaleTimeString() : '—'} ×
+          </button>
+        ))}
+      </div>
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">CONNECTION-RATE LIMIT</p>
+      <h3>New TCP connections per second, per workload</h3>
+      <p>Checked only on TCP <code>connect()</code> attempts (UDP is connectionless and excluded). When more than one rule matches a workload, the strictest (lowest) cap applies.</p>
+      {cap((cfg?.connRateLimits?.length||0), caps?.limits?.connRateLimit)}
+      <div className="ruleform">
+        <input aria-label="Namespace" value={crlSelNS} onChange={e => setCrlSelNS(e.target.value)} placeholder="namespace" />
+        <input aria-label="Pod" value={crlSelPod} onChange={e => setCrlSelPod(e.target.value)} placeholder="pod (optional)" />
+        <input aria-label="Label selector" value={crlSelLabel} onChange={e => setCrlSelLabel(e.target.value)} placeholder="label key=value (optional)" />
+        <input aria-label="Connections per second" value={crlPerSecond} onChange={e => setCrlPerSecond(e.target.value)} inputMode="numeric" placeholder="connections/sec" />
+        <button className="primary" onClick={addConnRateLimit}>Add limit</button>
+      </div>
+      <div className="chips">
+        {(cfg?.connRateLimits || []).length === 0 && <span>No connection-rate limits configured.</span>}
+        {(cfg?.connRateLimits || []).map((x: any) => (
+          <button key={x.id} aria-label={`Remove limit ${x.id}`} onClick={() => delConnRateLimit(x.id)}>
+            {x.selector?.namespace || '*'}/{x.selector?.pod || '*'} ≤ {x.perSecond}/s ×
           </button>
         ))}
       </div>

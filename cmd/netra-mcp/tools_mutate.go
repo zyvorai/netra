@@ -276,6 +276,21 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			pathParams:  []string{"id"},
 		},
 		{
+			name: "netra_ebpf_conn_rate_limit_add", method: "POST", path: "/api/v1/ebpf/conn-rate-limit",
+			description: "Cap new TCP connection attempts per second for every workload matching a selector (namespace/pod/owner/labels — same shape as netra_ebpf_scope_set). Checked only on TCP connect() attempts, not UDP sendmsg. When multiple rules match the same workload the strictest (lowest) perSecond applies. Returns the full updated fast-path config with the new rule's assigned id.",
+			schema: objSchema(map[string]any{
+				"selector":  map[string]any{"type": "object", "description": "Workload selector: namespace/pod/workloadKind/workloadName/labels/cgroupId. At least one field required."},
+				"perSecond": intProp("New-TCP-connection ceiling per second. Must be greater than zero."),
+			}, "selector", "perSecond"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_conn_rate_limit_delete", method: "DELETE", path: "/api/v1/ebpf/conn-rate-limit/{id}",
+			description: "Delete a connection-rate-limit rule by its id (from the fast-path config's connRateLimits, or netra_ebpf_conn_rate_limit_add's response).",
+			schema:      objSchema(map[string]any{"id": strProp("Rule id.")}, "id"),
+			pathParams:  []string{"id"},
+		},
+		{
 			name: "netra_ebpf_netpol_default_deny_plan", method: "POST", path: "/api/v1/ebpf/netpol/default-deny/plan",
 			description: "Mandatory first step to activate/deactivate v2 default-deny for a workload selector: assesses risk (workloads with zero covering allow rules make this \"critical\" and the call is refused unless allow_no_rules is set) and issues a receipt.token (5-minute, single-use) required by netra_ebpf_netpol_default_deny_set. Deactivating is always risk \"low\". Mutates nothing else.",
 			schema: objSchema(map[string]any{

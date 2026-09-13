@@ -59,6 +59,7 @@
 #define REASON_NETPOL 9
 #define REASON_NETPOL_RULE 10         /* explicit netpol_rules4 deny match (v2) */
 #define REASON_NETPOL_DEFAULT_DENY 11 /* v2 default-deny posture, no matching allow rule */
+#define REASON_CONN_RATE 12           /* per-cgroup new-TCP-connection-rate cap (conn_rate_limits) */
 #define FAMILY_V4    4
 #define FAMILY_V6    6
 
@@ -340,6 +341,25 @@ struct {
     __type(key, struct ip6_key);
     __type(value, struct rate_state);
 } rate_state_v6 SEC(".maps");
+
+// Per-cgroup new-TCP-connection-rate cap. Unlike rate_v4/v6 (keyed by
+// destination address, checked in the TC packet path), this is keyed by
+// cgroup_id and checked in socket4/socket6 (cgroup/connect4|connect6) —
+// once per TCP connect() attempt, not once per packet. Family-agnostic
+// (cgroup_id has no address family), so a single map pair covers both.
+// Reuses the existing rate_state token-bucket shape verbatim.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u64); /* cgroup_id */
+    __type(value, __u32); /* connections-per-second ceiling */
+} conn_rate_limits SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u64); /* cgroup_id */
+    __type(value, struct rate_state);
+} conn_rate_state SEC(".maps");
 
 // icmp_type_stats: observe-only ICMPv4 type histogram (key = ICMP type 0-255).
 struct {
@@ -1258,6 +1278,37 @@ static __always_inline int rate_limited4(__u32 dst)
     return 0;
 }
 
+// Per-cgroup new-TCP-connection-rate cap — same token-bucket-per-second
+// logic as rate_limited4/6, keyed by cgroup_id instead of destination
+// address. Only called from socket4/socket6 for proto==IPPROTO_TCP (see
+// their call sites): cgroup/sendmsg4|6 (UDP) never reaches this, since a
+// UDP sendmsg() isn't a new connection.
+static __always_inline int conn_rate_limited(__u64 cgroup_id)
+{
+    if (!cgroup_id) return 0;
+    __u32 *pps = bpf_map_lookup_elem(&conn_rate_limits, &cgroup_id);
+    if (!pps || !*pps) return 0;
+    __u64 sec = bpf_ktime_get_ns() / 1000000000ULL;
+    struct rate_state zero = {.second = sec, .count = 0, .dropped = 0};
+    struct rate_state *st = bpf_map_lookup_elem(&conn_rate_state, &cgroup_id);
+    if (!st) {
+        bpf_map_update_elem(&conn_rate_state, &cgroup_id, &zero, BPF_NOEXIST);
+        st = bpf_map_lookup_elem(&conn_rate_state, &cgroup_id);
+        if (!st) return 0;
+    }
+    if (st->second != sec) {
+        st->second = sec;
+        st->count = 1;
+        return 0;
+    }
+    __u64 old = __sync_fetch_and_add(&st->count, 1);
+    if (old >= *pps) {
+        __sync_fetch_and_add(&st->dropped, 1);
+        return 1;
+    }
+    return 0;
+}
+
 static __always_inline void update_flow(__u8 family, __u8 direction, __u8 hook, __u8 proto,
                                         __u16 sport, __u16 dport, const __u8 src[16], const __u8 dst[16],
                                         __u32 len, int blocked, __u64 cgroup_id)
@@ -2070,6 +2121,7 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
         if(bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}
         else if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}
     }
+    if(!blocked && proto==IPPROTO_TCP && conn_rate_limited(cgroup_id)){reason=REASON_CONN_RATE;blocked=1;}
     if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id);
     if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); struct connect_start_value cv={}; cv.start_ns=bpf_ktime_get_ns(); cv.key.cgroup_id=cgroup_id; cv.key.family=FAMILY_V4; cv.key.protocol=IPPROTO_TCP; cv.key.remote_port=dport; copy4(cv.key.remote,dst); bpf_map_update_elem(&connect_start,&cookie,&cv,BPF_ANY); } }
     track_connect_attempt(cgroup_id,FAMILY_V4,proto,addr,dport,blocked);
@@ -2084,6 +2136,7 @@ static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
         if(bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}
         else if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}
     }
+    if(!blocked && proto==IPPROTO_TCP && conn_rate_limited(cgroup_id)){reason=REASON_CONN_RATE;blocked=1;}
     if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,0,cgroup_id);
     if (!blocked && proto==IPPROTO_TCP) { __u64 cookie=bpf_get_socket_cookie(ctx); if(cookie){ struct socket_owner_value ov={.cgroup_id=cgroup_id,.pid=(__u32)(bpf_get_current_pid_tgid()>>32),.uid=uid}; bpf_get_current_comm(ov.comm,sizeof(ov.comm)); bpf_map_update_elem(&socket_owner,&cookie,&ov,BPF_ANY); struct connect_start_value cv={}; cv.start_ns=bpf_ktime_get_ns(); cv.key.cgroup_id=cgroup_id; cv.key.family=FAMILY_V6; cv.key.protocol=IPPROTO_TCP; cv.key.remote_port=dport; copy16(cv.key.remote,addr); bpf_map_update_elem(&connect_start,&cookie,&cv,BPF_ANY); } }
     track_connect_attempt(cgroup_id,FAMILY_V6,proto,addr,dport,blocked);

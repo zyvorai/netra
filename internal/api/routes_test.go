@@ -70,6 +70,8 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"PUT", "/api/v1/ebpf/netpol/v2/config"},
 		{"POST", "/api/v1/ebpf/netpol/rules"},
 		{"DELETE", "/api/v1/ebpf/netpol/rules/netpolrule-1"},
+		{"POST", "/api/v1/ebpf/conn-rate-limit"},
+		{"DELETE", "/api/v1/ebpf/conn-rate-limit/connratelimit-1"},
 		{"POST", "/api/v1/ebpf/netpol/default-deny/plan"},
 		{"PUT", "/api/v1/ebpf/netpol/default-deny"},
 		{"GET", "/api/v1/ebpf/rules"},
