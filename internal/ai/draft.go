@@ -13,16 +13,16 @@ import (
 // RuleDraft is a preview of an emergency eBPF rule parsed from natural
 // language. It is never applied by this package.
 type RuleDraft struct {
-	Understood bool           `json:"understood"`
-	Confidence string         `json:"confidence"` // high | medium | low
-	Kind       string         `json:"kind,omitempty"`
-	Summary    string         `json:"summary"`
-	ApplyPath  string         `json:"applyPath,omitempty"`
-	ApplyMethod string        `json:"applyMethod,omitempty"`
-	Body       map[string]any `json:"body,omitempty"`
-	CLI        string         `json:"cli,omitempty"`
-	Warnings   []string       `json:"warnings"`
-	Note       string         `json:"note"`
+	Understood  bool           `json:"understood"`
+	Confidence  string         `json:"confidence"` // high | medium | low
+	Kind        string         `json:"kind,omitempty"`
+	Summary     string         `json:"summary"`
+	ApplyPath   string         `json:"applyPath,omitempty"`
+	ApplyMethod string         `json:"applyMethod,omitempty"`
+	Body        map[string]any `json:"body,omitempty"`
+	CLI         string         `json:"cli,omitempty"`
+	Warnings    []string       `json:"warnings"`
+	Note        string         `json:"note"`
 }
 
 var (

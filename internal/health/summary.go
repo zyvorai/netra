@@ -214,6 +214,29 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 				labels[c.CgroupID] = subject(c.Namespace, c.Pod, "", "", 0)
 			}
 		}
+		echo, unreach := uint64(0), uint64(0)
+		for _, c := range a.ICMPTypes {
+			if c.Name == "echo-request" {
+				echo += c.Count
+			}
+			if c.Name == "dest-unreach" {
+				unreach += c.Count
+			}
+		}
+		for _, c := range a.ICMP6Types {
+			if c.Name == "echo-request" {
+				echo += c.Count
+			}
+			if c.Name == "dest-unreach" {
+				unreach += c.Count
+			}
+		}
+		if echo >= 10000 {
+			out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "icmp-echo", Subject: a.Node, Message: fmt.Sprintf("%d ICMP echo-request messages observed on this node (cumulative)", echo), Value: float64(echo)})
+		}
+		if unreach >= 1000 {
+			out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "icmp-unreach", Subject: a.Node, Message: fmt.Sprintf("%d ICMP destination-unreachable messages observed on this node (cumulative)", unreach), Value: float64(unreach)})
+		}
 		for cg, n := range attempts {
 			if n >= 20 && established[cg]*100 < n*50 {
 				out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "connect-failure", Subject: labels[cg], Message: fmt.Sprintf("%d TCP connect attempts but only %d active establishments observed; counters are cumulative and this is an estimate", n, established[cg]), Value: float64(n - established[cg])})

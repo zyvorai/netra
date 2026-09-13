@@ -47,6 +47,26 @@ export default function Health() {
     </section>
 
     <section className="card span3">
+      <p className="eyebrow">ICMP PULSE</p>
+      <h3>Type histogram from the packet path</h3>
+      <p>Observe-only. Cumulative since the map was last created. No ICMP payload is exported.</p>
+      <div className="list">
+        {agents.flatMap((a: any) => [...(a.icmpTypes || []).map((c: any) => ({ ...c, node: a.node, fam: 'v4' })), ...(a.icmp6Types || []).map((c: any) => ({ ...c, node: a.node, fam: 'v6' }))]).length === 0 && (
+          <p className="empty-state">No ICMP types recorded yet. Rebuild the agent BPF object so icmp_type_stats exists.</p>
+        )}
+        {agents.flatMap((a: any) => [
+          ...(a.icmpTypes || []).map((c: any) => ({ ...c, node: a.node, fam: 'icmp' })),
+          ...(a.icmp6Types || []).map((c: any) => ({ ...c, node: a.node, fam: 'icmp6' })),
+        ]).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 20).map((c: any, i: number) => (
+          <div className="agent wide" key={i}>
+            <b>{c.fam}/{c.name}</b><span>{c.node}</span><small>{c.count} messages</small>
+            <ExplainFinding page="health" kind={`icmp:${c.name}`} subject={c.node} message={`${c.count} ${c.fam} ${c.name}`} />
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <section className="card span3">
       <p className="eyebrow">HEALTH SIGNALS</p>
       <h3>Heuristic anomalies</h3>
       <p>These are deterministic operational thresholds, not ML/statistical anomaly claims.</p>

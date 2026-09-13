@@ -23,3 +23,46 @@ func TestBuildFindsTCPAndDNSProblems(t *testing.T) {
 		t.Fatalf("expected anomalies: %+v", r.Summary.Anomalies)
 	}
 }
+
+func TestBuildFindsICMPAnomalies(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node:       "node-1",
+		ICMPTypes:  []models.NamedCount{{Name: "echo-request", Count: 6000}, {Name: "dest-unreach", Count: 600}},
+		ICMP6Types: []models.NamedCount{{Name: "echo-request", Count: 5000}, {Name: "dest-unreach", Count: 500}},
+	}}
+	r := Build([]models.AgentStatus{a}, 10)
+
+	var gotEcho, gotUnreach bool
+	for _, an := range r.Summary.Anomalies {
+		if an.Kind == "icmp-echo" {
+			gotEcho = true
+			if an.Subject != "node-1" || an.Value != 11000 {
+				t.Fatalf("unexpected icmp-echo anomaly: %+v", an)
+			}
+		}
+		if an.Kind == "icmp-unreach" {
+			gotUnreach = true
+			if an.Subject != "node-1" || an.Value != 1100 {
+				t.Fatalf("unexpected icmp-unreach anomaly: %+v", an)
+			}
+		}
+	}
+	if !gotEcho || !gotUnreach {
+		t.Fatalf("expected icmp-echo and icmp-unreach anomalies: %+v", r.Summary.Anomalies)
+	}
+}
+
+func TestBuildIgnoresICMPBelowThreshold(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node:       "node-1",
+		ICMPTypes:  []models.NamedCount{{Name: "echo-request", Count: 9999}, {Name: "dest-unreach", Count: 999}},
+		ICMP6Types: []models.NamedCount{{Name: "echo-request", Count: 0}, {Name: "dest-unreach", Count: 0}},
+	}}
+	r := Build([]models.AgentStatus{a}, 10)
+
+	for _, an := range r.Summary.Anomalies {
+		if an.Kind == "icmp-echo" || an.Kind == "icmp-unreach" {
+			t.Fatalf("unexpected icmp anomaly below threshold: %+v", an)
+		}
+	}
+}

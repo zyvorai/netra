@@ -57,27 +57,27 @@ type EBPFWorkloadScope struct {
 }
 
 type EBPFFastPathConfig struct {
-	Mode             string              `json:"mode"`
-	BlockedIPv4      []string            `json:"blockedIPv4"`
-	BlockedIPv6      []string            `json:"blockedIPv6,omitempty"`
+	Mode               string              `json:"mode"`
+	BlockedIPv4        []string            `json:"blockedIPv4"`
+	BlockedIPv6        []string            `json:"blockedIPv6,omitempty"`
 	AllowedIPv4        []string            `json:"allowedIPv4,omitempty"`
 	AllowedIPv6        []string            `json:"allowedIPv6,omitempty"`
 	AllowedCIDRs       []EBPFCIDRRule      `json:"allowedCidrs,omitempty"`
 	BlockedIngressIPv4 []string            `json:"blockedIngressIPv4,omitempty"`
 	BlockedIngressIPv6 []string            `json:"blockedIngressIPv6,omitempty"`
-	BlockedCIDRs     []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`
-	BlockedPorts     []EBPFPortRule      `json:"blockedPorts,omitempty"`
-	BlockedUIDs      []uint32            `json:"blockedUids,omitempty"`
-	BlockedDNS       []string            `json:"blockedDns,omitempty"`
-	BlockedProcesses []string            `json:"blockedProcesses,omitempty"`
-	BlockedSNI       []string            `json:"blockedSni,omitempty"`
-	RateLimits       []EBPFRateLimit     `json:"rateLimits,omitempty"`
-	ScopeMode        string              `json:"scopeMode,omitempty"` // all or selected
-	WorkloadScopes   []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
-	Workloads        []WorkloadIdentity  `json:"workloads,omitempty"` // ephemeral node inventory, never persisted intentionally
-	Shield           *ShieldConfig       `json:"shield,omitempty"`
-	NetPolEnabled    bool                `json:"netPolEnabled,omitempty"`
-	NetPolDenies     []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
+	BlockedCIDRs       []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`
+	BlockedPorts       []EBPFPortRule      `json:"blockedPorts,omitempty"`
+	BlockedUIDs        []uint32            `json:"blockedUids,omitempty"`
+	BlockedDNS         []string            `json:"blockedDns,omitempty"`
+	BlockedProcesses   []string            `json:"blockedProcesses,omitempty"`
+	BlockedSNI         []string            `json:"blockedSni,omitempty"`
+	RateLimits         []EBPFRateLimit     `json:"rateLimits,omitempty"`
+	ScopeMode          string              `json:"scopeMode,omitempty"` // all or selected
+	WorkloadScopes     []EBPFWorkloadScope `json:"workloadScopes,omitempty"`
+	Workloads          []WorkloadIdentity  `json:"workloads,omitempty"` // ephemeral node inventory, never persisted intentionally
+	Shield             *ShieldConfig       `json:"shield,omitempty"`
+	NetPolEnabled      bool                `json:"netPolEnabled,omitempty"`
+	NetPolDenies       []NetPolPeerDeny    `json:"netPolDenies,omitempty"`
 	// v2: allow-list / default-deny per-workload engine (Phase 3), additive
 	// and independent of NetPolEnabled/NetPolDenies above — see
 	// docs/native-netpol.md. An explicit NetPolRules allow entry can

@@ -71,7 +71,12 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_fastpath_blocked_dns_names", "Exact cleartext DNS-name rules in the Netra datapath.", float64(len(cfg.BlockedDNS)))
 	metricGauge(w, "netra_fastpath_blocked_processes", "Linux comm socket-deny rules in the Netra datapath.", float64(len(cfg.BlockedProcesses)))
 	metricGauge(w, "netra_fastpath_blocked_sni_names", "Exact TLS SNI deny rules in the Netra datapath.", float64(len(cfg.BlockedSNI)))
-	metricGauge(w, "netra_fastpath_rate_limits", "Exact IPv4 destination PPS rules in the Netra datapath.", float64(len(cfg.RateLimits)))
+	metricGauge(w, "netra_fastpath_rate_limits", "Exact IPv4/IPv6 destination PPS rules in the Netra datapath.", float64(len(cfg.RateLimits)))
+	metricGauge(w, "netra_fastpath_allowed_ipv4", "Exact IPv4 allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedIPv4)))
+	metricGauge(w, "netra_fastpath_allowed_ipv6", "Exact IPv6 allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedIPv6)))
+	metricGauge(w, "netra_fastpath_allowed_cidrs", "Directional CIDR allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedCIDRs)))
+	metricGauge(w, "netra_fastpath_blocked_ingress_ipv4", "Exact IPv4 ingress deny destinations.", float64(len(cfg.BlockedIngressIPv4)))
+	metricGauge(w, "netra_fastpath_blocked_ingress_ipv6", "Exact IPv6 ingress deny destinations.", float64(len(cfg.BlockedIngressIPv6)))
 	scopeSelected := 0
 	if cfg.ScopeMode == "selected" {
 		scopeSelected = 1
