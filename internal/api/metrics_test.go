@@ -13,9 +13,9 @@ import (
 	"github.com/zyvorai/netra/internal/store"
 )
 
-// TestMetricsFastpathGauges guards the five Prometheus gauges added for the
+// TestMetricsFastpathGauges guards the Prometheus gauges added for the
 // allow-side and ingress-deny fast-path maps (allowed_v4/v6, allowed_cidr_v4/v6,
-// blocked_ingress_v4/v6): they must reflect the live store config counts.
+// allowed_ports, blocked_ingress_v4/v6): they must reflect the live store config counts.
 func TestMetricsFastpathGauges(t *testing.T) {
 	st := store.New()
 	if _, err := st.AddAllowed("203.0.113.5", "test"); err != nil {
@@ -25,6 +25,9 @@ func TestMetricsFastpathGauges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.AddAllowedCIDR(models.EBPFCIDRRule{CIDR: "10.5.0.0/16", Direction: "both"}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddAllowedPort(models.EBPFPortRule{Protocol: "TCP", Port: 443, Direction: "egress"}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.AddBlockedIngress("198.51.100.9", "test"); err != nil {
@@ -48,6 +51,7 @@ func TestMetricsFastpathGauges(t *testing.T) {
 		"netra_fastpath_allowed_ipv4 ":         "1",
 		"netra_fastpath_allowed_ipv6 ":         "1",
 		"netra_fastpath_allowed_cidrs ":        "1",
+		"netra_fastpath_allowed_ports ":        "1",
 		"netra_fastpath_blocked_ingress_ipv4 ": "1",
 		"netra_fastpath_blocked_ingress_ipv6 ": "1",
 	}

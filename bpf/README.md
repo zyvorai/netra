@@ -26,6 +26,7 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `blocked_ingress_v4`, `blocked_ingress_v6`: exact-IP ingress denies (parity with the existing egress `blocked_v4`/`v6` — exact-IP deny now supports direction).
 - `blocked_cidr_v4`, `blocked_cidr_v6`: directional LPM prefix denies.
 - `blocked_ports`: directional L4 destination-port denies.
+- `allowed_ports`: directional L4 destination-port exceptions, mirror of `blocked_ports` but evaluated before deny/CIDR/port/rate.
 - `blocked_uids`: socket UID denies.
 - `blocked_comms`: exact Linux process `comm` denies.
 - `blocked_dns`: exact normalized DNS qname denies for cleartext UDP/53.

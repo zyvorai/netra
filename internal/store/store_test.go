@@ -493,6 +493,45 @@ func TestAllowCIDRAndIngressDeny(t *testing.T) {
 	}
 }
 
+func TestAllowedPort(t *testing.T) {
+	s := New()
+	rule := models.EBPFPortRule{Protocol: "TCP", Port: 8443, Direction: "egress"}
+	if _, err := s.AddAllowedPort(rule, "test"); err != nil {
+		t.Fatal(err)
+	}
+	c := s.Config()
+	if len(c.AllowedPorts) != 1 || c.AllowedPorts[0] != rule {
+		t.Fatalf("rule missing: %#v", c.AllowedPorts)
+	}
+	// Config must be a deep copy.
+	c.AllowedPorts[0].Port = 1
+	c2 := s.Config()
+	if c2.AllowedPorts[0].Port == 1 {
+		t.Fatal("Config leaked mutable slice")
+	}
+
+	rules := s.ListRules()
+	var found *models.FirewallRule
+	for i := range rules {
+		if rules[i].Type == "allow-port" {
+			found = &rules[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("allow-port missing from ListRules: %#v", rules)
+	}
+	if found.Protocol != "TCP" || found.Port != 8443 || found.Direction != "egress" {
+		t.Fatalf("unexpected allow-port rule: %#v", found)
+	}
+	if _, err := s.DeleteRule(found.ID, "test"); err != nil {
+		t.Fatalf("DeleteRule(allow-port): %v", err)
+	}
+	final := s.Config()
+	if len(final.AllowedPorts) != 0 {
+		t.Fatalf("rule not removed via DeleteRule: %#v", final)
+	}
+}
+
 func TestDeleteRuleByID(t *testing.T) {
 	s := New()
 	if _, err := s.AddUID(1000, "test"); err != nil {

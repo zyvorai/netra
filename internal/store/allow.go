@@ -254,3 +254,51 @@ func (s *Store) DelBlockedIngressIPv6(ip, actor string) (models.EBPFFastPathConf
 	}
 	return cloneConfig(s.config), nil
 }
+
+func (s *Store) AddAllowedPort(rule models.EBPFPortRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.AllowedPorts {
+		if x == rule {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.AllowedPorts = append(s.config.AllowedPorts, rule)
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.allow-port.add", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelAllowedPort(rule models.EBPFPortRule, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFPortRule, 0, len(s.config.AllowedPorts))
+	for _, x := range s.config.AllowedPorts {
+		if x != rule {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.AllowedPorts) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.AllowedPorts = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.allow-port.delete", Target: fmt.Sprintf("%s/%d", rule.Protocol, rule.Port), Details: map[string]any{"direction": rule.Direction}})
+	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		s.reconcileRuleIndexLocked("system", time.Now().UTC())
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}

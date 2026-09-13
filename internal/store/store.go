@@ -136,6 +136,9 @@ func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
 	for _, v := range s.config.AllowedCIDRs {
 		touch("allow-cidr", v.Direction+"|"+v.CIDR)
 	}
+	for _, v := range s.config.AllowedPorts {
+		touch("allow-port", v.Direction+"|"+v.Protocol+"|"+strconv.FormatUint(uint64(v.Port), 10))
+	}
 	for _, v := range s.config.BlockedIngressIPv4 {
 		touch("ip4-in", v)
 	}
@@ -750,6 +753,15 @@ func (s *Store) ListRules() []models.FirewallRule {
 				}
 			}
 			fr.Summary = fmt.Sprintf("%s · %s/%d", fr.Direction, fr.Protocol, fr.Port)
+		case "allow-port":
+			parts := strings.SplitN(idx.Key, "|", 3)
+			if len(parts) == 3 {
+				fr.Direction, fr.Protocol = parts[0], parts[1]
+				if p, err := strconv.ParseUint(parts[2], 10, 16); err == nil {
+					fr.Port = uint16(p)
+				}
+			}
+			fr.Summary = fmt.Sprintf("allow %s · %s/%d", fr.Direction, fr.Protocol, fr.Port)
 		case "rate":
 			fr.Destination = idx.Key
 			fr.PPS = rateByDest[idx.Key]
@@ -794,6 +806,16 @@ func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) 
 			return s.Config(), fmt.Errorf("corrupt allow-cidr rule index entry")
 		}
 		return s.DelAllowedCIDR(models.EBPFCIDRRule{Direction: parts[0], CIDR: parts[1]}, actor)
+	case "allow-port":
+		parts := strings.SplitN(key, "|", 3)
+		if len(parts) != 3 {
+			return s.Config(), fmt.Errorf("corrupt allow-port rule index entry")
+		}
+		port, err := strconv.ParseUint(parts[2], 10, 16)
+		if err != nil {
+			return s.Config(), fmt.Errorf("corrupt allow-port rule index entry")
+		}
+		return s.DelAllowedPort(models.EBPFPortRule{Direction: parts[0], Protocol: parts[1], Port: uint16(port)}, actor)
 	case "ip4-in":
 		return s.DelBlockedIngress(key, actor)
 	case "ip6-in":
@@ -1546,6 +1568,7 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.AllowedIPv4 = append([]string(nil), c.AllowedIPv4...)
 	c.AllowedIPv6 = append([]string(nil), c.AllowedIPv6...)
 	c.AllowedCIDRs = append([]models.EBPFCIDRRule(nil), c.AllowedCIDRs...)
+	c.AllowedPorts = append([]models.EBPFPortRule(nil), c.AllowedPorts...)
 	c.BlockedIngressIPv4 = append([]string(nil), c.BlockedIngressIPv4...)
 	c.BlockedIngressIPv6 = append([]string(nil), c.BlockedIngressIPv6...)
 	c.BlockedCIDRs = append([]models.EBPFCIDRRule(nil), c.BlockedCIDRs...)

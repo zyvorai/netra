@@ -5,6 +5,7 @@ package health
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/zyvorai/netra/internal/models"
 )
@@ -213,6 +214,9 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 			if labels[c.CgroupID] == "" {
 				labels[c.CgroupID] = subject(c.Namespace, c.Pod, "", "", 0)
 			}
+		}
+		if n := len(a.MissingMaps); n > 0 {
+			out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "bpf-maps-missing", Subject: a.Node, Message: fmt.Sprintf("agent BPF object is missing maps: %s — rebuild the agent image", strings.Join(a.MissingMaps, ",")), Value: float64(n)})
 		}
 		echo, unreach := uint64(0), uint64(0)
 		for _, c := range a.ICMPTypes {

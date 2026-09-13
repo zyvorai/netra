@@ -82,6 +82,7 @@ func usage() {
   ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
+  ebpf allow-port add TCP|UDP|ANY PORT [direction] | allow-port del ...
   ebpf uid add UID | uid del UID
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
@@ -725,6 +726,25 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/port/delete", b)
+		}
+	case "allow-port":
+		if len(os.Args) < 6 {
+			return fmt.Errorf("allow-port add|del TCP|UDP|ANY PORT [direction]")
+		}
+		port, err := strconv.ParseUint(os.Args[5], 10, 16)
+		if err != nil || port == 0 {
+			return fmt.Errorf("valid port required")
+		}
+		dir := "egress"
+		if len(os.Args) > 6 {
+			dir = os.Args[6]
+		}
+		b, _ := json.Marshal(map[string]any{"protocol": os.Args[4], "port": uint16(port), "direction": dir})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/allow-port", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/allow-port/delete", b)
 		}
 	case "uid":
 		if len(os.Args) < 5 {

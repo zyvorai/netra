@@ -63,6 +63,7 @@ type EBPFFastPathConfig struct {
 	AllowedIPv4        []string            `json:"allowedIPv4,omitempty"`
 	AllowedIPv6        []string            `json:"allowedIPv6,omitempty"`
 	AllowedCIDRs       []EBPFCIDRRule      `json:"allowedCidrs,omitempty"`
+	AllowedPorts       []EBPFPortRule      `json:"allowedPorts,omitempty"`
 	BlockedIngressIPv4 []string            `json:"blockedIngressIPv4,omitempty"`
 	BlockedIngressIPv6 []string            `json:"blockedIngressIPv6,omitempty"`
 	BlockedCIDRs       []EBPFCIDRRule      `json:"blockedCidrs,omitempty"`
@@ -698,6 +699,8 @@ type AgentReport struct {
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
 	ICMPTypes          []NamedCount            `json:"icmpTypes,omitempty"`
 	ICMP6Types         []NamedCount            `json:"icmp6Types,omitempty"`
+	RateDrops          []NamedCount            `json:"rateDrops,omitempty"`
+	MissingMaps        []string                `json:"missingMaps,omitempty"`
 	PolicyDrops        []PolicyDropStat        `json:"policyDrops,omitempty"`
 	IPv6ExtHeaders     []IPv6ExtHeaderStat     `json:"ipv6ExtHeaders,omitempty"`
 	ConntrackEntries   int                     `json:"conntrackEntries,omitempty"`

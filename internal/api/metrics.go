@@ -75,6 +75,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_fastpath_allowed_ipv4", "Exact IPv4 allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedIPv4)))
 	metricGauge(w, "netra_fastpath_allowed_ipv6", "Exact IPv6 allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedIPv6)))
 	metricGauge(w, "netra_fastpath_allowed_cidrs", "Directional CIDR allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedCIDRs)))
+	metricGauge(w, "netra_fastpath_allowed_ports", "Directional L4 port allow-exceptions in the Netra datapath.", float64(len(cfg.AllowedPorts)))
 	metricGauge(w, "netra_fastpath_blocked_ingress_ipv4", "Exact IPv4 ingress deny destinations.", float64(len(cfg.BlockedIngressIPv4)))
 	metricGauge(w, "netra_fastpath_blocked_ingress_ipv6", "Exact IPv6 ingress deny destinations.", float64(len(cfg.BlockedIngressIPv6)))
 	scopeSelected := 0

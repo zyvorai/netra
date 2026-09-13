@@ -230,6 +230,12 @@ struct {
     __type(key, struct port_key);
     __type(value, __u8);
 } blocked_ports SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct port_key);
+    __type(value, __u8);
+} allowed_ports SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -1008,6 +1014,14 @@ static __always_inline int blocked_port(__u8 direction, __u8 proto, __u16 port)
     k.protocol = 0;
     return bpf_map_lookup_elem(&blocked_ports, &k) != 0;
 }
+static __always_inline int allowed_port(__u8 direction, __u8 proto, __u16 port)
+{
+    if (!port) return 0;
+    struct port_key k = {.direction = direction, .protocol = proto, .port = port};
+    if (bpf_map_lookup_elem(&allowed_ports, &k)) return 1;
+    k.protocol = 0;
+    return bpf_map_lookup_elem(&allowed_ports, &k) != 0;
+}
 
 static __always_inline int blocked_cidr4(__u8 direction, __u32 addr)
 {
@@ -1220,6 +1234,7 @@ static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
     if (bpf_map_lookup_elem(&allowed_v4, &addr)) return 0;
     if (allowed_cidr4(direction, addr)) return 0;
+    if (dport && allowed_port(direction, proto, dport)) return 0;
     if (direction==DIR_INGRESS && bpf_map_lookup_elem(&blocked_ingress_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v4,&addr)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr4(direction,addr)) { *reason=REASON_CIDR; return 1; }
@@ -1233,6 +1248,7 @@ static __always_inline int decide6(__u8 direction, const __u8 addr[16], __u8 pro
     struct ip6_key k={}; __builtin_memcpy(k.addr,addr,16);
     if (bpf_map_lookup_elem(&allowed_v6, &k)) return 0;
     if (allowed_cidr6(direction, addr)) return 0;
+    if (dport && allowed_port(direction, proto, dport)) return 0;
     if (direction==DIR_INGRESS && bpf_map_lookup_elem(&blocked_ingress_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (direction==DIR_EGRESS && bpf_map_lookup_elem(&blocked_v6,&k)) { *reason=REASON_EXACT; return 1; }
     if (blocked_cidr6(direction,addr)) { *reason=REASON_CIDR; return 1; }

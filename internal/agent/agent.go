@@ -149,7 +149,7 @@ var mapNames = []string{
 	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_protected6", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
-	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
+	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
 }
@@ -493,6 +493,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	rateDrops, err := a.readRateDrops()
+	if err != nil {
+		return err
+	}
 	ipv6ExtHeaders, err := a.readIPv6ExtStats()
 	if err != nil {
 		return err
@@ -549,7 +553,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
@@ -638,6 +642,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.replacePorts(cfg.BlockedPorts); err != nil {
+		return err
+	}
+	if err := a.replacePortMap("allowed_ports", cfg.AllowedPorts); err != nil {
 		return err
 	}
 	if err := a.replaceUIDs(cfg.BlockedUIDs); err != nil {
@@ -812,7 +819,17 @@ func protoNum(s string) byte {
 	}
 }
 func (a *Agent) replacePorts(rules []models.EBPFPortRule) error {
-	m := a.collection.Maps["blocked_ports"]
+	return a.replacePortMap("blocked_ports", rules)
+}
+
+func (a *Agent) replacePortMap(name string, rules []models.EBPFPortRule) error {
+	m := a.collection.Maps[name]
+	if m == nil {
+		if name != "blocked_ports" {
+			return nil
+		}
+		return fmt.Errorf("map %s unavailable", name)
+	}
 	var k [4]byte
 	var v uint8
 	var keys [][4]byte
@@ -1577,6 +1594,67 @@ func (a *Agent) readICMPTypeStats(mapName string) ([]models.NamedCount, error) {
 	}
 	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
+func (a *Agent) missingMaps() []string {
+	if a.collection == nil {
+		return append([]string(nil), mapNames...)
+	}
+	var out []string
+	for _, n := range mapNames {
+		if a.collection.Maps[n] == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func (a *Agent) readRateDrops() ([]models.NamedCount, error) {
+	out := make([]models.NamedCount, 0, 16)
+	if m := a.collection.Maps["rate_state_v4"]; m != nil {
+		var k [4]byte
+		var v struct {
+			Second  uint64
+			Count   uint64
+			Dropped uint64
+		}
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			if v.Dropped == 0 {
+				continue
+			}
+			out = append(out, models.NamedCount{Name: net.IP(k[:]).String(), Count: v.Dropped})
+			if len(out) >= 32 {
+				break
+			}
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
+	}
+	if m := a.collection.Maps["rate_state_v6"]; m != nil && len(out) < 32 {
+		var k [16]byte
+		var v struct {
+			Second  uint64
+			Count   uint64
+			Dropped uint64
+		}
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			if v.Dropped == 0 {
+				continue
+			}
+			out = append(out, models.NamedCount{Name: net.IP(k[:]).String(), Count: v.Dropped})
+			if len(out) >= 32 {
+				break
+			}
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
 	return out, nil

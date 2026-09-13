@@ -122,6 +122,26 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			bodyFields: true,
 		},
 		{
+			name: "netra_ebpf_allow_port_add", method: "POST", path: "/api/v1/ebpf/allow-port",
+			description: "Add an L4 port exception evaluated before deny/CIDR/port/rate. Returns the full updated fast-path config.",
+			schema: objSchema(map[string]any{
+				"port":      intProp("Port to except, 1-65535."),
+				"protocol":  enumProp("Protocol. Default ANY.", "TCP", "UDP", "ANY"),
+				"direction": enumProp("Direction to except. Default egress.", "egress", "ingress", "both"),
+			}, "port"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_allow_port_delete", method: "POST", path: "/api/v1/ebpf/allow-port/delete",
+			description: "Remove an L4 port exception. Returns the full updated fast-path config.",
+			schema: objSchema(map[string]any{
+				"port":      intProp("Port exception to remove."),
+				"protocol":  enumProp("Protocol it was excepted under. Default ANY.", "TCP", "UDP", "ANY"),
+				"direction": enumProp("Direction it was excepted in. Default egress.", "egress", "ingress", "both"),
+			}, "port"),
+			bodyFields: true,
+		},
+		{
 			name: "netra_ebpf_uid_add", method: "POST", path: "/api/v1/ebpf/uid",
 			description: "Add a Linux UID to the eBPF fast-path deny rule set (blocks all sockets opened by that UID). Returns the full updated fast-path config.",
 			schema:      objSchema(map[string]any{"uid": intProp("Linux UID to block.")}, "uid"),

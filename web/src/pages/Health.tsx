@@ -46,6 +46,26 @@ export default function Health() {
       <p>Failure rate: <b>{pct(s.dnsFailures || 0, s.dnsResponses || 0)}</b>. DNS timing covers matched plain UDP/53 transactions only; DoH, DoT and TCP DNS are intentionally not inferred.</p>
     </section>
 
+    {agents.some((a: any) => (a.missingMaps || []).length) && (
+      <section className="card span3">
+        <p className="eyebrow">BPF OBJECT</p>
+        <h3>Agent maps missing</h3>
+        <p className="warning">Rebuild and roll the agent image so allow/rate/icmp maps exist. Until then those controls fail open.</p>
+        {agents.filter((a: any) => (a.missingMaps || []).length).map((a: any) => (
+          <div className="agent wide" key={a.node}><b>{a.node}</b><small>{(a.missingMaps || []).join(', ')}</small></div>
+        ))}
+      </section>
+    )}
+    <section className="card span3">
+      <p className="eyebrow">RATE DROPS</p>
+      <h3>PPS ceilings that actually fired</h3>
+      <div className="list">
+        {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No destination has been rate-dropped yet.</p>}
+        {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
+          <div className="agent wide" key={i}><b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small></div>
+        ))}
+      </div>
+    </section>
     <section className="card span3">
       <p className="eyebrow">ICMP PULSE</p>
       <h3>Type histogram from the packet path</h3>

@@ -31,6 +31,7 @@ Rules are staged in controller state and synchronized to every agent. Observe mo
 | destination PPS | ✅ exact IPv4 | ✅ exact IPv6 | — | ✅ | — |
 | exact IP allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/rate |
 | CIDR LPM allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/rate |
+| TCP/UDP/ANY port allow-exception | ✅ | ✅ | ✅ | ✅ | wins over flat deny/CIDR/port/rate |
 
 ## DNS visibility
 

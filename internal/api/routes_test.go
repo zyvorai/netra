@@ -59,6 +59,8 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"DELETE", "/api/v1/ebpf/allow/1.2.3.4"},
 		{"POST", "/api/v1/ebpf/allow-cidr"},
 		{"POST", "/api/v1/ebpf/allow-cidr/delete"},
+		{"POST", "/api/v1/ebpf/allow-port"},
+		{"POST", "/api/v1/ebpf/allow-port/delete"},
 		{"PUT", "/api/v1/ebpf/shield"},
 		{"PUT", "/api/v1/ebpf/netpol/config"},
 		{"PUT", "/api/v1/ebpf/netpol/v2/config"},

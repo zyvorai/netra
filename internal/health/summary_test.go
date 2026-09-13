@@ -66,3 +66,35 @@ func TestBuildIgnoresICMPBelowThreshold(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildFindsBPFMapsMissingAnomaly(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node:        "node-1",
+		MissingMaps: []string{"allowed_ports", "rate_v6"},
+	}}
+	r := Build([]models.AgentStatus{a}, 10)
+
+	var got *models.NetworkHealthAnomaly
+	for i, an := range r.Summary.Anomalies {
+		if an.Kind == "bpf-maps-missing" {
+			got = &r.Summary.Anomalies[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected bpf-maps-missing anomaly: %+v", r.Summary.Anomalies)
+	}
+	if got.Subject != "node-1" || got.Severity != "warning" || got.Value != 2 {
+		t.Fatalf("unexpected bpf-maps-missing anomaly: %+v", got)
+	}
+}
+
+func TestBuildIgnoresBPFMapsMissingWhenComplete(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{Node: "node-1"}}
+	r := Build([]models.AgentStatus{a}, 10)
+
+	for _, an := range r.Summary.Anomalies {
+		if an.Kind == "bpf-maps-missing" {
+			t.Fatalf("unexpected bpf-maps-missing anomaly: %+v", an)
+		}
+	}
+}
