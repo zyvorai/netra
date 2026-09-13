@@ -1863,8 +1863,9 @@ func (a *Agent) readShieldSourceHits() ([]models.ShieldSourceStat, error) {
 		Addr    [16]byte
 	}
 	type value struct {
-		Denied uint64
-		LastNS uint64
+		Denied   uint64
+		LastNS   uint64
+		Attempts uint64
 	}
 	var k key
 	var v value
@@ -1883,12 +1884,18 @@ func (a *Agent) readShieldSourceHits() ([]models.ShieldSourceStat, error) {
 			Address:    addr,
 			Denied:     v.Denied,
 			LastSeenNS: v.LastNS,
+			Attempts:   v.Attempts,
 		})
 	}
 	if err := mapIterErr(it.Err()); err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Denied > out[j].Denied })
+	// Sort by Attempts, not Denied: Attempts >= Denied always (every denied
+	// packet was first counted as an attempt), so this never loses a
+	// high-Denied source and also keeps high-Attempts/low-Denied sources
+	// (e.g. audit mode, or a class whose pps threshold is disabled) that a
+	// Denied-only sort would truncate away before the controller ever sees them.
+	sort.Slice(out, func(i, j int) bool { return out[i].Attempts > out[j].Attempts })
 	if len(out) > 200 {
 		out = out[:200]
 	}

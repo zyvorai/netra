@@ -93,8 +93,10 @@ _Static_assert(sizeof(struct shield_stat_value) == 24, "shield_stat_value must s
 struct shield_source_hit_value {
     uint64_t denied;
     uint64_t last_ns;
+    uint64_t attempts;
 };
-_Static_assert(sizeof(struct shield_source_hit_value) == 16, "shield_source_hit_value must stay 16 bytes to match internal/agent readShieldSourceHits()'s value struct");
+_Static_assert(sizeof(struct shield_source_hit_value) == 24, "shield_source_hit_value must stay 24 bytes to match internal/agent readShieldSourceHits()'s value struct");
+_Static_assert(offsetof(struct shield_source_hit_value, attempts) == 16, "attempts must be the third field to match internal/agent readShieldSourceHits()'s value struct order");
 
 int main(void)
 {

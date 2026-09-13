@@ -77,7 +77,7 @@ func usage() {
   drops [explain]
   ebpf stats | summary | health | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
-  ebpf deny add IP [egress|ingress|both] | deny del IP
+  ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
   ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
@@ -97,6 +97,7 @@ func usage() {
   ebpf netpol rule del ID
   ebpf netpol default-deny plan [--namespace NS] ... [--disable] [--allow-no-rules]
   ebpf netpol default-deny set --token TOKEN [--confirm-risk RISK] [--namespace NS] ... [--disable] [--lease DURATION]
+  ebpf netpol quarantine [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--allow-peer IP[:PORT[/PROTO]]]... [--lease DURATION] [--confirm-risk RISK] [--allow-no-rules]
   ebpf rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION
   ebpf workloads [node]
   ebpf scope show | scope all
@@ -368,6 +369,169 @@ func planAndApply(body []byte, confirmedRisk string) error {
 	return requestHeaders("POST", "/api/v1/policies/apply", body, headers)
 }
 
+// netpolQuarantine is a client-side convenience over three existing, already
+// fully-safety-gated endpoints (netpol v2 enable, netpol rule add, and the
+// mandatory plan→confirm-risk→apply default-deny flow) — it introduces no
+// new server-side logic and preserves every existing check, in particular
+// the "zero covering allow rules is a certain-outage config" refusal. It
+// exists because a real incident calls for one command, not five.
+func netpolQuarantine(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("netpol quarantine [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--allow-peer IP[:PORT[/PROTO]]]... [--lease DURATION] [--confirm-risk RISK] [--allow-no-rules]")
+	}
+	selector, labels := map[string]any{}, map[string]string{}
+	var allowPeers []string
+	lease, confirmRisk := "5m", ""
+	allowNoRules := false
+	for i := 0; i < len(args); i++ {
+		flag := args[i]
+		if flag == "--allow-no-rules" {
+			allowNoRules = true
+			continue
+		}
+		if i+1 >= len(args) {
+			return fmt.Errorf("%s requires a value", flag)
+		}
+		value := args[i+1]
+		i++
+		switch flag {
+		case "--namespace":
+			selector["namespace"] = value
+		case "--pod":
+			selector["pod"] = value
+		case "--kind":
+			selector["workloadKind"] = value
+		case "--workload":
+			selector["workloadName"] = value
+		case "--label":
+			parts := strings.SplitN(value, "=", 2)
+			if len(parts) != 2 || parts[0] == "" {
+				return fmt.Errorf("label must be key=value")
+			}
+			labels[parts[0]] = parts[1]
+		case "--allow-peer":
+			allowPeers = append(allowPeers, value)
+		case "--lease":
+			lease = value
+		case "--confirm-risk":
+			confirmRisk = value
+		default:
+			return fmt.Errorf("unknown netpol quarantine flag %s", flag)
+		}
+	}
+	if len(labels) > 0 {
+		selector["labels"] = labels
+	}
+	if len(selector) == 0 {
+		return fmt.Errorf("quarantine requires at least one selector flag (--namespace/--pod/--kind/--workload/--label)")
+	}
+
+	if err := request("PUT", "/api/v1/ebpf/netpol/v2/config", mustJSON(map[string]bool{"enabled": true})); err != nil {
+		return fmt.Errorf("enable netpol v2: %w", err)
+	}
+	for _, peer := range allowPeers {
+		host, port, proto := peer, uint64(0), "ANY"
+		if h, rest, ok := strings.Cut(peer, ":"); ok {
+			host = h
+			portStr, protoStr, hasProto := strings.Cut(rest, "/")
+			p, err := strconv.ParseUint(portStr, 10, 16)
+			if err != nil {
+				return fmt.Errorf("--allow-peer %q: invalid port", peer)
+			}
+			port = p
+			if hasProto {
+				proto = protoStr
+			}
+		}
+		body := map[string]any{"selector": selector, "peerIpv4": host, "action": "allow", "direction": "egress", "protocol": proto}
+		if port != 0 {
+			body["port"] = uint16(port)
+		}
+		if err := request("POST", "/api/v1/ebpf/netpol/rules", mustJSON(body)); err != nil {
+			return fmt.Errorf("add allow rule for %s: %w", peer, err)
+		}
+	}
+
+	planBody := mustJSON(map[string]any{"selector": selector, "enabled": true})
+	planPath := "/api/v1/ebpf/netpol/default-deny/plan"
+	if allowNoRules {
+		planPath += "?allowNoRules=true"
+	}
+	out, status, err := doRequest("POST", planPath, planBody, nil)
+	if err != nil {
+		return err
+	}
+	if status >= 300 {
+		return fmt.Errorf("quarantine preflight %s: %s", http.StatusText(status), string(out))
+	}
+	var planned struct {
+		Risk    string `json:"risk"`
+		Receipt struct {
+			Token string `json:"token"`
+		} `json:"receipt"`
+	}
+	if err := json.Unmarshal(out, &planned); err != nil {
+		return fmt.Errorf("decode quarantine preflight: %w", err)
+	}
+	if planned.Receipt.Token == "" {
+		return fmt.Errorf("preflight did not produce a receipt: %s", string(out))
+	}
+	risk := strings.ToLower(strings.TrimSpace(planned.Risk))
+	if risk == "high" || risk == "critical" {
+		if !strings.EqualFold(strings.TrimSpace(confirmRisk), risk) {
+			return fmt.Errorf("quarantine preflight risk is %s; re-run with --confirm-risk %s (allow-list rules were still added above)", risk, risk)
+		}
+	}
+	setBody := mustJSON(map[string]any{"selector": selector, "enabled": true, "lease": lease})
+	headers := map[string]string{"X-Netra-Plan-Token": planned.Receipt.Token}
+	if risk == "high" || risk == "critical" {
+		headers["X-Netra-Confirm-Risk"] = risk
+	}
+	return requestHeaders("PUT", "/api/v1/ebpf/netpol/default-deny", setBody, headers)
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+// denyImport reads a plain-text deny list (one "TYPE VALUE [DIRECTION]" per
+// line; blank lines and "#" comments ignored) and bulk-applies it via
+// POST /api/v1/ebpf/deny/import — introduces no client-side validation of
+// its own, the server dispatches every entry through the exact same
+// per-type validators the single-rule endpoints already use.
+func denyImport(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var entries []map[string]string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return fmt.Errorf("invalid line %q: expected TYPE VALUE [DIRECTION]", line)
+		}
+		e := map[string]string{"type": fields[0], "value": fields[1]}
+		if len(fields) > 2 {
+			e["direction"] = fields[2]
+		}
+		entries = append(entries, e)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("%s contains no entries", path)
+	}
+	return request("POST", "/api/v1/ebpf/deny/import", mustJSON(map[string]any{"entries": entries}))
+}
+
 func flows() error {
 	if len(os.Args) < 3 || (os.Args[2] != "watch" && os.Args[2] != "summary") {
 		return fmt.Errorf("use flows watch|summary")
@@ -478,7 +642,7 @@ func ebpf() error {
 		return request("PUT", "/api/v1/ebpf/shield", b)
 	case "netpol":
 		if len(os.Args) < 4 {
-			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set")
+			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set | netpol quarantine")
 		}
 		switch os.Args[3] {
 		case "enable":
@@ -629,8 +793,10 @@ func ebpf() error {
 			default:
 				return fmt.Errorf("netpol default-deny plan|set")
 			}
+		case "quarantine":
+			return netpolQuarantine(os.Args[4:])
 		default:
-			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set")
+			return fmt.Errorf("netpol enable|disable | netpol v2 enable|disable | netpol rule add|del | netpol default-deny plan|set | netpol quarantine")
 		}
 	case "interfaces":
 		return request("GET", "/api/v1/ebpf/interfaces", nil)
@@ -656,7 +822,7 @@ func ebpf() error {
 		return request("PUT", p, b)
 	case "deny":
 		if len(os.Args) < 5 {
-			return fmt.Errorf("deny add|del IP")
+			return fmt.Errorf("deny add|del IP | deny import FILE")
 		}
 		if os.Args[3] == "add" {
 			dir := "egress"
@@ -668,6 +834,9 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/deny/"+url.PathEscape(os.Args[4]), nil)
+		}
+		if os.Args[3] == "import" {
+			return denyImport(os.Args[4])
 		}
 	case "allow-cidr":
 		if len(os.Args) < 5 {

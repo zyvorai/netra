@@ -56,6 +56,35 @@ compile-time constants; raising one requires a source change and a program
 rebuild, not a
 runtime setting.
 
+## Bulk deny-list import
+
+`POST /api/v1/ebpf/deny/import` (`netractl ebpf deny import FILE`) bulk-populates
+the existing exact-IP, CIDR, DNS-name, and SNI deny primitives from an
+operator-supplied list — up to 1000 entries per request. It introduces **no
+new validation or detection logic**: every entry is dispatched through the
+exact same per-type validator (`netip.ParseAddr`, `netip.ParsePrefix`,
+`normalizeDNSName`) and store `Add` function the single-rule endpoints
+already use, so an imported entry behaves identically to one added by hand.
+This is a bulk-apply convenience for an operator-supplied file, not a live
+threat-intel subscription — there is no polling, no scoring, and no
+auto-refresh.
+
+The CLI file format is one `TYPE VALUE [DIRECTION]` entry per line
+(`ip`/`cidr`/`dns`/`sni`), blank lines and `#`-prefixed comments ignored:
+
+```
+# quarantine list, incident-2026-09-13
+ip 203.0.113.5 egress
+cidr 198.51.100.0/24 ingress
+dns malware.example.com
+sni exfil.example.net
+```
+
+The response reports **per-entry** success/failure (`{results, applied,
+failed}`) rather than all-or-nothing, since a real operator-supplied list
+usually has a few bad lines — a malformed entry never blocks the rest of
+the import from applying.
+
 ## Shield and NetPol
 
 The SHIELD and NETPOL cards configure two engines that were already fully

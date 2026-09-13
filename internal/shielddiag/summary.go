@@ -19,6 +19,13 @@ import (
 // aggregate class-level drop rate.
 const sourceFloodThreshold = 10000
 
+// connectionAttemptRateThreshold is the per-source new-connection-attempt
+// (SYN) count above which fan-in is worth calling out — independent of
+// sourceFloodThreshold, since Attempts is recorded regardless of Shield's
+// pass/drop verdict (unlike Denied, so this can fire in audit mode, or for
+// a source Shield is allowing through entirely, e.g. syn_pps disabled).
+const connectionAttemptRateThreshold = 10000
+
 // Build aggregates per-node Shield class breakdowns and merges/re-sorts
 // per-source hit counts (already bounded and pre-sorted agent-side) into
 // a cluster-wide top-N — no in-kernel top-K, just a periodic-snapshot
@@ -43,7 +50,11 @@ func Build(agents []models.AgentStatus, topN int) models.ShieldDiagnosticsRespon
 		}
 		allSources = append(allSources, a.ShieldSources...)
 	}
-	sort.Slice(allSources, func(i, j int) bool { return allSources[i].Denied > allSources[j].Denied })
+	// Sort by Attempts, not Denied: Attempts >= Denied always, so this never
+	// loses a high-Denied source and also surfaces high-Attempts/low-Denied
+	// sources (audit mode, or a disabled pps threshold) a Denied-only sort
+	// would truncate away.
+	sort.Slice(allSources, func(i, j int) bool { return allSources[i].Attempts > allSources[j].Attempts })
 	if len(allSources) > topN {
 		allSources = allSources[:topN]
 	}
@@ -92,6 +103,16 @@ func anomalies(r models.ShieldDiagnosticsResponse) []models.NetworkHealthAnomaly
 			Severity: "critical", Kind: "shield-source-flood", Subject: fmt.Sprintf("%s (%s)", s.Address, s.Class),
 			Message: fmt.Sprintf("a single source has been denied %d times by XDP Shield", s.Denied),
 			Value:   float64(s.Denied),
+		})
+	}
+	for _, s := range r.TopSources {
+		if s.Attempts < connectionAttemptRateThreshold {
+			continue
+		}
+		out = append(out, models.NetworkHealthAnomaly{
+			Severity: "warning", Kind: "shield-connection-rate", Subject: fmt.Sprintf("%s (%s)", s.Address, s.Class),
+			Message: fmt.Sprintf("a single source has attempted %d new connections observed by XDP Shield, regardless of verdict", s.Attempts),
+			Value:   float64(s.Attempts),
 		})
 	}
 	order := map[string]int{"critical": 3, "warning": 2, "info": 1}

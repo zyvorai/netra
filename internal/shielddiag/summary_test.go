@@ -31,18 +31,34 @@ func TestBuildSkipsStale(t *testing.T) {
 func TestTopSourcesMergedAndTruncatedAcrossNodes(t *testing.T) {
 	r := Build([]models.AgentStatus{
 		{AgentReport: models.AgentReport{Node: "n1", ShieldSources: []models.ShieldSourceStat{
-			{Address: "1.1.1.1", Class: "syn", Denied: 500},
-			{Address: "2.2.2.2", Class: "udp", Denied: 5},
+			{Address: "1.1.1.1", Class: "syn", Denied: 500, Attempts: 500},
+			{Address: "2.2.2.2", Class: "udp", Denied: 5, Attempts: 5},
 		}}},
 		{AgentReport: models.AgentReport{Node: "n2", ShieldSources: []models.ShieldSourceStat{
-			{Address: "3.3.3.3", Class: "icmp", Denied: 9000},
+			{Address: "3.3.3.3", Class: "icmp", Denied: 9000, Attempts: 9000},
 		}}},
 	}, 2)
 	if len(r.TopSources) != 2 {
 		t.Fatalf("expected topN=2, got %d: %+v", len(r.TopSources), r.TopSources)
 	}
 	if r.TopSources[0].Address != "3.3.3.3" || r.TopSources[1].Address != "1.1.1.1" {
-		t.Fatalf("expected sources sorted by denied desc across nodes, got %+v", r.TopSources)
+		t.Fatalf("expected sources sorted by attempts desc across nodes, got %+v", r.TopSources)
+	}
+}
+
+// TestTopSourcesSortsByAttemptsNotDenied guards the fix that keeps a
+// high-Attempts/low-Denied source (audit mode, or a disabled pps threshold)
+// from being truncated away by a Denied-only sort, since Attempts >= Denied
+// always holds and is therefore the more inclusive sort key.
+func TestTopSourcesSortsByAttemptsNotDenied(t *testing.T) {
+	r := Build([]models.AgentStatus{
+		{AgentReport: models.AgentReport{Node: "n1", ShieldSources: []models.ShieldSourceStat{
+			{Address: "1.1.1.1", Class: "syn", Denied: 900, Attempts: 900},
+			{Address: "2.2.2.2", Class: "syn", Denied: 0, Attempts: 50000},
+		}}},
+	}, 1)
+	if len(r.TopSources) != 1 || r.TopSources[0].Address != "2.2.2.2" {
+		t.Fatalf("expected the high-attempts/zero-denied source to win the top-N cut: %+v", r.TopSources)
 	}
 }
 
@@ -66,7 +82,7 @@ func TestShieldClassDropRateAnomaly(t *testing.T) {
 
 func TestShieldSourceFloodAnomaly(t *testing.T) {
 	r := Build([]models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1", ShieldSources: []models.ShieldSourceStat{
-		{Address: "9.9.9.9", Class: "syn", Denied: 20000},
+		{Address: "9.9.9.9", Class: "syn", Denied: 20000, Attempts: 20000},
 	}}}}, 10)
 	found := false
 	for _, a := range r.Summary.Anomalies {
@@ -76,5 +92,38 @@ func TestShieldSourceFloodAnomaly(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected shield-source-flood anomaly, got %+v", r.Summary.Anomalies)
+	}
+}
+
+// TestShieldConnectionRateAnomaly guards a source with high Attempts but
+// zero Denied (e.g. audit mode, or a disabled syn_pps threshold) still
+// producing a finding — distinct from shield-source-flood, which requires
+// an actual denial.
+func TestShieldConnectionRateAnomaly(t *testing.T) {
+	r := Build([]models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1", ShieldSources: []models.ShieldSourceStat{
+		{Address: "8.8.4.4", Class: "syn", Denied: 0, Attempts: 20000},
+	}}}}, 10)
+	var found *models.NetworkHealthAnomaly
+	for i, a := range r.Summary.Anomalies {
+		if a.Kind == "shield-connection-rate" {
+			found = &r.Summary.Anomalies[i]
+		}
+		if a.Kind == "shield-source-flood" {
+			t.Fatalf("zero-denied source should not also trip shield-source-flood: %+v", a)
+		}
+	}
+	if found == nil || found.Severity != "warning" || found.Value != 20000 {
+		t.Fatalf("expected shield-connection-rate anomaly, got %+v", r.Summary.Anomalies)
+	}
+}
+
+func TestShieldConnectionRateAnomalyIgnoresBelowThreshold(t *testing.T) {
+	r := Build([]models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1", ShieldSources: []models.ShieldSourceStat{
+		{Address: "8.8.4.4", Class: "syn", Denied: 0, Attempts: 9999},
+	}}}}, 10)
+	for _, a := range r.Summary.Anomalies {
+		if a.Kind == "shield-connection-rate" {
+			t.Fatalf("unexpected anomaly below threshold: %+v", a)
+		}
 	}
 }

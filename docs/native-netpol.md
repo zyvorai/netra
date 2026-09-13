@@ -155,6 +155,38 @@ CiliumNetworkPolicy apply flow, where preflight is optional):
    [--lease DURATION]`. MCP: `netra_ebpf_netpol_default_deny_plan` /
    `netra_ebpf_netpol_default_deny_set`.
 
+### One-shot quarantine
+
+`netractl ebpf netpol quarantine [--namespace NS] [--pod POD] [--kind KIND]
+[--workload NAME] [--label k=v] [--allow-peer IP[:PORT[/PROTO]]]...
+[--lease DURATION] [--confirm-risk RISK] [--allow-no-rules]` is a
+**client-side convenience**, not a new server capability: it composes the
+three calls above (`PUT /netpol/v2/config` to enable v2 if needed, one
+`POST /netpol/rules` per `--allow-peer` to seed allow rules for the
+selector, then the full plan → confirm-risk → apply default-deny sequence)
+into one command, for the real incident where "run five commands correctly
+in order" is worse than "run one command that already knows the order."
+It introduces **no new server-side logic and bypasses none of the existing
+safety machinery** — the zero-covering-allow-rule `critical`-risk refusal,
+the single-use receipt token, and the `X-Netra-Confirm-Risk` requirement
+all still apply exactly as if the steps were run by hand.
+
+`--allow-peer` requires an exact IPv4 (matching `NetPolRule.PeerIPv4`'s
+existing exact-peer-only scope — see above); there is no DNS-name allow
+rule in this engine, so quarantining a workload that still needs to resolve
+names requires naming the cluster DNS service's IP explicitly, e.g.
+`--allow-peer 10.96.0.10:53/UDP`. Netra does not guess this — an emergency
+containment command that silently assumes the wrong DNS server IP is worse
+than one that requires the operator to name it.
+
+If the allow-peer rules are added but the subsequent plan/apply step then
+fails or is refused (e.g. risk is `critical` and `--confirm-risk` wasn't
+given), the rules are **not rolled back** — they are a strict safety
+improvement on their own (an allow-exception before default-deny is even
+active is inert) and are left in place so a retried quarantine, or an
+operator finishing the job by hand with `netpol default-deny set`, doesn't
+have to re-add them.
+
 ### Fail-open on restart
 
 Exactly like the general enforce `Mode` today, no default-deny-enabled

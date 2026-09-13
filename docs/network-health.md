@@ -27,6 +27,10 @@ For ordinary UDP/53 only, Netra correlates DNS transaction IDs between egress qu
 
 Use the exact counters as evidence and correlate with application/runtime data before declaring root cause. `missingMaps`/`rateDrops` findings are also available via `netractl explain`/the web Explain page as `bpf-maps-missing`/`rate-drop`, in addition to the raw dashboard cards — see [Explain](explain.md).
 
+## Correlated findings
+
+When two or more of the anomalies above share the same workload or node in one build cycle, an additional `correlated-degradation` anomaly is appended alongside them (never replacing them), naming the related kinds in its `relatedKinds` field — e.g. a DNS-failure anomaly and a TCP-retransmit anomaly on the same pod, even against different remote destinations. This is pure grouping over evidence Netra already computed; it adds no new eBPF collection and infers no causal relationship between the grouped kinds.
+
 ## Privacy and limits
 
 Netra does not copy arbitrary packet payloads to userspace. TCP health is kernel/socket metadata. DNS parsing is deliberately limited to the cleartext DNS header/question needed for qname and transaction timing. Kernel and runtime support must be validated on target nodes; real BPF verifier/runtime tests remain an integration gate.

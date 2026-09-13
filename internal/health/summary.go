@@ -250,6 +250,7 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 			}
 		}
 	}
+	out = correlateAnomalies(out)
 	order := map[string]int{"critical": 3, "warning": 2, "info": 1}
 	sort.SliceStable(out, func(i, j int) bool {
 		if order[out[i].Severity] != order[out[j].Severity] {

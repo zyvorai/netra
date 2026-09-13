@@ -321,11 +321,12 @@ type DNSHealthStat struct {
 }
 
 type NetworkHealthAnomaly struct {
-	Severity string  `json:"severity"`
-	Kind     string  `json:"kind"`
-	Subject  string  `json:"subject"`
-	Message  string  `json:"message"`
-	Value    float64 `json:"value,omitempty"`
+	Severity     string   `json:"severity"`
+	Kind         string   `json:"kind"`
+	Subject      string   `json:"subject"`
+	Message      string   `json:"message"`
+	Value        float64  `json:"value,omitempty"`
+	RelatedKinds []string `json:"relatedKinds,omitempty"`
 }
 
 type NetworkHealthSummary struct {
@@ -520,6 +521,10 @@ type ShieldSourceStat struct {
 	Address    string `json:"address"`
 	Denied     uint64 `json:"denied"`
 	LastSeenNS uint64 `json:"lastSeenNs"`
+	// Attempts is an unconditional new-connection-attempt counter (SYN
+	// packets only), recorded regardless of pass/drop verdict — unlike
+	// Denied, which only counts packets the token bucket was empty for.
+	Attempts uint64 `json:"attempts,omitempty"`
 }
 
 type ShieldDiagnosticsSummary struct {

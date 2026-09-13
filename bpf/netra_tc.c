@@ -763,7 +763,11 @@ struct {
 // Per-source "would-be-denied" hit counter, reusing shield_src_key verbatim
 // so an operator can preview which sources Shield would drop before
 // switching from audit to enforce mode. Recorded identically in both modes.
-struct shield_source_hit_value { __u64 denied; __u64 last_ns; };
+// attempts is a separate, unconditional new-connection-attempt counter
+// (SYN packets only, class_id==1) recorded regardless of pass/drop verdict
+// — distinct from denied, which only counts packets the token bucket was
+// empty for.
+struct shield_source_hit_value { __u64 denied; __u64 last_ns; __u64 attempts; };
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 8192);
@@ -1005,8 +1009,25 @@ static __always_inline void track_shield_source_hit(const struct shield_src_key 
     v->last_ns = bpf_ktime_get_ns();
 }
 
+static __always_inline void track_shield_source_attempt(const struct shield_src_key *k)
+{
+    struct shield_source_hit_value zero = {};
+    struct shield_source_hit_value *v = bpf_map_lookup_elem(&shield_source_hits, k);
+    if (!v) {
+        bpf_map_update_elem(&shield_source_hits, k, &zero, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&shield_source_hits, k);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->attempts, 1);
+}
+
 static __always_inline int shield_rate_ok(__u8 family, __u8 class_id, const __u8 addr[16], __u32 pps, __u32 burst)
 {
+    if (class_id == 1) {
+        struct shield_src_key ak = {.family=family,.class_id=class_id};
+        __builtin_memcpy(ak.addr, addr, 16);
+        track_shield_source_attempt(&ak);
+    }
     if (!pps) return 1;
     if (!burst) burst = 1;
     struct shield_src_key k = {.family=family,.class_id=class_id};
