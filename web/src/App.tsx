@@ -3,6 +3,7 @@ import Nav, { Page } from './components/Nav';
 import Overview from './pages/Overview';
 import Connections from './pages/Connections';
 import ObservedWorkloads from './pages/ObservedWorkloads';
+import Explain from './pages/Explain';
 import { readRoute } from './lib/investigation';
 import Path from './pages/Path';
 import Drops from './pages/Drops';
@@ -30,6 +31,11 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     eyebrow: 'Investigation',
     title: 'Know the workload.',
     lede: 'Explore identities and network evidence reported by Netra agents.',
+  },
+  explain: {
+    eyebrow: 'Investigation',
+    title: 'Explain a connection.',
+    lede: 'Passive, read-only evidence from agent reports — the same diagnostics as netractl explain, one selector away.',
   },
   pods: {
     eyebrow: 'Workloads',
@@ -130,6 +136,7 @@ export default function App() {
     overview: <Overview />,
     connections: <Connections />,
     workloads: <ObservedWorkloads />,
+    explain: <Explain />,
     pods: <Workloads key="pod" kind="pod" />,
     vms: <Workloads key="vm" kind="vm" />,
     health: <Health />,

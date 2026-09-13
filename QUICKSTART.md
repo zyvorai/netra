@@ -73,4 +73,5 @@ netractl ebpf health
 netractl ebpf l7
 netractl flows summary --direction EGRESS
 netractl insights summary
+netractl explain --all --format json   # passive, read-only — see docs/explain.md
 ```

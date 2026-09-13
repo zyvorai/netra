@@ -1,0 +1,153 @@
+import { describe, expect, it } from 'vitest';
+import { buildExplainReport, emptyExplainScope, parseExplainScope, type ExplainAgentStatus, type ExplainScope } from './explain';
+
+function scope(overrides: Partial<ExplainScope>): ExplainScope {
+  return { ...emptyExplainScope, ...overrides };
+}
+
+describe('parseExplainScope validation', () => {
+  const bad: Partial<ExplainScope>[] = [
+    {},
+    { pid: '1' },
+    { node: 'n', pid: '0' },
+    { pod: 'api' },
+    { pod: 'ns/api', namespace: 'other' },
+    { all: true, limit: 0 },
+    { all: true, limit: 1001 },
+    { all: true, maxAgeMinutes: 0 },
+    { destination: 'example.com:443' },
+    { destination: '1.2.3.4:0' },
+    { dns: 'example.com', node: 'n', pid: '1' },
+    { dns: '.' },
+    { node: ' n' },
+  ];
+  for (const o of bad) {
+    it(`rejects ${JSON.stringify(o)}`, () => {
+      const r = parseExplainScope(scope(o));
+      expect('error' in r).toBe(true);
+    });
+  }
+});
+
+describe('parseExplainScope selectors', () => {
+  it('splits pod into namespace/pod and normalizes an IPv6 destination+port', () => {
+    const r = parseExplainScope(scope({ pod: 'prod/api', destination: '[2001:db8::1]:443' }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    expect(r.scope.namespace).toBe('prod');
+    expect(r.scope.pod).toBe('api');
+    expect(r.scope.ip).toBe('2001:db8::1');
+    expect(r.scope.port).toBe(443);
+  });
+
+  it('unmaps an IPv4-mapped IPv6 destination', () => {
+    const r = parseExplainScope(scope({ destination: '::ffff:192.0.2.1' }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    expect(r.scope.ip).toBe('192.0.2.1');
+  });
+
+  it('lowercases and trims a trailing dot from --dns', () => {
+    const r = parseExplainScope(scope({ dns: 'EXAMPLE.COM.' }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    expect(r.scope.dns).toBe('example.com');
+  });
+});
+
+function fixture(): { agents: ExplainAgentStatus[]; now: Date } {
+  const now = new Date('2026-09-13T00:00:00Z');
+  const nowIso = now.toISOString();
+  return {
+    now,
+    agents: [
+      {
+        node: 'node-b',
+        stale: false,
+        observedAt: nowIso,
+        events: [
+          {
+            namespace: 'prod',
+            pod: 'api',
+            pid: 42,
+            action: 'blocked',
+            reason: 'port-deny',
+            observedAt: nowIso,
+            destinationIp: '',
+            destinationPort: 0,
+          },
+        ],
+      },
+      {
+        node: 'node-a',
+        stale: false,
+        observedAt: nowIso,
+        events: [
+          {
+            namespace: 'prod',
+            pod: 'api',
+            pid: 42,
+            containerId: 'container-exact',
+            action: 'blocked',
+            reason: 'cidr-deny',
+            hook: 'cgroup',
+            destinationIp: '192.0.2.1',
+            destinationPort: 443,
+            observedAt: nowIso,
+          },
+          { namespace: 'dev', pod: 'api', action: 'observed', observedAt: nowIso, destinationIp: '', destinationPort: 0 },
+        ],
+        tcpHealth: [
+          {
+            namespace: 'prod',
+            pod: 'api',
+            pid: 42,
+            remoteIp: '192.0.2.1',
+            remotePort: 443,
+            activeEstablished: 1,
+            passiveEstablished: 0,
+            retransmissions: 2,
+            rtos: 1,
+          },
+        ],
+        dnsHealth: [{ namespace: 'prod', pod: 'api', name: 'example.com', queries: 3, responses: 2, failures: 1 }],
+      },
+    ],
+  };
+}
+
+describe('buildExplainReport', () => {
+  it('scopes findings to a specific node+pid, excluding the other node and DNS (no pod identity)', () => {
+    const { agents, now } = fixture();
+    const r = parseExplainScope(scope({ node: 'node-a', pid: '42' }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    const report = buildExplainReport(agents, r.scope, now);
+    expect(report.agentsConsidered).toBe(1);
+    expect(report.findingsTotal).toBe(3); // 1 blocked event + tcp-established + tcp-loss-signal
+    expect(report.findings.every((f) => f.node === 'node-a')).toBe(true);
+  });
+
+  it('finds DNS counters when scoped to namespace/pod with no pid/container/destination', () => {
+    const { agents, now } = fixture();
+    const r = parseExplainScope(scope({ pod: 'prod/api' }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    const report = buildExplainReport(agents, r.scope, now);
+    expect(report.findings.some((f) => f.kind === 'dns-counters')).toBe(true);
+  });
+
+  it('excludes stale agents', () => {
+    const { agents, now } = fixture();
+    agents[1].stale = true;
+    const r = parseExplainScope(scope({ all: true }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    const report = buildExplainReport(agents, r.scope, now);
+    expect(report.agentsExcluded).toBe(1);
+  });
+
+  it('truncates findings to the limit but still reports the true total', () => {
+    const { agents, now } = fixture();
+    const r = parseExplainScope(scope({ all: true, limit: 1 }));
+    if (!('scope' in r)) throw new Error('expected scope');
+    const report = buildExplainReport(agents, r.scope, now);
+    expect(report.findings.length).toBe(1);
+    expect(report.findingsTotal).toBeGreaterThan(1);
+    expect(report.truncated).toBe(true);
+  });
+});

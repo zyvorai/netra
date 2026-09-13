@@ -2,6 +2,8 @@
 
 `netractl explain` is a passive, read-only diagnostic command over the controller's existing `/api/v1/agents` reports. It works without Cilium or Hubble and can also read a saved report offline. No additional Go dependencies or backend endpoints are introduced.
 
+The dashboard's **Explain** page (nav, next to Connections/Workloads) offers the same scoped diagnostics from the browser against live agent reports — same selectors, same findings, same limitations text, always read-only. It's a straight client-side port (`web/src/lib/explain.ts`, unit-tested against the same edge cases as `cmd/netractl/explain_test.go`) of this exact logic, not a second implementation with its own behavior; the CLI remains the only offline/scripted/`--input file` path.
+
 ```bash
 netractl explain --pod production/payments-api
 netractl explain --node worker-1 --pid 1842

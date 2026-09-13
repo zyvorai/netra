@@ -1,7 +1,7 @@
 // Read-only views over AgentReport. Never infer a winning policy from current config.
 export type Scope = { namespace: string; pod: string; node: string; query: string; direction: string; protocol: string; action: string };
 export const emptyScope: Scope = { namespace: '', pod: '', node: '', query: '', direction: '', protocol: '', action: '' };
-export const pages = ['overview', 'connections', 'workloads', 'pods', 'vms', 'health', 'path', 'drops', 'l7', 'insights', 'policies', 'flows', 'ebpf', 'audit'] as const;
+export const pages = ['overview', 'connections', 'workloads', 'explain', 'pods', 'vms', 'health', 'path', 'drops', 'l7', 'insights', 'policies', 'flows', 'ebpf', 'audit'] as const;
 export type Route = { page: typeof pages[number]; scope: Scope };
 export function readRoute(hash: string): Route {
   const params = new URLSearchParams(hash.replace(/^#/, ''));

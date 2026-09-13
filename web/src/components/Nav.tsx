@@ -4,6 +4,7 @@ export type Page =
   | 'overview'
   | 'connections'
   | 'workloads'
+  | 'explain'
   | 'pods'
   | 'vms'
   | 'health'
@@ -20,6 +21,7 @@ const items: [Page, string][] = [
   ['overview', 'Overview'],
   ['connections', 'Connections'],
   ['workloads', 'Workloads'],
+  ['explain', 'Explain'],
   ['pods', 'Pods'],
   ['vms', 'VMs'],
   ['health', 'Health'],
