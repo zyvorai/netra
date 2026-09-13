@@ -22,7 +22,7 @@ export default function Path(){
       <div><b>{s.packetsOut||0}</b><span>packets in flight</span></div>
       <div><b>{s.deliveredRatePps||0}</b><span>delivered pkt/s samples</span></div>
     </div></section>
-    <section className="card span3"><p className="eyebrow">PATH SIGNALS</p><h3>Transport-pressure findings</h3><p>Threshold-based diagnostics only. Netra does not infer router/interface drop reasons from these counters.</p><div className="list">{anomalies.length===0&&<p className="empty-state">No current path-pressure thresholds triggered.</p>}{anomalies.map((a:any,i:number)=><div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}</div></section>
+    <section className="card span3"><p className="eyebrow">PATH SIGNALS</p><h3>Transport-pressure findings</h3><p>Threshold-based diagnostics only. Netra does not infer router/interface drop reasons from these counters.</p><div className="list">{anomalies.length===0&&<p className="empty-state">No current path-pressure thresholds triggered.</p>}{anomalies.slice(0,25).map((a:any,i:number)=><div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}{anomalies.length>25&&<p className="empty-state">+{anomalies.length-25} more not shown.</p>}</div></section>
     <section className="card span3">
       <p className="eyebrow">TCP PRESSURE</p><h3>Exact sockops transport state</h3>
       {pressure.length===0 && <p className="empty-state">No TCP pressure samples yet.</p>}

@@ -72,6 +72,10 @@ export default function Workloads({ kind }: { kind: Kind }) {
 
   async function open(x: any) {
     setSelected(x);
+    setDetail(null);
+    setCandidate('');
+    setReceipt(null);
+    setMsg('');
     try {
       setDetail(
         await api<Detail>(

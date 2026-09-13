@@ -73,7 +73,7 @@ export default function Drops() {
         <h3>Policy-aware findings</h3>
         <div className="list">
           {findings.length === 0 && <p className="empty-state">No Netra policy-drop findings.</p>}
-          {findings.map((f: any, i: number) => (
+          {findings.slice(0, 25).map((f: any, i: number) => (
             <div className="agent wide" key={i}>
               <b>{f.code}</b>
               <span className={f.confidence === 'exact' ? 'blocked' : ''}>{f.confidence}</span>
@@ -85,6 +85,7 @@ export default function Drops() {
               </small>
             </div>
           ))}
+          {findings.length > 25 && <p className="empty-state">+{findings.length - 25} more not shown.</p>}
         </div>
       </section>
       <section className="card span3">
@@ -92,7 +93,7 @@ export default function Drops() {
         <h3>Queue and interface findings</h3>
         <div className="list">
           {anomalies.length === 0 && <p className="empty-state">No drop-pressure thresholds triggered.</p>}
-          {anomalies.map((a: any, i: number) => (
+          {anomalies.slice(0, 25).map((a: any, i: number) => (
             <div className="agent wide" key={i}>
               <b>{a.kind}</b>
               <span className={`severity-badge ${a.severity}`}>{a.severity}</span>
@@ -100,6 +101,7 @@ export default function Drops() {
               <small>{a.message}</small>
             </div>
           ))}
+          {anomalies.length > 25 && <p className="empty-state">+{anomalies.length - 25} more not shown.</p>}
         </div>
       </section>
       {nodes.map((n: any) => (

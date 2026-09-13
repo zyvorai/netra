@@ -94,8 +94,8 @@ export default function App() {
 
   const body = {
     overview: <Overview />,
-    pods: <Workloads kind="pod" />,
-    vms: <Workloads kind="vm" />,
+    pods: <Workloads key="pod" kind="pod" />,
+    vms: <Workloads key="vm" kind="vm" />,
     health: <Health />,
     path: <Path />,
     drops: <Drops />,

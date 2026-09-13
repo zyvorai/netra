@@ -50,8 +50,9 @@ export default function Health() {
       <h3>Heuristic anomalies</h3>
       <p>These are deterministic operational thresholds, not ML/statistical anomaly claims.</p>
       <div className="list">
-        {anomalies.length === 0 && <p>No threshold-based network health signals in the latest reports.</p>}
-        {anomalies.map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}
+        {anomalies.length === 0 && <p className="empty-state">No threshold-based network health signals in the latest reports.</p>}
+        {anomalies.slice(0, 25).map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}
+        {anomalies.length > 25 && <p className="empty-state">+{anomalies.length - 25} more not shown.</p>}
       </div>
     </section>
 
