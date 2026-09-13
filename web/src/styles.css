@@ -366,10 +366,14 @@ button:disabled,
 }
 .nav-inner {
   width: 100%;
-  max-width: 1024px;
+  /* Matches main's own max-width so the brand mark sits at the page's
+     true left edge (and nav-actions at its true right edge) instead of
+     being centered as a narrower column — was max-width: 1024px, which
+     pushed "Z Netra" ~245px in from the left on any wide viewport. */
+  max-width: 1800px;
   height: 100%;
   margin: 0 auto;
-  padding: 0 22px;
+  padding: 0 clamp(20px, 3.5vw, 64px);
   display: flex;
   align-items: center;
   gap: 12px;

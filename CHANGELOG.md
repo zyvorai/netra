@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.27.14 — 2026-09-13
+
+- **Fixed the nav bar's brand mark not actually sitting at the page's top-left edge**: `.nav-inner` had `max-width: 1024px; margin: 0 auto`, centering the whole bar (brand + links + actions) as a narrow column inside the full-width `.nav` — on any viewport wider than ~1068px the "Z Netra" mark landed well inside the left edge (245px in at 1470px wide) instead of at it, and `nav-actions` (digest chip, logout, theme toggle) similarly wasn't flush right. Found live on the deployed dashboard, not in a kit. Changed the cap to match `main`'s own `max-width: 1800px` and padding scale, so the nav's content width now tracks the page content's actual width instead of an unrelated, much narrower one — brand pins to the true left edge, actions to the true right edge, and the already-tight 15-item nav-links row gets meaningfully more breathing room before its own horizontal scroll kicks in. Verified live via Chrome (style injected and previewed against the real deployment before rebuilding) and confirmed the existing `@media (max-width: 900px)` mobile nav rules are unaffected (they already override padding explicitly at that breakpoint).
+- Version bumped to 0.27.14 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.13 — 2026-09-13
 
 - **Extended Explain to L7** (0.27.12) with a sixth external PR kit continuing the same feature — same recurring pattern (explain-deletion hunk rejected, stale docs rejected in favor of this project's already-more-complete copies). Two things this round:
