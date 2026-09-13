@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import ExplainFinding from '../components/ExplainFinding';
 
 export default function Drops() {
   const [data, setData] = useState<any>();
@@ -83,6 +84,7 @@ export default function Drops() {
               <small>
                 {f.explanation} {f.suggestion}
               </small>
+              <ExplainFinding page="drops" kind={f.code || 'policy-drop'} subject={`${f.src || ''} → ${f.dst || ''}`} message={`${f.explanation || ''} ${f.suggestion || ''}`} severity={f.confidence === 'exact' ? 'warning' : 'info'} />
             </div>
           ))}
           {findings.length > 25 && <p className="empty-state">+{findings.length - 25} more not shown.</p>}
@@ -99,6 +101,7 @@ export default function Drops() {
               <span className={`severity-badge ${a.severity}`}>{a.severity}</span>
               <span>{a.subject}</span>
               <small>{a.message}</small>
+              <ExplainFinding page="drops" kind={a.kind} subject={a.subject} message={a.message} severity={a.severity} />
             </div>
           ))}
           {anomalies.length > 25 && <p className="empty-state">+{anomalies.length - 25} more not shown.</p>}

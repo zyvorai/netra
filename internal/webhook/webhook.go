@@ -34,6 +34,9 @@ type Event struct {
 	Value     float64   `json:"value,omitempty"`
 	Node      string    `json:"node,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+	// Optional AI digest fields. Empty on classic health/path/drop events.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Card        string `json:"card,omitempty"`
 }
 
 // severityRank orders "info" < "warning" < "critical". Matches the plain-string

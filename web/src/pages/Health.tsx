@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import ExplainFinding from '../components/ExplainFinding';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
 const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
@@ -51,7 +52,7 @@ export default function Health() {
       <p>These are deterministic operational thresholds, not ML/statistical anomaly claims.</p>
       <div className="list">
         {anomalies.length === 0 && <p className="empty-state">No threshold-based network health signals in the latest reports.</p>}
-        {anomalies.slice(0, 25).map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small></div>)}
+        {anomalies.slice(0, 25).map((a:any, i:number) => <div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small><ExplainFinding page="health" kind={a.kind} subject={a.subject} message={a.message} severity={a.severity} /></div>)}
         {anomalies.length > 25 && <p className="empty-state">+{anomalies.length - 25} more not shown.</p>}
       </div>
     </section>

@@ -15,9 +15,11 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zyvorai/netra/internal/ai"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/webhook"
@@ -124,6 +126,58 @@ func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) []webhook.
 	collect("health", health.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("pathdiag", pathdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("dropdiag", dropdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
+	if ev, ok := digestEvent(now, agents); ok && p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+		out = append(out, ev)
+	}
 	p.dedup.sweep(now, p.cfg.Cooldown)
 	return out
+}
+
+// digestEvent builds the on-call card for this agent snapshot. Quiet
+// clusters (info, unchanged fingerprint) do not emit a webhook event.
+func digestEvent(now time.Time, agents []models.AgentStatus) (webhook.Event, bool) {
+	obs := observability.Summarize(agents, 8)
+	hs := health.Build(agents, 8)
+	stale, workloads := 0, 0
+	mode := ""
+	for _, a := range agents {
+		if a.Stale {
+			stale++
+		}
+		workloads += len(a.Workloads)
+		if mode == "" && a.Mode != "" {
+			mode = a.Mode
+		}
+	}
+	snap := ai.Snapshot{
+		GeneratedAt: now,
+		AgentsTotal: len(agents),
+		AgentsStale: stale,
+		Workloads:   workloads,
+		Mode:        mode,
+		Packets:     obs.Packets,
+		Bytes:       obs.Bytes,
+		Blocked:     obs.Blocked,
+		HealthScore: hs.Summary.HealthScore,
+	}
+	for _, a := range hs.Summary.Anomalies {
+		if len(snap.Anomalies) >= 8 {
+			break
+		}
+		snap.Anomalies = append(snap.Anomalies, ai.Finding{Severity: a.Severity, Kind: a.Kind, Subject: a.Subject, Message: a.Message})
+	}
+	d := ai.BuildDigest(ai.BuildBrief(snap))
+	if d.Severity == "info" && !d.Changed {
+		return webhook.Event{}, false
+	}
+	return webhook.Event{
+		Source:      "ai",
+		Kind:        "digest",
+		Severity:    d.Severity,
+		Subject:     d.Fingerprint,
+		Message:     d.Card,
+		Timestamp:   now,
+		Fingerprint: d.Fingerprint,
+		Card:        d.Card,
+	}, true
 }
