@@ -151,7 +151,7 @@ var mapNames = []string{
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
-	"shield_class_stats", "shield_source_hits", "iface_flow_stats",
+	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -497,6 +497,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	icmpErrors, err := a.readICMPErrors()
+	if err != nil {
+		return err
+	}
 	ipv6ExtHeaders, err := a.readIPv6ExtStats()
 	if err != nil {
 		return err
@@ -553,7 +557,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),

@@ -34,6 +34,7 @@ All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 - `rate_v6`, `rate_state_v6`: exact IPv6 destination PPS (parity with `rate_v4`).
 - `icmp_type_stats`: observe-only ICMPv4 type histogram.
 - `icmp6_type_stats`: observe-only ICMPv6 type histogram (parity with `icmp_type_stats`).
+- `icmp_errors`: observe-only, node/interface-scoped LRU histogram of fixed ICMPv4/ICMPv6 error headers (unreachable, time-exceeded, parameter-problem, packet-too-big/MTU) seen at TC ingress/egress. Never attributes to a workload, destination, port, or connection; quoted original packets are not retained.
 - `scope_config`: enforcement scope mode (`all` or `selected`).
 - `enforced_cgroups`: cgroup IDs currently selected for enforcement.
 - `config_map`: observe/enforce mode.

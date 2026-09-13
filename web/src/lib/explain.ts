@@ -1,3 +1,6 @@
+import { dnsResponseFinding, type DNSResponseEvent } from './dns';
+import { icmpFinding, type ICMPError } from './icmp';
+
 // Client-side port of cmd/netractl/explain.go's parseExplain/buildExplain,
 // so the web dashboard can offer the same passive, read-only connection
 // diagnostics as `netractl explain` against the same /api/v1/agents data.
@@ -160,7 +163,7 @@ export function parseExplainScope(o: ExplainScope): { error: string } | { scope:
 // —— Agent report shapes (mirrors internal/models.AgentStatus's JSON tags) ——
 
 export type ExplainIdentity = { namespace?: string; pod?: string; pid?: number; containerId?: string };
-export type ExplainEvent = ExplainIdentity & {
+export type ExplainEvent = ExplainIdentity & DNSResponseEvent & {
   observedAt: string;
   destinationIp: string;
   destinationPort: number;
@@ -181,6 +184,7 @@ export type ExplainTCP = ExplainIdentity & {
 };
 export type ExplainDNS = { namespace?: string; pod?: string; name: string; queries: number; responses: number; failures: number };
 export type ExplainAgentStatus = {
+  icmpErrors?: ICMPError[];
   node: string;
   stale: boolean;
   observedAt: string;
@@ -222,6 +226,8 @@ function destinationMatches(o: NormalizedScope, ip: string, port: number): boole
 
 export function buildExplainReport(agents: ExplainAgentStatus[], o: NormalizedScope, now: Date): ExplainReport {
   const limitations: string[] = [
+    'ICMP errors are cumulative TC observations by node/interface/direction; one packet may be seen at multiple interfaces. No workload or quoted-flow attribution is inferred. Missing ICMP data can mean an older agent, unattached TC hooks, or no observed errors. Fragmented ICMP errors are excluded.',
+    'DNS response findings use reported matched UDP/53 events and the four-bit base-header RCODE only. EDNS extended errors, answer records, TCP DNS, DoH, and DoT are not inferred. Event latency is the reported query-response interval, not resolver execution time.',
     'Evidence is sampled or aggregated from agent reports; missing evidence does not prove no traffic or a healthy connection.',
     'TCP/DNS counters are cumulative snapshots, not measurements for a selected time window. Event timestamps are agent observation times.',
     'A passed/observed event does not prove end-to-end delivery. Events lack a stable historical winning rule ID and policy generation.',
@@ -251,9 +257,20 @@ export function buildExplainReport(agents: ExplainAgentStatus[], o: NormalizedSc
       agentsExcluded++;
       continue;
     }
+    if (!o.namespace && !o.pod && !o.pid && !o.container && !o.destination && !o.dns) {
+      for (const e of a.icmpErrors || []) {
+        const f = icmpFinding(e);
+        if (f) add(f.kind, a.node, {}, f.evidence, f.nextCheck);
+      }
+    }
     for (const e of a.events || []) {
       if (!identityMatches(o, e) || !destinationMatches(o, e.destinationIp, e.destinationPort)) continue;
       if (o.dns && (e.dnsQuery || '').toLowerCase().replace(/\.$/, '') !== o.dns) continue;
+      const dns = dnsResponseFinding(e);
+      if (dns) {
+        add(dns.kind, a.node, e, dns.evidence, dns.nextCheck);
+        continue;
+      }
       const blocked = e.action === 'blocked';
       const kind = blocked ? 'observed-block' : 'network-event';
       const nextCheck = blocked

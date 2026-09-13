@@ -114,6 +114,14 @@ These controls are intentionally an emergency/containment layer, not a replaceme
 
 Netra v0.13 added a dedicated **Path Diagnostics** surface independent of Cilium. It measures active TCP connect establishment latency and exports current Linux TCP transport pressure (`snd_cwnd`, `packets_out`, `retrans_out`, `lost_out`, `total_retrans`, delivered-rate samples and state) per cgroup/workload and remote tuple. The feature is observe-only and uses new maps without resizing earlier pinned-map ABIs. See `docs/path-diagnostics.md`.
 
+## DNS Response Diagnostics
+
+**Health** and **Explain** now explain native DNS response events, including NXDOMAIN, SERVFAIL, REFUSED, and malformed-request errors, with resolver details and next checks. Use `netractl explain --pod NS/POD --dns NAME`. See [DNS response diagnostics](docs/dns-response-diagnostics.md).
+
+## ICMP Diagnostics
+
+The **Health** and **Explain** pages now surface IPv4/IPv6 MTU, unreachable-destination, time-exceeded, and parameter errors observed by Netra’s TC hooks. Use `netractl explain --node NODE` for suggested checks. Evidence stays node/interface-scoped; advertised MTUs are peer claims. See [ICMP diagnostics](docs/icmp-diagnostics.md). Local Docker-name diagnosis is available with `netractl explain --node NODE --docker NAME`; see [Explain](docs/explain.md#local-docker-name-discovery).
+
 ## Drop Diagnostics
 
 Netra v0.19 adds a dedicated **Drop Diagnostics** surface independent of Cilium. When the host exposes a modern `kfree_skb` drop-reason tracepoint, the agent attaches an optional raw tracepoint and counts kernel skb drop reasons. It also reports `/proc/net/softnet_stat` backlog drops/time-squeeze events and per-interface receive/transmit drop/error/missed/no-handler counters. Drop-reason counters are intentionally node-level because the kernel tracepoint does not provide a trustworthy Kubernetes workload identity. See `docs/drop-diagnostics.md`.

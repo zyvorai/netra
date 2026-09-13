@@ -22,6 +22,7 @@
 #define NETRA_BPF 1
 #include "netra_ipv6.h"
 #include "netra_l7.h"
+#include "netra_icmp.h"
 
 /* Force full inlining — clang BPF rejects non-inlined helpers with >5 args. */
 #undef __always_inline
@@ -73,6 +74,48 @@ static long (*bpf_get_current_comm)(void *buf, __u32 size) = (void *)BPF_FUNC_ge
 static __u64 (*bpf_get_current_cgroup_id)(void) = (void *)BPF_FUNC_get_current_cgroup_id;
 static __u64 (*bpf_get_socket_cookie)(void *ctx) = (void *)BPF_FUNC_get_socket_cookie;
 static int (*bpf_sock_ops_cb_flags_set)(struct bpf_sock_ops *skops, int flags) = (void *)BPF_FUNC_sock_ops_cb_flags_set;
+
+// Additive ABI: node/interface-scoped TC observations, never workload attribution.
+struct icmp_error_key {
+    __u32 ifindex;
+    __u8 family, type, code, direction;
+};
+struct icmp_error_value {
+    __u64 packets;
+    __u32 advertised_mtu;
+    __u32 pad;
+    __u64 last_ns;
+};
+_Static_assert(sizeof(struct icmp_error_key) == 8, "icmp key ABI");
+_Static_assert(sizeof(struct icmp_error_value) == 24, "icmp value ABI");
+_Static_assert(__builtin_offsetof(struct icmp_error_key, family) == 4, "icmp family offset");
+_Static_assert(__builtin_offsetof(struct icmp_error_value, advertised_mtu) == 8, "icmp MTU offset");
+_Static_assert(__builtin_offsetof(struct icmp_error_value, last_ns) == 16, "icmp time offset");
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, struct icmp_error_key);
+    __type(value, struct icmp_error_value);
+} icmp_errors SEC(".maps");
+
+static __always_inline void record_icmp_error(__u32 ifindex, __u8 family,
+        __u8 direction, const struct netra_icmp_error *error)
+{
+    if (!error->valid) return;
+    struct icmp_error_key k = { .ifindex = ifindex, .family = family,
+        .type = error->type, .code = error->code, .direction = direction };
+    struct icmp_error_value *v = bpf_map_lookup_elem(&icmp_errors, &k);
+    if (!v) {
+        struct icmp_error_value initial = {};
+        bpf_map_update_elem(&icmp_errors, &k, &initial, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&icmp_errors, &k);
+    }
+    if (v) {
+        __sync_fetch_and_add(&v->packets, 1);
+        v->advertised_mtu = error->mtu;
+        v->last_ns = bpf_ktime_get_ns();
+    }
+}
 
 // Legacy v0.6 destination stats are retained so existing pinned maps can be reused.
 struct dest_key {
@@ -1449,12 +1492,18 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
         unsigned char *ic = l4;
         if ((void *)(ic + 1) <= data_end) bump_icmp_type(ic[0]);
     }
+    struct netra_icmp_error icmp = {};
+    if (hook == HOOK_TC && proto == IPPROTO_ICMP &&
+        !(ip->frag_off & __builtin_bswap16(0x3fff)) &&
+        __builtin_bswap16(ip->tot_len) >= ip->ihl * 4U + 8U)
+        netra_icmp_parse(l4, data_end, FAMILY_V4, &icmp);
     __u32 peer = direction==DIR_EGRESS ? daddr : saddr;
     __u16 policy_port = dport;
     copy4(sc->src,saddr); copy4(sc->dst,daddr);
 
     /* TC path stays lean — L7/DNS live on cgroup hooks to keep programs under verifier limits. */
     if (hook == HOOK_TC) {
+        record_icmp_error(ifindex, FAMILY_V4, direction, &icmp);
         __u64 cgroup_id = 0;
         int syn_new = (proto==IPPROTO_TCP && (flags & 0x02) && !(flags & 0x10));
         ct_fill(FAMILY_V4, proto, sport, dport, sc->src, sc->dst, &sc->ct);
@@ -1555,9 +1604,16 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         unsigned char *ic = l4;
         if ((void *)(ic + 1) <= data_end) bump_icmp6_type(ic[0]);
     }
+    struct netra_icmp_error icmp = {};
+    if (hook == HOOK_TC && proto == IPPROTO_ICMPV6 && walk.l4_parseable &&
+        !walk.fragmented && ip6->version == 6 &&
+        (unsigned long)((unsigned char *)l4 - (unsigned char *)(ip6 + 1)) + 8U <=
+            __builtin_bswap16(ip6->payload_len))
+        netra_icmp_parse(l4, data_end, FAMILY_V6, &icmp);
     copy16(sc->src,&ip6->saddr); copy16(sc->dst,&ip6->daddr);
 
     if (hook == HOOK_TC) {
+        record_icmp_error(ifindex, FAMILY_V6, direction, &icmp);
         const __u8 *peer = direction==DIR_EGRESS ? sc->dst : sc->src;
         __u64 cgroup_id = 0;
         int syn_new = (proto==IPPROTO_TCP && l4_ok && (flags & 0x02) && !(flags & 0x10));

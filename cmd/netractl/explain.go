@@ -20,6 +20,10 @@ import (
 const explainMaxBytes = 32 << 20
 
 type explainOptions struct {
+	Docker            string `json:"docker,omitempty"`
+	dockerSocket      string
+	cgroupID          uint64
+	dockerDetails     *dockerEvidence
 	Node              string        `json:"node,omitempty"`
 	Namespace         string        `json:"namespace,omitempty"`
 	Pod               string        `json:"pod,omitempty"`
@@ -35,12 +39,20 @@ type explainOptions struct {
 }
 
 type explainIdentity struct {
+	CgroupID    uint64 `json:"cgroupId"`
 	Namespace   string `json:"namespace"`
 	Pod         string `json:"pod"`
 	PID         uint   `json:"pid"`
 	ContainerID string `json:"containerId"`
 }
 type explainEvent struct {
+	Type       string `json:"type"`
+	Direction  string `json:"direction"`
+	Protocol   string `json:"protocol"`
+	SourceIP   string `json:"sourceIp"`
+	SourcePort uint16 `json:"sourcePort"`
+	DNSRcode   uint8  `json:"dnsRcode"`
+	LatencyUS  uint32 `json:"latencyUs"`
 	explainIdentity
 	ObservedAt      time.Time `json:"observedAt"`
 	DestinationIP   string    `json:"destinationIp"`
@@ -62,6 +74,7 @@ type explainTCP struct {
 	OwnershipStale     bool   `json:"ownershipStale"`
 }
 type explainDNS struct {
+	CgroupID  uint64 `json:"cgroupId"`
 	Namespace string `json:"namespace"`
 	Pod       string `json:"pod"`
 	Name      string `json:"name"`
@@ -70,6 +83,7 @@ type explainDNS struct {
 	Failures  uint64 `json:"failures"`
 }
 type explainAgent struct {
+	ICMP       []explainICMP  `json:"icmpErrors"`
 	Node       string         `json:"node"`
 	Stale      bool           `json:"stale"`
 	ObservedAt time.Time      `json:"observedAt"`
@@ -86,6 +100,7 @@ type explainFinding struct {
 	NextCheck string `json:"nextCheck"`
 }
 type explainReport struct {
+	Docker           *dockerEvidence  `json:"docker,omitempty"`
 	SchemaVersion    int              `json:"schemaVersion"`
 	GeneratedAt      time.Time        `json:"generatedAt"`
 	Scope            explainOptions   `json:"scope"`
@@ -102,6 +117,8 @@ func parseExplain(args []string) (explainOptions, error) {
 	o := explainOptions{}
 	f := flag.NewFlagSet("explain", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	f.StringVar(&o.Docker, "docker", "", "exact local Docker container name or full ID; requires --node")
+	f.StringVar(&o.dockerSocket, "docker-socket", "/var/run/docker.sock", "local Docker Unix socket")
 	f.StringVar(&o.Node, "node", "", "exact node name")
 	f.StringVar(&o.Namespace, "namespace", "", "exact namespace")
 	f.StringVar(&o.Pod, "pod", "", "namespace/pod or pod with --namespace")
@@ -129,7 +146,7 @@ func parseExplain(args []string) (explainOptions, error) {
 	if o.MaxAge <= 0 || o.MaxAge > 24*time.Hour {
 		return o, fmt.Errorf("--max-age must be greater than zero and at most 24h")
 	}
-	for _, v := range []string{o.Node, o.Namespace, o.Pod, o.Container, o.Destination, o.DNS} {
+	for _, v := range []string{o.Docker, o.dockerSocket, o.Node, o.Namespace, o.Pod, o.Container, o.Destination, o.DNS} {
 		if strings.TrimSpace(v) != v || strings.ContainsAny(v, "\r\n\t\x00") {
 			return o, fmt.Errorf("selectors must not contain surrounding whitespace or control characters")
 		}
@@ -158,6 +175,30 @@ func parseExplain(args []string) (explainOptions, error) {
 	})
 	if pidSet && o.PID == 0 {
 		return o, fmt.Errorf("--pid must be greater than zero")
+	}
+	if o.Docker != "" {
+		if !dockerNamePattern.MatchString(o.Docker) {
+			return o, fmt.Errorf("--docker requires an exact container name or full ID")
+		}
+		if o.Node == "" {
+			return o, fmt.Errorf("--docker requires --node matching the Netra agent on this Docker host")
+		}
+		if o.PID != 0 || o.Container != "" || o.Pod != "" || o.Namespace != "" || o.All || o.input != "" {
+			return o, fmt.Errorf("--docker cannot be combined with PID, container, Kubernetes, all, or offline input selectors")
+		}
+		if _, err := dockerClient(o.dockerSocket); err != nil {
+			return o, err
+		}
+	} else {
+		socketSet := false
+		f.Visit(func(fl *flag.Flag) {
+			if fl.Name == "docker-socket" {
+				socketSet = true
+			}
+		})
+		if socketSet {
+			return o, fmt.Errorf("--docker-socket requires --docker")
+		}
 	}
 	if o.Destination != "" {
 		host := o.Destination
@@ -232,7 +273,7 @@ func fetchExplain(client *http.Client, endpoint string) ([]explainAgent, error) 
 }
 
 func (o explainOptions) identity(i explainIdentity) bool {
-	return (o.Namespace == "" || o.Namespace == i.Namespace) && (o.Pod == "" || o.Pod == i.Pod) && (o.PID == 0 || o.PID == i.PID) && (o.Container == "" || o.Container == i.ContainerID)
+	return (o.cgroupID == 0 || o.cgroupID == i.CgroupID) && (o.dockerDetails == nil || i.ContainerID == "" || i.ContainerID == o.dockerDetails.ID) && (o.Namespace == "" || o.Namespace == i.Namespace) && (o.Pod == "" || o.Pod == i.Pod) && (o.PID == 0 || o.PID == i.PID) && (o.Container == "" || o.Container == i.ContainerID)
 }
 func (o explainOptions) destination(ip string, port uint16) bool {
 	if o.ip == "" {
@@ -242,12 +283,17 @@ func (o explainOptions) destination(ip string, port uint16) bool {
 	return e == nil && a.Unmap().String() == o.ip && (o.port == 0 || o.port == port)
 }
 func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explainReport {
-	r := explainReport{SchemaVersion: 1, GeneratedAt: now.UTC(), Scope: o, Status: "no-matching-evidence", Findings: []explainFinding{}, Limitations: []string{
+	r := explainReport{SchemaVersion: 1, Docker: o.dockerDetails, GeneratedAt: now.UTC(), Scope: o, Status: "no-matching-evidence", Findings: []explainFinding{}, Limitations: []string{
 		"Evidence is sampled or aggregated from agent reports; missing evidence does not prove no traffic or a healthy connection.",
 		"TCP/DNS counters are cumulative snapshots, not measurements for a selected time window. Event timestamps are agent observation times.",
 		"A passed/observed event does not prove end-to-end delivery. Events lack a stable historical winning rule ID and policy generation.",
+		"ICMP errors are cumulative TC observations by node/interface/direction; one packet may be seen at multiple interfaces. No workload or quoted-flow attribution is inferred. Missing ICMP data can mean an older agent, unattached TC hooks, or no observed errors. Fragmented ICMP errors are excluded.",
+		"DNS response findings use reported matched UDP/53 events and the four-bit base-header RCODE only. EDNS extended errors, answer records, TCP DNS, DoH, and DoT are not inferred. Event latency is the reported query-response interval, not resolver execution time.",
 		"No active probes, DNS resolution, policy changes, or packet payload collection are performed.",
 	}}
+	if o.dockerDetails != nil {
+		r.Limitations = append(r.Limitations, "Docker scope matches the inspected init process cgroup on the explicitly selected node. Nested child cgroups are not included. Node-to-host mapping is operator supplied.", "Inspection and cgroup identity are rechecked after fetching reports. Cached counters and buffered events cannot prove container-incarnation identity; current connectivity is not inferred.")
+	}
 	if o.PID != 0 {
 		r.Limitations = append(r.Limitations, "PID events may describe an earlier process incarnation; DNS counters lack PID attribution and are excluded.")
 	}
@@ -274,15 +320,27 @@ func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explai
 			continue
 		}
 		r.AgentsConsidered++
-		if a.Node == "" || a.Stale || a.ObservedAt.IsZero() || now.Sub(a.ObservedAt) > o.MaxAge || a.ObservedAt.After(now.Add(time.Minute)) {
+		if (o.dockerDetails != nil && a.ObservedAt.Before(o.dockerDetails.StartedAt)) || a.Node == "" || a.Stale || a.ObservedAt.IsZero() || now.Sub(a.ObservedAt) > o.MaxAge || a.ObservedAt.After(now.Add(time.Minute)) {
 			r.AgentsExcluded++
 			continue
+		}
+		if o.includesNodeICMP() {
+			for _, e := range a.ICMP {
+				kind, evidence, next := icmpFinding(e)
+				if kind != "" {
+					add(kind, a.Node, explainIdentity{}, evidence, next)
+				}
+			}
 		}
 		for _, e := range a.Events {
 			if !o.identity(e.explainIdentity) || !o.destination(e.DestinationIP, e.DestinationPort) {
 				continue
 			}
 			if o.DNS != "" && strings.TrimSuffix(strings.ToLower(e.DNSQuery), ".") != o.DNS {
+				continue
+			}
+			if kind, evidence, next := dnsResponseFinding(e); kind != "" {
+				add(kind, a.Node, e.explainIdentity, evidence, next)
 				continue
 			}
 			kind, next := "network-event", "Inspect peer availability and application logs; this event alone cannot establish delivery."
@@ -306,7 +364,7 @@ func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explai
 		}
 		if o.PID == 0 && o.Container == "" && o.Destination == "" {
 			for _, d := range a.DNS {
-				id := explainIdentity{Namespace: d.Namespace, Pod: d.Pod}
+				id := explainIdentity{Namespace: d.Namespace, Pod: d.Pod, CgroupID: d.CgroupID}
 				if !o.identity(id) {
 					continue
 				}
@@ -329,7 +387,7 @@ func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explai
 	}
 	r.Truncated = r.FindingsTotal > len(r.Findings)
 	if r.AgentsExcluded > 0 {
-		r.Limitations = append(r.Limitations, fmt.Sprintf("Excluded %d reports marked stale, too old, missing node/time, or more than one minute in the future.", r.AgentsExcluded))
+		r.Limitations = append(r.Limitations, fmt.Sprintf("Excluded %d reports marked stale, too old, missing node/time, predating Docker start, or more than one minute in the future.", r.AgentsExcluded))
 	}
 	return r
 }
@@ -342,6 +400,11 @@ func writeExplain(w io.Writer, r explainReport, format string) error {
 	}
 	if _, e := fmt.Fprintf(w, "Netra connection explanation: %s\nAgents considered: %d; excluded: %d\nFindings: %d (showing %d)\n", r.Status, r.AgentsConsidered, r.AgentsExcluded, r.FindingsTotal, len(r.Findings)); e != nil {
 		return e
+	}
+	if r.Docker != nil {
+		if _, e := fmt.Fprintf(w, "Docker container: %q id=%q init-pid=%d cgroup=%s node=%q\n", r.Docker.Name, r.Docker.ID, r.Docker.PID, r.Docker.CgroupID, r.Docker.Node); e != nil {
+			return e
+		}
 	}
 	for _, f := range r.Findings {
 		if _, e := fmt.Fprintf(w, "\n[%s] node=%q workload=%q\n  %s\n  Next: %s\n", f.Kind, f.Node, f.Namespace+"/"+f.Pod, f.Evidence, f.NextCheck); e != nil {
@@ -368,14 +431,25 @@ func writeExplain(w io.Writer, r explainReport, format string) error {
 func explainCmd(args []string, w io.Writer) error {
 	o, e := parseExplain(args)
 	if e == flag.ErrHelp {
-		_, e = fmt.Fprintln(w, "netractl explain --pod NS/NAME | --node NODE --pid PID | --container EXACT_ID | --destination IP[:PORT] | --dns NAME | --all [--input FILE|-] [--format text|json] [--max-age 2m] [--limit 50]")
+		_, e = fmt.Fprintln(w, "netractl explain --docker NAME --node NODE [--docker-socket PATH] | --pod NS/NAME | --node NODE --pid PID | --container EXACT_ID | --destination IP[:PORT] | --dns NAME | --all [--input FILE|-] [--format text|json] [--max-age 2m] [--limit 50]")
 		return e
 	}
 	if e != nil {
 		return e
 	}
 	var agents []explainAgent
-	if o.input != "" {
+	if o.Docker != "" {
+		client, err := dockerClient(o.dockerSocket)
+		if err != nil {
+			return err
+		}
+		defer client.CloseIdleConnections()
+		agents, o, e = collectDocker(o, client, localDockerCgroup, func() ([]explainAgent, error) {
+			apiClient := httpClient(20 * time.Second)
+			apiClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+			return fetchExplain(apiClient, base)
+		})
+	} else if o.input != "" {
 		if o.input == "-" {
 			agents, e = readExplain(os.Stdin)
 		} else {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import DNSDiagnostics from '../components/DNSDiagnostics';
+import ICMPDiagnostics from '../components/ICMPDiagnostics';
 import ExplainFinding from '../components/ExplainFinding';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
@@ -46,6 +48,8 @@ export default function Health() {
       <p>Failure rate: <b>{pct(s.dnsFailures || 0, s.dnsResponses || 0)}</b>. DNS timing covers matched plain UDP/53 transactions only; DoH, DoT and TCP DNS are intentionally not inferred.</p>
     </section>
 
+    <DNSDiagnostics agents={agents} />
+
     {agents.some((a: any) => (a.missingMaps || []).length) && (
       <section className="card span3">
         <p className="eyebrow">BPF OBJECT</p>
@@ -85,6 +89,8 @@ export default function Health() {
         ))}
       </div>
     </section>
+
+    <ICMPDiagnostics agents={agents} />
 
     <section className="card span3">
       <p className="eyebrow">HEALTH SIGNALS</p>

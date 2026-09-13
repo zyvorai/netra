@@ -62,7 +62,7 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Println(`netractl explain --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
+	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
   status | audit
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]

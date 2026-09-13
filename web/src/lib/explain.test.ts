@@ -151,3 +151,30 @@ describe('buildExplainReport', () => {
     expect(report.truncated).toBe(true);
   });
 });
+
+
+describe('node ICMP explanation', () => {
+  const now = new Date('2026-09-13T00:00:00Z');
+  const agents: ExplainAgentStatus[] = [{ node: 'n', stale: false, observedAt: now.toISOString(), icmpErrors: [
+    { interfaceIndex: 2, family: 'IPv4', type: 3, code: 4, direction: 'ingress', hook: 'tc', packets: 3, advertisedMtu: 1400 },
+  ] }];
+  it('includes node observations without assigning a workload', () => {
+    const parsed = parseExplainScope(scope({ node: 'n' }));
+    if ('error' in parsed) throw new Error(parsed.error);
+    const r = buildExplainReport(agents, parsed.scope, now);
+    expect(r.findingsTotal).toBe(1);
+    expect(r.findings[0].kind).toBe('icmp-pmtu');
+    expect(r.findings[0].evidence).toContain('last-advertised-mtu=1400');
+    expect(r.findings[0].pod).toBeUndefined();
+  });
+  it('excludes unrelated scope and stale reports', () => {
+    for (const selector of [{ node: 'other' }, { namespace: 'ns' }, { pod: 'ns/p' }, { node: 'n', pid: '1' }, { container: 'id' }, { destination: '192.0.2.1' }, { dns: 'example.com' }]) {
+      const parsed = parseExplainScope(scope(selector));
+      if ('error' in parsed) throw new Error(parsed.error);
+      expect(buildExplainReport(agents, parsed.scope, now).findingsTotal).toBe(0);
+    }
+    const parsed = parseExplainScope(scope({ all: true }));
+    if ('error' in parsed) throw new Error(parsed.error);
+    expect(buildExplainReport(agents, parsed.scope, new Date(now.getTime() + 121_000)).findingsTotal).toBe(0);
+  });
+});

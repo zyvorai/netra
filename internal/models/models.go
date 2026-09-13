@@ -679,7 +679,23 @@ type NetPolDefaultDeny struct {
 	Actor        string            `json:"actor,omitempty"`
 }
 
+// ICMPErrorStat is cumulative TC evidence scoped to an interface, not a workload.
+// AdvertisedMTU is an unvalidated peer claim; LastSeenNS uses the kernel monotonic clock.
+type ICMPErrorStat struct {
+	InterfaceName  string `json:"interfaceName,omitempty"`
+	InterfaceIndex uint32 `json:"interfaceIndex"`
+	Family         string `json:"family"`
+	Type           uint8  `json:"type"`
+	Code           uint8  `json:"code"`
+	Direction      string `json:"direction"`
+	Hook           string `json:"hook"`
+	Packets        uint64 `json:"packets"`
+	AdvertisedMTU  uint32 `json:"advertisedMtu,omitempty"`
+	LastSeenNS     uint64 `json:"lastSeenNs"`
+}
+
 type AgentReport struct {
+	ICMPErrors         []ICMPErrorStat         `json:"icmpErrors,omitempty"`
 	Node               string                  `json:"node"`
 	Mode               string                  `json:"mode"`
 	Interfaces         []string                `json:"interfaces"`
