@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { navigate } from '../hooks/useInvestigation';
 import LiveFlowTerminal from '../components/LiveFlowTerminal';
 import PodExec from '../components/PodExec';
 import PodLogs from '../components/PodLogs';
@@ -241,6 +242,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
       </section>
       <section className="card">
         <h3>Entity</h3>
+        {selected && <button onClick={() => navigate('workloads', { namespace: selected.namespace, pod: kind === 'pod' ? selected.name : (selected.podName || ''), node: selected.node || '', query: '' })}>Inspect native network evidence</button>}
         {detail ? (
           <>
             <p>

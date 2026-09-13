@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import Nav, { Page } from './components/Nav';
 import Overview from './pages/Overview';
+import Connections from './pages/Connections';
+import ObservedWorkloads from './pages/ObservedWorkloads';
+import { readRoute } from './lib/investigation';
 import Path from './pages/Path';
 import Drops from './pages/Drops';
 import Insights from './pages/Insights';
@@ -18,6 +21,16 @@ import { logout } from './auth';
 import { applyTheme, readStoredTheme, toggleTheme, type Theme } from './theme';
 
 const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: string }>> = {
+  connections: {
+    eyebrow: 'Investigation',
+    title: 'Follow every clue.',
+    lede: 'Native eBPF events, workload context, and honest explanations of observed outcomes.',
+  },
+  workloads: {
+    eyebrow: 'Investigation',
+    title: 'Know the workload.',
+    lede: 'Explore identities and network evidence reported by Netra agents.',
+  },
   pods: {
     eyebrow: 'Workloads',
     title: 'Pods.',
@@ -76,7 +89,10 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
 };
 
 export default function App() {
-  const [page, setPage] = useState<Page>('overview');
+  // Defaults to 'overview' exactly like plain useState('overview') did when
+  // there's no hash — only differs when the URL already carries a shared
+  // investigation link (#page=...), so a pasted link opens directly to it.
+  const [page, setPage] = useState<Page>(() => readRoute(window.location.hash).page as Page);
   const [loggedIn, setLoggedIn] = useState(() => Boolean(token()));
   const [theme, setTheme] = useState<Theme>(() => {
     const t = readStoredTheme();
@@ -90,10 +106,23 @@ export default function App() {
     return () => window.removeEventListener('netra-auth-expired', onExpired);
   }, []);
 
+  // Regular Nav clicks call setPage(id) directly and never touch the hash,
+  // so existing navigation keeps its exact current behavior (no URL change,
+  // no history entry). This listener only exists so the investigation
+  // feature's own navigate() calls (which do set the hash, for shareable
+  // links) can switch the visible page too.
+  useEffect(() => {
+    const onHashChange = () => setPage(readRoute(window.location.hash).page as Page);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
   if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
 
   const body = {
     overview: <Overview />,
+    connections: <Connections />,
+    workloads: <ObservedWorkloads />,
     pods: <Workloads key="pod" kind="pod" />,
     vms: <Workloads key="vm" kind="vm" />,
     health: <Health />,

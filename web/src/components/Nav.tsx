@@ -2,6 +2,8 @@ import type { Theme } from '../theme';
 
 export type Page =
   | 'overview'
+  | 'connections'
+  | 'workloads'
   | 'pods'
   | 'vms'
   | 'health'
@@ -16,6 +18,8 @@ export type Page =
 
 const items: [Page, string][] = [
   ['overview', 'Overview'],
+  ['connections', 'Connections'],
+  ['workloads', 'Workloads'],
   ['pods', 'Pods'],
   ['vms', 'VMs'],
   ['health', 'Health'],

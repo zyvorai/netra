@@ -1475,3 +1475,39 @@ code {
   .insightrow code { grid-column: auto; }
   .recommendation summary { display: block; }
 }
+
+/* Investigation workspace: native telemetry, bounded tables, and evidence.
+   Reuses the app's existing .empty-state/.card/.toolbar/.warning patterns
+   rather than redefining them, so these new pages match the rest of the
+   app's look instead of introducing a second visual language. */
+.investigation { display: grid; gap: 22px; }
+.investigation-filters { display: flex; flex-wrap: wrap; gap: 14px; padding: 22px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 18px; }
+.investigation-filters label { display: grid; gap: 7px; font-size: 12px; color: var(--text-secondary); flex: 1 1 145px; }
+.investigation-filters input, .investigation-filters select { width: 100%; min-width: 0; }
+.investigation-filters .toolbar { flex-basis: 100%; }
+.operations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.operations-grid h2 { font-size: 36px; text-transform: capitalize; }
+.operations-grid h2 small { font-size: 14px; font-weight: 400; }
+.investigation-table { overflow-x: auto; }
+.investigation-table table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.investigation-table th { text-align: left; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; }
+.investigation-table td, .investigation-table th { padding: 16px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.investigation-table small, .attention-row small { display: block; color: var(--text-secondary); margin-top: 5px; }
+.investigation-table td { overflow-wrap: anywhere; }
+.outcome { display: inline-block; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.outcome.blocked { color: #b42318; }
+[data-theme="dark"] .outcome.blocked { color: #ff8b82; }
+.snapshot-time { font-size: 12px; color: var(--text-secondary); }
+.attention-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.workload-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+.workload-card { border: 1px solid var(--border); padding: 20px; border-radius: 14px; overflow-wrap: anywhere; }
+.connection-drawer { margin: 0 0 0 auto; height: 100dvh; max-height: 100dvh; width: min(620px, 100vw); max-width: 100vw; padding: 28px; border: 0; border-left: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); overflow-y: auto; }
+.connection-drawer::backdrop { background: rgba(0, 0, 0, .4); }
+.connection-drawer .toolbar { justify-content: space-between; }
+.connection-drawer p, .connection-drawer dd { overflow-wrap: anywhere; }
+.connection-tuple { font-family: ui-monospace, monospace; font-size: 14px; padding: 16px; background: var(--bg-elevated-2); border-radius: 12px; }
+.evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 24px 0; }
+.evidence-grid dt { font-size: 12px; color: var(--text-secondary); }
+.evidence-grid dd { margin: 4px 0 0; font-size: 14px; }
+.connection-drawer pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .operations-grid { grid-template-columns: 1fr; } .investigation .card { padding: 20px; } .connection-drawer { padding: 20px; } .evidence-grid { grid-template-columns: 1fr; } }
