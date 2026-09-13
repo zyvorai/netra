@@ -2,5 +2,7 @@
 /web/dist/
 *.tsbuildinfo
 /bin/
+/netractl
+/netrad
 *.o
 .DS_Store

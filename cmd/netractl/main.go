@@ -34,6 +34,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "explain":
+		err = explainCmd(os.Args[2:], os.Stdout)
 	case "status":
 		err = request("GET", "/api/v1/status", nil)
 	case "audit":
@@ -58,7 +60,8 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Println(`netractl status | audit
+	fmt.Println(`netractl explain --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
+  status | audit
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE
