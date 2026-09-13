@@ -31,6 +31,11 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 			resp.Summary.UDPPackets += u.Packets
 			resp.Summary.UDPBytes += u.Bytes
 		}
+		resp.QUIC = append(resp.QUIC, a.QUICObserved...)
+		for _, q := range a.QUICObserved {
+			resp.Summary.QUICObservedFlows++
+			resp.Summary.QUICLongHeaderPackets += q.LongHeaderPackets
+		}
 		for _, t := range a.TCPHealth {
 			connections := t.ActiveEstablished + t.PassiveEstablished
 			activeEstablished[t.CgroupID] += t.ActiveEstablished
@@ -83,6 +88,7 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 	sort.Slice(resp.TCP, func(i, j int) bool { return tcpScore(resp.TCP[i]) > tcpScore(resp.TCP[j]) })
 	sort.Slice(resp.DNS, func(i, j int) bool { return dnsScore(resp.DNS[i]) > dnsScore(resp.DNS[j]) })
 	sort.Slice(resp.UDP, func(i, j int) bool { return resp.UDP[i].Bytes > resp.UDP[j].Bytes })
+	sort.Slice(resp.QUIC, func(i, j int) bool { return resp.QUIC[i].LongHeaderPackets > resp.QUIC[j].LongHeaderPackets })
 	if len(resp.TCP) > topN {
 		resp.TCP = resp.TCP[:topN]
 	}
@@ -91,6 +97,9 @@ func Build(agents []models.AgentStatus, topN int) models.NetworkHealthResponse {
 	}
 	if len(resp.UDP) > topN {
 		resp.UDP = resp.UDP[:topN]
+	}
+	if len(resp.QUIC) > topN {
+		resp.QUIC = resp.QUIC[:topN]
 	}
 
 	resp.Summary.TopTCPProblems = append([]models.TCPHealthStat(nil), resp.TCP...)

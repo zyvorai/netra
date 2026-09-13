@@ -58,6 +58,15 @@ export default function Health() {
       <p>Cgroup-attributed UDP flow counters beyond DNS. No send-failure signal is tracked: no BPF hook Netra attaches can see a UDP send fail after the fact.</p>
     </section>
 
+    <section className="card span3">
+      <p className="eyebrow">QUIC OBSERVED</p>
+      <div className="metrics">
+        <div><b>{s.quicObservedFlows || 0}</b><span>UDP/443 flows</span></div>
+        <div><b>{s.quicLongHeaderPackets || 0}</b><span>long-header packets</span></div>
+      </div>
+      <p>A traffic-observation heuristic on UDP/443 packets matching RFC 9000's long-header wire form — <b>not SNI extraction</b>. Full QUIC SNI parsing is infeasible in BPF: RFC 9001 mandatorily applies header protection to Initial packets, requiring crypto helpers (HKDF-SHA256, AES-128/ChaCha20) that don't exist in BPF.</p>
+    </section>
+
     <DNSDiagnostics agents={agents} />
 
     {agents.some((a: any) => (a.missingMaps || []).length) && (
@@ -170,6 +179,24 @@ export default function Health() {
             <span>{u.remoteIp}:{u.remotePort}</span>
             <span>{u.packets}</span>
             <span>{u.bytes}</span>
+          </div>;
+        })}
+      </div>}
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">QUIC-OBSERVED FLOWS</p>
+      <h3>UDP/443 long-header packets by remote endpoint</h3>
+      {(data?.quic || []).length === 0 && <p className="empty-state">No QUIC-observed traffic yet.</p>}
+      {(data?.quic || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>LONG-HEADER</span><span>TOTAL UDP/443</span></div>
+        {(data?.quic || []).map((q:any, i:number) => {
+          const who = q.namespace ? `${q.namespace}/${q.pod}` : `cgroup ${q.cgroupId || 0}`;
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
+            <span>{q.remoteIp}:{q.remotePort}</span>
+            <span>{q.longHeaderPackets}</span>
+            <span>{q.packets}</span>
           </div>;
         })}
       </div>}

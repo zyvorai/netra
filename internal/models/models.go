@@ -264,6 +264,24 @@ type UDPFlowHealthStat struct {
 	WorkloadName string `json:"workloadName,omitempty"`
 }
 
+// QUICObservedStat is a traffic-observation counter, not SNI extraction: how
+// many UDP/443 packets for a cgroup+remote endpoint matched RFC 9000's
+// long-header wire form, out of how many UDP/443 packets were seen in
+// total. See docs/quic-observed.md for why SNI itself is not extracted.
+type QUICObservedStat struct {
+	CgroupID          uint64 `json:"cgroupId,omitempty"`
+	Family            string `json:"family"`
+	RemoteIP          string `json:"remoteIp"`
+	RemotePort        uint16 `json:"remotePort"`
+	Packets           uint64 `json:"packets"`
+	LongHeaderPackets uint64 `json:"longHeaderPackets"`
+	LastSeenNS        uint64 `json:"lastSeenNs"`
+	Namespace         string `json:"namespace,omitempty"`
+	Pod               string `json:"pod,omitempty"`
+	WorkloadKind      string `json:"workloadKind,omitempty"`
+	WorkloadName      string `json:"workloadName,omitempty"`
+}
+
 // BPFProgramStat is per-program attach + optional kernel run stats from the agent.
 type BPFProgramStat struct {
 	Name            string `json:"name"`
@@ -366,6 +384,8 @@ type NetworkHealthSummary struct {
 	UDPFlows                 uint64                 `json:"udpFlows"`
 	UDPPackets               uint64                 `json:"udpPackets"`
 	UDPBytes                 uint64                 `json:"udpBytes"`
+	QUICObservedFlows        uint64                 `json:"quicObservedFlows"`
+	QUICLongHeaderPackets    uint64                 `json:"quicLongHeaderPackets"`
 	HealthScore              int                    `json:"healthScore"`
 	TopTCPProblems           []TCPHealthStat        `json:"topTcpProblems"`
 	TopDNSProblems           []DNSHealthStat        `json:"topDnsProblems"`
@@ -378,6 +398,7 @@ type NetworkHealthResponse struct {
 	DNS     []DNSHealthStat      `json:"dns"`
 	Signals []TCPSignalStat      `json:"signals"`
 	UDP     []UDPFlowHealthStat  `json:"udp"`
+	QUIC    []QUICObservedStat   `json:"quic"`
 }
 
 type TCPPressureStat struct {
@@ -756,6 +777,7 @@ type AgentReport struct {
 	ShieldSources      []ShieldSourceStat      `json:"shieldSources,omitempty"`
 	InterfaceFlows     []InterfaceFlowStat     `json:"interfaceFlows,omitempty"`
 	UDPFlowHealth      []UDPFlowHealthStat     `json:"udpFlowHealth,omitempty"`
+	QUICObserved       []QUICObservedStat      `json:"quicObserved,omitempty"`
 	// ProcessMeta is /proc-derived process metadata for PIDs observed in
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to

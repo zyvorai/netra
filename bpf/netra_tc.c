@@ -480,6 +480,33 @@ struct {
     __type(value, struct udp_flow_value);
 } udp_flow_health SEC(".maps");
 
+// QUIC-observed: NOT SNI extraction. Full QUIC SNI parsing is infeasible in
+// BPF — RFC 9001 mandatorily applies header protection to Initial packets,
+// requiring HKDF-SHA256 + AES-128/ChaCha20, none of which exist as BPF
+// helpers. This instead counts UDP/443 packets whose first payload byte
+// matches RFC 9000's long-header form (top bit set, second-highest "fixed"
+// bit set) — a traffic-observation heuristic, not a parser. See
+// docs/quic-observed.md.
+struct quic_observed_key {
+    __u64 cgroup_id;
+    __u8 family;
+    __u8 pad[3];
+    __u8 remote_addr[16];
+    __u16 remote_port; // always 443 today; kept explicit for schema stability
+    __u16 pad2;
+};
+struct quic_observed_value {
+    __u64 packets;             // all UDP/443 packets observed for this cgroup+remote
+    __u64 long_header_packets; // subset matching the long-header heuristic
+    __u64 last_ns;
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct quic_observed_key);
+    __type(value, struct quic_observed_value);
+} quic_observed SEC(".maps");
+
 struct dns_pending_key {
     __u64 cgroup_id;
     __u8 family;
@@ -874,6 +901,8 @@ struct netra_pkt_scratch {
     struct iface_flow_key ifk;
     struct udp_flow_key ufk;
     struct udp_flow_value ufv;
+    struct quic_observed_key qok;
+    struct quic_observed_value qov;
     struct tls_meta_key tlsk;
     struct tls_meta_value tlsv;
     struct http_meta_key httpk;
@@ -1338,6 +1367,44 @@ static __always_inline void update_udp_flow_health(__u8 family, __u8 direction, 
     v->last_ns = bpf_ktime_get_ns();
 }
 
+// Only called for UDP/443 traffic from the same HOOK_CGROUP call site as
+// update_udp_flow_health, with the same real cgroup_id. See the
+// quic_observed_key/value comment above for why this counts long-header
+// packets rather than extracting SNI.
+static __always_inline void update_quic_observed(__u8 family, __u8 direction, __u16 sport, __u16 dport,
+                                                  const __u8 src[16], const __u8 dst[16],
+                                                  void *payload, void *data_end, __u64 cgroup_id)
+{
+    __u16 remote_port = direction == DIR_EGRESS ? dport : sport;
+    if (remote_port != __builtin_bswap16(443) || !cgroup_id || !payload) return;
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return;
+    __builtin_memset(&sc->qok, 0, sizeof(sc->qok));
+    sc->qok.cgroup_id = cgroup_id;
+    sc->qok.family = family;
+    const __u8 *remote = direction == DIR_EGRESS ? dst : src;
+    if (family == FAMILY_V4) {
+        __builtin_memcpy(sc->qok.remote_addr, remote, 4);
+    } else {
+        __builtin_memcpy(sc->qok.remote_addr, remote, 16);
+    }
+    sc->qok.remote_port = remote_port;
+    __builtin_memset(&sc->qov, 0, sizeof(sc->qov));
+    struct quic_observed_value *v = bpf_map_lookup_elem(&quic_observed, &sc->qok);
+    if (!v) {
+        bpf_map_update_elem(&quic_observed, &sc->qok, &sc->qov, BPF_NOEXIST);
+        v = bpf_map_lookup_elem(&quic_observed, &sc->qok);
+    }
+    if (!v) return;
+    __sync_fetch_and_add(&v->packets, 1);
+    unsigned char *p = payload;
+    if ((void *)(p + 1) <= data_end) {
+        __u8 byte0 = p[0];
+        if ((byte0 & 0x80) && (byte0 & 0x40)) __sync_fetch_and_add(&v->long_header_packets, 1);
+    }
+    v->last_ns = bpf_ktime_get_ns();
+}
+
 static __always_inline struct obs_event *new_event(__u8 family, __u8 direction, __u8 hook, __u8 proto,
                                                     __u8 action, __u8 type, __u8 reason)
 {
@@ -1659,6 +1726,7 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
     }
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
+    if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);
     if (direction==DIR_EGRESS) {
         sc->destk.dst_ip=daddr; sc->destk.dst_port=dport; sc->destk.protocol=proto; sc->destk.pad=0;
         __builtin_memset(&sc->destv, 0, sizeof(sc->destv));
@@ -1759,6 +1827,7 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
     if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,1,cgroup_id);
     update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
+    if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);
     if(blocked) {
         record_policy_drop(FAMILY_V6,proto,direction,reason,sport,dport,sc->src,sc->dst,len);
         submit_packet_event(FAMILY_V6,direction,hook,proto,ACT_BLOCK,EVT_BLOCK,reason,ifindex,len,sc->src,sc->dst,sport,dport,flags,0,0,cgroup_id);

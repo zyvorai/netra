@@ -85,6 +85,23 @@ struct udp_flow_value {
 };
 _Static_assert(sizeof(struct udp_flow_value) == 24, "udp_flow_value must stay 24 bytes to match internal/agent readUDPFlowHealth()'s [24]byte decode");
 
+struct quic_observed_key {
+    uint64_t cgroup_id;
+    uint8_t family;
+    uint8_t pad[3];
+    uint8_t remote_addr[16];
+    uint16_t remote_port;
+    uint16_t pad2;
+};
+_Static_assert(sizeof(struct quic_observed_key) == 32, "quic_observed_key must stay 32 bytes to match internal/agent readQUICObserved()'s [32]byte decode");
+
+struct quic_observed_value {
+    uint64_t packets;
+    uint64_t long_header_packets;
+    uint64_t last_ns;
+};
+_Static_assert(sizeof(struct quic_observed_value) == 24, "quic_observed_value must stay 24 bytes to match internal/agent readQUICObserved()'s [24]byte decode");
+
 struct ipv6_ext_key {
     uint8_t direction;
     uint8_t hook;

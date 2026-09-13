@@ -20,6 +20,13 @@ packet/byte counters for every other UDP flow — see
 `udpFlows`/`udpPackets`/`udpBytes` summary counters, and why no send-failure
 signal is tracked.
 
+## QUIC-observed traffic
+
+Netra also counts UDP/443 packets matching RFC 9000's long-header wire
+form — a handshake-attempt indicator, **not SNI extraction** (QUIC SNI
+parsing is not feasible in BPF; see
+[QUIC-observed traffic counter](quic-observed.md) for why).
+
 ## Health signals
 
 `GET /api/v1/ebpf/health`, `netractl ebpf health`, and the Network Health dashboard expose deterministic signals. These are operational thresholds, not machine learning or root-cause claims:

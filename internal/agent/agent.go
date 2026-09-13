@@ -151,7 +151,7 @@ var mapNames = []string{
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "allowed_uids", "allowed_comms", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
-	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health",
+	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health", "quic_observed",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -533,6 +533,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	quicObserved, err := a.readQUICObserved()
+	if err != nil {
+		return err
+	}
 	stack := a.readNodeStack()
 	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
 	histJSON := models.NetworkHistogramReport{
@@ -562,7 +566,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
-		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, ProcessMeta: processMeta,
+		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
@@ -1321,6 +1325,58 @@ func (a *Agent) readUDPFlowHealth() ([]models.UDPFlowHealthStat, error) {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Bytes > out[j].Bytes })
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+// Key layout: cgroup_id[0:8], family[8], pad[9:12], remote_addr[12:28],
+// remote_port[28:30], pad2[30:32] — see quic_observed_key in bpf/netra_tc.c
+// and its _Static_assert-guarded mirror in bpf/tests/abi_layout_test.c.
+func decodeQUICObserved(k [32]byte, v [24]byte) models.QUICObservedStat {
+	family := k[8]
+	remoteIP := ""
+	if family == 4 {
+		remoteIP = net.IP(k[12:16]).String()
+	}
+	if family == 6 {
+		remoteIP = net.IP(k[12:28]).String()
+	}
+	return models.QUICObservedStat{
+		CgroupID: native.Uint64(k[0:8]), Family: familyName(family), RemoteIP: remoteIP,
+		RemotePort: native.Uint16(k[28:30]),
+		Packets: native.Uint64(v[0:8]), LongHeaderPackets: native.Uint64(v[8:16]), LastSeenNS: native.Uint64(v[16:24]),
+	}
+}
+
+func (a *Agent) enrichQUICObserved(st *models.QUICObservedStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
+
+func (a *Agent) readQUICObserved() ([]models.QUICObservedStat, error) {
+	m := a.collection.Maps["quic_observed"]
+	if m == nil {
+		return nil, fmt.Errorf("quic_observed unavailable")
+	}
+	it := m.Iterate()
+	var k [32]byte
+	var v [24]byte
+	out := make([]models.QUICObservedStat, 0, 256)
+	for it.Next(&k, &v) {
+		st := decodeQUICObserved(k, v)
+		a.enrichQUICObserved(&st)
+		out = append(out, st)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LongHeaderPackets > out[j].LongHeaderPackets })
 	if len(out) > 1000 {
 		out = out[:1000]
 	}
