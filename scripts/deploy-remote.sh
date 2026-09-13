@@ -170,21 +170,21 @@ build_image() {
       echo "podman or working docker required to build controller image" >&2
       exit 1
     fi
-    \$runtime build -f Dockerfile.runtime -t ghcr.io/zyvorai/netra:0.27.8 .
+    \$runtime build -f Dockerfile.runtime -t ghcr.io/zyvorai/netra:0.27.9 .
     return 0
   fi
   if [[ -z "\$runtime" ]]; then
     echo "podman or working docker required to build controller image" >&2
     exit 1
   fi
-  \$runtime build -t ghcr.io/zyvorai/netra:0.27.8 .
+  \$runtime build -t ghcr.io/zyvorai/netra:0.27.9 .
 }
 
 import_image() {
   if command -v podman >/dev/null 2>&1; then
-    podman save ghcr.io/zyvorai/netra:0.27.8 | sudo k3s ctr images import -
+    podman save ghcr.io/zyvorai/netra:0.27.9 | sudo k3s ctr images import -
   else
-    docker save ghcr.io/zyvorai/netra:0.27.8 | sudo k3s ctr images import -
+    docker save ghcr.io/zyvorai/netra:0.27.9 | sudo k3s ctr images import -
   fi
 }
 
@@ -205,14 +205,14 @@ build_agent_image() {
     exit 1
   fi
   echo "Building netra-agent (Go binary + BPF object) via Dockerfile.agent..."
-  \$runtime build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.8 .
+  \$runtime build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.9 .
 }
 
 import_agent_image() {
   if command -v podman >/dev/null 2>&1; then
-    podman save ghcr.io/zyvorai/netra-agent:0.27.8 | sudo k3s ctr images import -
+    podman save ghcr.io/zyvorai/netra-agent:0.27.9 | sudo k3s ctr images import -
   else
-    docker save ghcr.io/zyvorai/netra-agent:0.27.8 | sudo k3s ctr images import -
+    docker save ghcr.io/zyvorai/netra-agent:0.27.9 | sudo k3s ctr images import -
   fi
 }
 
@@ -232,7 +232,7 @@ fi
 
 AGENT_SET=(--set agent.enabled=false)
 if [[ "\$AGENT_ENABLED" == "true" ]]; then
-  AGENT_SET=(--set agent.enabled=true --set agentImage.repository=ghcr.io/zyvorai/netra-agent --set agentImage.tag=0.27.8)
+  AGENT_SET=(--set agent.enabled=true --set agentImage.repository=ghcr.io/zyvorai/netra-agent --set agentImage.tag=0.27.9)
 fi
 
 CONSOLE_SET=(--set workloadConsole.enabled=false)
@@ -255,7 +255,7 @@ helm upgrade --install netra ./helm/netra \
   "\${CONSOLE_SET[@]}" \
   "\${IFACE_SET[@]}" \
   --set image.repository=ghcr.io/zyvorai/netra \
-  --set image.tag=0.27.8 \
+  --set image.tag=0.27.9 \
   --set image.pullPolicy=IfNotPresent \
   --set hubble.address=hubble-relay.kube-system.svc:80 \
   --set service.type=NodePort \
@@ -265,7 +265,7 @@ helm upgrade --install netra ./helm/netra \
   --set hubble.enabled=true \
   --wait --timeout 300s
 
-# image.tag is a fixed value ("0.27.8"), not a per-build digest/tag, so the
+# image.tag is a fixed value ("0.27.9"), not a per-build digest/tag, so the
 # Deployment's pod template never actually changes between runs even though
 # the image content underneath that tag does (a fresh image was just built
 # and imported above). With imagePullPolicy=IfNotPresent, Kubernetes has no

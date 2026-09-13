@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import AskNetra from '../components/AskNetra';
 import { useCountUp } from '../hooks/useCountUp';
 
 function Metric({ value, label }: { value: number | string; label: string }) {
@@ -56,6 +57,7 @@ export default function Overview() {
 
   return (
     <div className="grid">
+      <AskNetra />
       <section className="card span2">
         <p className="eyebrow">NETRA DATAPATH</p>
         <h3>Independent by default.</h3>

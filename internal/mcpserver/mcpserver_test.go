@@ -271,3 +271,31 @@ func TestPromptsListAndGet(t *testing.T) {
 		t.Fatalf("expected substitution, got %s", got.Result)
 	}
 }
+
+func TestResourcesListAndRead(t *testing.T) {
+	srv := New("s", "v")
+	if err := srv.RegisterResource(Resource{
+		URI:      "netra://ai/brief",
+		Name:     "brief",
+		MimeType: "application/json",
+		Read:     func(context.Context) (string, error) { return `{"ok":true}`, nil },
+	}); err != nil {
+		t.Fatalf("register resource: %v", err)
+	}
+	list := serveOne(t, srv, `{"jsonrpc":"2.0","id":1,"method":"resources/list"}`)
+	if list.Error != nil {
+		t.Fatalf("list error: %+v", list.Error)
+	}
+	if !strings.Contains(string(list.Result), "netra://ai/brief") {
+		t.Fatalf("list=%s", list.Result)
+	}
+	got := serveOne(t, srv, `{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"netra://ai/brief"}}`)
+	if got.Error != nil {
+		t.Fatalf("read error: %+v", got.Error)
+	}
+	// got.Result is the raw JSON-RPC result; the resource's own JSON body
+	// lives inside its "text" string field, so its quotes are escaped here.
+	if !strings.Contains(string(got.Result), `\"ok\":true`) {
+		t.Fatalf("read=%s", got.Result)
+	}
+}

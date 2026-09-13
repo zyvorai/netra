@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zyvorai/netra/internal/ai"
@@ -55,6 +56,66 @@ func (s *Server) aiAsk(w http.ResponseWriter, r *http.Request) {
 	// compatibility and is not a hard switch.
 	_ = req.PreferLLM
 	writeJSON(w, 200, ai.Answer(r.Context(), snap, req.Question, ai.ProviderFromEnv()))
+}
+
+func (s *Server) aiDraft(w http.ResponseWriter, r *http.Request) {
+	var req ai.AskRequest
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, "unable to read request body")
+		return
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			errorJSON(w, 400, "invalid JSON body")
+			return
+		}
+	}
+	if strings.TrimSpace(req.Question) == "" {
+		errorJSON(w, 400, "question is required")
+		return
+	}
+	writeJSON(w, 200, ai.DraftRule(req.Question))
+}
+
+func (s *Server) aiDigest(w http.ResponseWriter, r *http.Request) {
+	snap, err := s.aiSnapshot(r)
+	if err != nil {
+		errorJSON(w, 503, err.Error())
+		return
+	}
+	writeJSON(w, 200, ai.BuildDigest(ai.BuildBrief(snap)))
+}
+
+func (s *Server) aiSuggestions(w http.ResponseWriter, r *http.Request) {
+	snap, err := s.aiSnapshot(r)
+	if err != nil {
+		errorJSON(w, 503, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": ai.Suggestions(snap)})
+}
+
+func (s *Server) aiExplain(w http.ResponseWriter, r *http.Request) {
+	var req ai.ExplainRequest
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, "unable to read request body")
+		return
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			errorJSON(w, 400, "invalid JSON body")
+			return
+		}
+	}
+	snap, err := s.aiSnapshot(r)
+	if err != nil {
+		errorJSON(w, 503, err.Error())
+		return
+	}
+	q := ai.ExplainQuestion(req)
+	writeJSON(w, 200, ai.Answer(r.Context(), snap, q, ai.ProviderFromEnv()))
 }
 
 func (s *Server) aiSnapshot(r *http.Request) (ai.Snapshot, error) {

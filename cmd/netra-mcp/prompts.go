@@ -27,6 +27,25 @@ func registerPrompts(srv *mcpserver.Server) error {
 			}},
 		},
 		{
+			Name:        "netra_draft_rule",
+			Description: "Turn a deny/rate sentence into a preview rule. Never apply it.",
+			Arguments: []mcpserver.PromptArg{
+				{Name: "request", Description: "Operator sentence, e.g. deny dns malware.example", Required: true},
+			},
+			Messages: []mcpserver.PromptMessage{{
+				Role: "user",
+				Text: "Draft a Netra emergency rule for: {{request}}. Call netra_ai_draft first. If understood=false, ask a clarifying question. Do not call any mutating tool. Show the CLI and warnings verbatim. Remind the operator that enforce is lease-bounded.",
+			}},
+		},
+		{
+			Name:        "netra_oncall_digest",
+			Description: "Produce the current on-call digest and say whether the incident fingerprint changed.",
+			Messages: []mcpserver.PromptMessage{{
+				Role: "user",
+				Text: "Call netra_ai_digest. Quote the card. If changed=true, say the fingerprint moved and summarize what that usually means (mode, health bucket, or finding-kind shift — not packet-counter chatter). Stay read-only.",
+			}},
+		},
+		{
 			Name:        "netra_policy_review",
 			Description: "Review insight-generated policy drafts. Never apply them.",
 			Arguments: []mcpserver.PromptArg{

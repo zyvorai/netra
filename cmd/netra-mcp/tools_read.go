@@ -271,6 +271,35 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			bodyFields: true,
 		},
 		{
+			name: "netra_ai_draft", method: "POST", path: "/api/v1/ai/draft",
+			description: "Parse a natural-language deny/rate request into a preview eBPF rule. Never applies. Review the body/CLI then use a mutating tool only if the operator explicitly wants it.",
+			schema:      objSchema(map[string]any{"question": strProp("e.g. \"deny dns malware.example\" or \"rate limit 1.2.3.4 to 100 pps\".")}, "question"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ai_digest", method: "GET", path: "/api/v1/ai/digest",
+			description: "On-call digest: severity, incident fingerprint, copy-paste card. Fingerprint stays stable while only raw counters chatter.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ai_suggestions", method: "GET", path: "/api/v1/ai/suggestions",
+			description: "Live follow-up questions derived from the current snapshot (stale agents, DNS, exposure, lease).",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ai_explain", method: "POST", path: "/api/v1/ai/explain",
+			description: "Narrate one structured finding (kind/subject/message/page) against the live snapshot. Read-only.",
+			schema: objSchema(map[string]any{
+				"kind":     strProp("Finding kind, e.g. dns-failure or kfree_skb."),
+				"subject":  strProp("Workload or node subject."),
+				"message":  strProp("Original finding text."),
+				"severity": strProp("info|warning|critical."),
+				"page":     strProp("Dashboard page the finding came from: health, drops, insights."),
+				"question": strProp("Optional override question."),
+			}),
+			bodyFields: true,
+		},
+		{
 			name: "netra_insights_remediations", method: "GET", path: "/api/v1/insights/remediations",
 			description: "Proposed remediations combining exposure and drift findings. Always requires human review before applying (reviewRequired is always true, autoApply always false in the result).",
 			schema: objSchema(map[string]any{

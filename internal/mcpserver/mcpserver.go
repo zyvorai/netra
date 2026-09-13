@@ -64,20 +64,31 @@ type PromptMessage struct {
 	Text string
 }
 
+// Resource is a readable MCP resource. URI is the stable identifier
+// clients pass to resources/read.
+type Resource struct {
+	URI         string
+	Name        string
+	Description string
+	MimeType    string
+	Read        func(ctx context.Context) (string, error)
+}
+
 // Server holds a registered set of tools and serves them over the MCP
 // stdio transport.
 type Server struct {
 	name, version string
 
-	mu      sync.RWMutex
-	tools   map[string]Tool
-	prompts map[string]Prompt
+	mu        sync.RWMutex
+	tools     map[string]Tool
+	prompts   map[string]Prompt
+	resources map[string]Resource
 }
 
 // New returns an empty Server. name/version are reported to clients in
 // the initialize response's serverInfo.
 func New(name, version string) *Server {
-	return &Server{name: name, version: version, tools: map[string]Tool{}, prompts: map[string]Prompt{}}
+	return &Server{name: name, version: version, tools: map[string]Tool{}, prompts: map[string]Prompt{}, resources: map[string]Resource{}}
 }
 
 // Register adds a tool. It returns an error if a tool with the same
@@ -101,6 +112,17 @@ func (s *Server) RegisterPrompt(p Prompt) error {
 		return fmt.Errorf("mcpserver: prompt %q already registered", p.Name)
 	}
 	s.prompts[p.Name] = p
+	return nil
+}
+
+// RegisterResource adds a readable resource. Duplicate URIs are rejected.
+func (s *Server) RegisterResource(r Resource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.resources[r.URI]; exists {
+		return fmt.Errorf("mcpserver: resource %q already registered", r.URI)
+	}
+	s.resources[r.URI] = r
 	return nil
 }
 
@@ -170,7 +192,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte, w io.Writer, write
 	case "initialize":
 		s.respond(w, writeMu, msg, map[string]any{
 			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": s.name, "version": s.version},
 		}, nil)
 
@@ -179,6 +201,15 @@ func (s *Server) handleLine(ctx context.Context, line []byte, w io.Writer, write
 
 	case "tools/list":
 		s.respond(w, writeMu, msg, map[string]any{"tools": s.toolDescriptors()}, nil)
+
+	case "resources/list":
+		s.respond(w, writeMu, msg, map[string]any{"resources": s.resourceDescriptors()}, nil)
+
+	case "resources/read":
+		if isNotification {
+			return
+		}
+		s.handleResourcesRead(ctx, w, writeMu, msg)
 
 	case "prompts/list":
 		s.respond(w, writeMu, msg, map[string]any{"prompts": s.promptDescriptors()}, nil)
@@ -306,6 +337,64 @@ func (s *Server) promptDescriptors() []map[string]any {
 			"name":        p.Name,
 			"description": p.Description,
 			"arguments":   args,
+		})
+	}
+	return out
+}
+
+func (s *Server) handleResourcesRead(ctx context.Context, w io.Writer, writeMu *sync.Mutex, msg rpcMessage) {
+	var params struct {
+		URI string `json:"uri"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.respond(w, writeMu, msg, nil, &rpcError{Code: codeInvalidParams, Message: "invalid params: " + err.Error()})
+		return
+	}
+	s.mu.RLock()
+	res, ok := s.resources[params.URI]
+	s.mu.RUnlock()
+	if !ok {
+		s.respond(w, writeMu, msg, nil, &rpcError{Code: codeInvalidParams, Message: "unknown resource: " + params.URI})
+		return
+	}
+	text := ""
+	if res.Read != nil {
+		out, err := res.Read(ctx)
+		if err != nil {
+			s.respond(w, writeMu, msg, toolCallResult(err.Error(), true), nil)
+			return
+		}
+		text = out
+	}
+	mime := res.MimeType
+	if mime == "" {
+		mime = "text/plain"
+	}
+	s.respond(w, writeMu, msg, map[string]any{
+		"contents": []map[string]any{{
+			"uri":      res.URI,
+			"mimeType": mime,
+			"text":     text,
+		}},
+	}, nil)
+}
+
+func (s *Server) resourceDescriptors() []map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	uris := make([]string, 0, len(s.resources))
+	for uri := range s.resources {
+		uris = append(uris, uri)
+	}
+	sort.Strings(uris)
+	out := make([]map[string]any, 0, len(uris))
+	for _, uri := range uris {
+		r := s.resources[uri]
+		out = append(out, map[string]any{
+			"uri":         r.URI,
+			"name":        r.Name,
+			"description": r.Description,
+			"mimeType":    r.MimeType,
 		})
 	}
 	return out

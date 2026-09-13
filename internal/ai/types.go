@@ -69,6 +69,7 @@ type Brief struct {
 	Engine      string    `json:"engine"` // heuristic | llm
 	Model       string    `json:"model,omitempty"`
 	Question    string    `json:"question,omitempty"`
+	Fingerprint string    `json:"fingerprint,omitempty"`
 	GeneratedAt time.Time `json:"generatedAt"`
 	Snapshot    Snapshot  `json:"snapshot"`
 }

@@ -31,12 +31,16 @@ specialist tools (`netra_ebpf_diagnose`, `netra_insights_recommendations`,
 
 ## HTTP API
 
-All three routes require the same bearer token as the rest of `/api/v1`.
+All routes require the same bearer token as the rest of `/api/v1`.
 
 ```http
 GET  /api/v1/ai/status
 GET  /api/v1/ai/brief
+GET  /api/v1/ai/digest
+GET  /api/v1/ai/suggestions
 POST /api/v1/ai/ask
+POST /api/v1/ai/draft
+POST /api/v1/ai/explain
 Content-Type: application/json
 
 {"question":"why is DNS failing in kube-system?","namespace":"kube-system"}
@@ -52,11 +56,41 @@ exposure / mode / brief), specialises the heuristic answer, then — if a
 provider is configured — asks the model to rewrite the summary. Provider
 failures fall back to the heuristic brief instead of 5xx.
 
+`GET /api/v1/ai/digest` is the on-call card: severity, a 12-hex
+**incident fingerprint**, and copy-paste text. The fingerprint covers
+mode, health-score bucket, stale-agent flag, and finding kinds — not
+raw packet counters — so two operators can tell whether they are looking
+at the same incident cluster after counters have moved.
+
+`POST /api/v1/ai/draft` turns "deny dns malware.example" / "rate limit
+1.2.3.4 to 100 pps" into a preview of the existing eBPF API body and the
+matching `netractl` line. It never applies the rule.
+
+`POST /api/v1/ai/explain` narrates one structured finding (kind /
+subject / message / page) against the live snapshot.
+
+## Dashboard
+
+The Overview page hosts a read-only **Ask Netra** card
+(`web/src/components/AskNetra.tsx`).
+
+- Loads `GET /api/v1/ai/brief` on mount
+- Submits `POST /api/v1/ai/ask` from the question box or a suggestion chip
+- Shows severity, headline, findings, and next steps
+- Surfaces whether the controller is heuristic-only or has an LLM rewrite configured
+- Contains no enforce / apply / rule-edit controls
+- Loads live suggestion chips from `/api/v1/ai/suggestions`
+- If the question looks like deny/rate, shows a rule preview (never an Apply button)
+- Copy on-call card + incident fingerprint from `/api/v1/ai/digest`
+
 ## CLI
 
 ```bash
 netractl ai status
 netractl ai brief
+netractl ai digest
+netractl ai draft deny dns malware.example
+netractl ai explain dns-failure high SERVFAIL ratio
 netractl ai ask why are we dropping packets in kube-system?
 ```
 

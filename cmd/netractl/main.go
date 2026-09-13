@@ -101,30 +101,47 @@ func usage() {
   insights baseline show | capture | clear
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
   insights rate-baseline show | capture [window] | clear
-  ai status | brief | ask QUESTION...`)
+  ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
 
 func aiCmd() error {
 	if len(os.Args) < 3 {
-		return fmt.Errorf("ai status|brief|ask QUESTION...")
+		return fmt.Errorf("ai status|brief|digest|suggestions|ask|draft|explain")
 	}
 	switch os.Args[2] {
 	case "status":
 		return request("GET", "/api/v1/ai/status", nil)
 	case "brief":
 		return request("GET", "/api/v1/ai/brief", nil)
-	case "ask":
+	case "digest":
+		return request("GET", "/api/v1/ai/digest", nil)
+	case "suggestions":
+		return request("GET", "/api/v1/ai/suggestions", nil)
+	case "ask", "draft":
 		if len(os.Args) < 4 {
-			return fmt.Errorf("ai ask QUESTION...")
+			return fmt.Errorf("ai %s QUESTION...", os.Args[2])
 		}
 		q := strings.Join(os.Args[3:], " ")
 		b, err := json.Marshal(map[string]any{"question": q})
 		if err != nil {
 			return err
 		}
-		return request("POST", "/api/v1/ai/ask", b)
+		return request("POST", "/api/v1/ai/"+os.Args[2], b)
+	case "explain":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("ai explain KIND [MESSAGE...]")
+		}
+		body := map[string]any{"kind": os.Args[3]}
+		if len(os.Args) > 4 {
+			body["message"] = strings.Join(os.Args[4:], " ")
+		}
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		return request("POST", "/api/v1/ai/explain", b)
 	default:
-		return fmt.Errorf("ai status|brief|ask QUESTION...")
+		return fmt.Errorf("ai status|brief|digest|suggestions|ask|draft|explain")
 	}
 }
 func policy() error {

@@ -1617,3 +1617,52 @@ code {
 .evidence-grid dd { margin: 4px 0 0; font-size: 14px; }
 .connection-drawer pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .operations-grid { grid-template-columns: 1fr; } .investigation .card { padding: 20px; } .connection-drawer { padding: 20px; } .evidence-grid { grid-template-columns: 1fr; } }
+
+.ask-netra-form { margin-top: 16px; align-items: end; }
+.ask-netra-field { flex: 1; min-width: 220px; }
+.ask-netra-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ask-chip {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated-2);
+  color: var(--text-primary);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  font-size: 13px;
+  min-height: 36px;
+  line-height: 1.25;
+}
+.ask-chip:hover { background: var(--hover-fill); }
+.ask-chip:disabled { opacity: 0.55; }
+.ask-netra-meta {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.ask-netra-engine {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.ask-netra-answer { margin-top: 16px; }
+.ask-netra-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+.ask-netra-list li { margin: 6px 0; }
+.ask-netra-draft {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ask-netra-draft code {
+  font-size: 13px;
+  background: var(--bg-elevated-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+}

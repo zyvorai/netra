@@ -26,7 +26,7 @@ func BuildBrief(snap Snapshot) Brief {
 	if len(next) == 0 {
 		next = defaultNextSteps(snap, sev)
 	}
-	return Brief{
+	b := Brief{
 		Headline:    headline,
 		Severity:    sev,
 		Summary:     summary,
@@ -36,6 +36,8 @@ func BuildBrief(snap Snapshot) Brief {
 		GeneratedAt: snap.GeneratedAt,
 		Snapshot:    snap,
 	}
+	b.Fingerprint = Fingerprint(snap, sev)
+	return b
 }
 
 func collectFindings(snap Snapshot) []Finding {

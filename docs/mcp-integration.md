@@ -139,9 +139,22 @@ Every tool call returns an MCP `tools/call` result of the form:
 |---|---|---|
 | `netra_triage` | — | Start with `netra_ai_brief`, stay read-only |
 | `netra_explain_drops` | `namespace`, `pod` (optional) | Combine `netra_ai_ask` with drop/diagnose tools |
+| `netra_draft_rule` | `request` **(required)** | Turn a deny/rate sentence into a preview rule via `netra_ai_draft`; never applies |
+| `netra_oncall_digest` | — | Produce the on-call card via `netra_ai_digest`; report whether the incident fingerprint changed |
 | `netra_policy_review` | `namespace`, `workload` (optional) | Review drafts; forbids apply / mode changes |
 
 See `docs/ai.md` for the controller-side brief/ask engines those prompts lean on.
+
+## Resources
+
+`netra-mcp` also advertises MCP resources (`resources/list`, `resources/read`) — read-only, URI-addressed snapshots a client can fetch without a tool call. Each resource's `Read` callback calls the same controller endpoint a matching tool would.
+
+| URI | Endpoint | Notes |
+|---|---|---|
+| `netra://ai/brief` | `GET /api/v1/ai/brief` | Live heuristic brief |
+| `netra://ai/digest` | `GET /api/v1/ai/digest` | On-call card + incident fingerprint |
+| `netra://ai/suggestions` | `GET /api/v1/ai/suggestions` | Snapshot-derived follow-up questions |
+| `netra://status` | `GET /api/v1/status` | Controller status |
 
 ## Complete tool reference
 
@@ -154,6 +167,10 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ai_status` | `GET /api/v1/ai/status` | — | Whether the optional LLM rewrite path is configured. Heuristic briefs always work |
 | `netra_ai_brief` | `GET /api/v1/ai/brief` | — | Deterministic cluster brief from live aggregates. Read-only, no payloads |
 | `netra_ai_ask` | `POST /api/v1/ai/ask` | `question` **(required)**, `namespace`, `preferLlm` | Natural-language question over the same snapshot. Optional LLM rewrite lives on the controller (`NETRA_AI_API_KEY`), not in `netra-mcp` |
+| `netra_ai_draft` | `POST /api/v1/ai/draft` | `question` **(required)** | Parses a deny/rate sentence into a preview eBPF rule (body + `netractl` line). Never applies it |
+| `netra_ai_digest` | `GET /api/v1/ai/digest` | — | On-call card: severity, incident fingerprint, copy-paste text. Fingerprint is stable across counter chatter |
+| `netra_ai_suggestions` | `GET /api/v1/ai/suggestions` | — | Live follow-up questions derived from the current snapshot |
+| `netra_ai_explain` | `POST /api/v1/ai/explain` | `kind`, `subject`, `message`, `severity`, `page`, `question` (all optional) | Narrates one structured page finding against the live snapshot |
 | `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |
 | `netra_agents` | `GET /api/v1/agents` | — | One entry per reporting node agent |
 | `netra_audit` | `GET /api/v1/audit` | `limit` (1-500, default 100) | Every mutating action recorded by the controller, including this MCP server's own |
