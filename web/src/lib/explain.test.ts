@@ -178,3 +178,52 @@ describe('node ICMP explanation', () => {
     expect(buildExplainReport(agents, parsed.scope, new Date(now.getTime() + 121_000)).findingsTotal).toBe(0);
   });
 });
+
+describe('bpf-maps-missing explanation', () => {
+  const now = new Date('2026-09-13T00:00:00Z');
+  const agents: ExplainAgentStatus[] = [{ node: 'n', stale: false, observedAt: now.toISOString(), missingMaps: ['allowed_ports', 'rate_v6'] }];
+  it('includes node observations without assigning a workload', () => {
+    const parsed = parseExplainScope(scope({ node: 'n' }));
+    if ('error' in parsed) throw new Error(parsed.error);
+    const r = buildExplainReport(agents, parsed.scope, now);
+    expect(r.findingsTotal).toBe(1);
+    expect(r.findings[0].kind).toBe('bpf-maps-missing');
+    expect(r.findings[0].evidence).toContain('allowed_ports');
+    expect(r.findings[0].pod).toBeUndefined();
+  });
+  it('excludes unrelated scope and stale reports', () => {
+    for (const selector of [{ node: 'other' }, { namespace: 'ns' }, { pod: 'ns/p' }, { node: 'n', pid: '1' }, { container: 'id' }, { destination: '192.0.2.1' }, { dns: 'example.com' }]) {
+      const parsed = parseExplainScope(scope(selector));
+      if ('error' in parsed) throw new Error(parsed.error);
+      expect(buildExplainReport(agents, parsed.scope, now).findingsTotal).toBe(0);
+    }
+  });
+});
+
+describe('rate-drop explanation', () => {
+  const now = new Date('2026-09-13T00:00:00Z');
+  const agents: ExplainAgentStatus[] = [{ node: 'n', stale: false, observedAt: now.toISOString(), rateDrops: [{ name: '203.0.113.5', count: 42 }] }];
+  it('matches node-wide and destination scope', () => {
+    const parsed = parseExplainScope(scope({ node: 'n' }));
+    if ('error' in parsed) throw new Error(parsed.error);
+    const r = buildExplainReport(agents, parsed.scope, now);
+    expect(r.findingsTotal).toBe(1);
+    expect(r.findings[0].kind).toBe('rate-drop');
+    expect(r.findings[0].evidence).toContain('203.0.113.5');
+
+    const dst = parseExplainScope(scope({ destination: '203.0.113.5' }));
+    if ('error' in dst) throw new Error(dst.error);
+    expect(buildExplainReport(agents, dst.scope, now).findingsTotal).toBe(1);
+
+    const other = parseExplainScope(scope({ destination: '198.51.100.9' }));
+    if ('error' in other) throw new Error(other.error);
+    expect(buildExplainReport(agents, other.scope, now).findingsTotal).toBe(0);
+  });
+  it('excludes identity scope', () => {
+    for (const selector of [{ node: 'other' }, { namespace: 'ns' }, { pod: 'ns/p' }, { node: 'n', pid: '1' }, { container: 'id' }, { dns: 'example.com' }]) {
+      const parsed = parseExplainScope(scope(selector));
+      if ('error' in parsed) throw new Error(parsed.error);
+      expect(buildExplainReport(agents, parsed.scope, now).findingsTotal).toBe(0);
+    }
+  });
+});

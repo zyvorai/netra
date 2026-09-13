@@ -68,6 +68,24 @@ the kernel and can be enabled independently.
   workload-scoped enforcement already uses. `action` is `allow` or `deny`.
   Exact peer IPv4 only in this release; CIDR-shaped peers and IPv6 are
   explicit follow-ups.
+
+  **No UID/process-name allow-exceptions — deliberately deferred, different
+  hook family, not just unfinished work.** The flat global engine's
+  `allowed_uids`/`allowed_comms` exceptions are checked in `socket4`/`socket6`
+  (`cgroup/connect4|connect6|sendmsg4|sendmsg6`, `bpf_sock_addr` hooks) at
+  socket-creation time — the only point `bpf_get_current_uid_gid()`/
+  `bpf_get_current_comm()` are valid, which is also why the project caches
+  identity into `socket_owner` at connect time instead of re-deriving it
+  later. `netpol_rules4` is instead looked up from `cgroup_skb/egress|ingress`
+  on an already-built `__sk_buff`, where ingress traffic in particular has no
+  reliable process-identity context. Adding UID/comm selectors to `NetPolRule`
+  therefore isn't a field addition to the existing map/lookup; it would need
+  a second, parallel per-workload table consulted from the socket hooks
+  instead, plus its own API/CLI/MCP surface and evaluation-order slot
+  alongside the existing flat allow/deny checks. Port-only allow-exceptions
+  (peer-agnostic — `Port`/`Protocol` already exist on `NetPolRule`, a
+  wildcard `peerIpv4` would suffice) don't have this hook-family mismatch and
+  remain a smaller, separate candidate if picked up later.
 - CLI: `netractl ebpf netpol rule add --peer IP --action allow|deny
   [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME]
   [--label k=v] [--port N] [--protocol P] [--direction D]`, `netractl ebpf

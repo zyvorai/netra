@@ -56,7 +56,10 @@ export default function Health() {
         <h3>Agent maps missing</h3>
         <p className="warning">Rebuild and roll the agent image so allow/rate/icmp maps exist. Until then those controls fail open.</p>
         {agents.filter((a: any) => (a.missingMaps || []).length).map((a: any) => (
-          <div className="agent wide" key={a.node}><b>{a.node}</b><small>{(a.missingMaps || []).join(', ')}</small></div>
+          <div className="agent wide" key={a.node}>
+            <b>{a.node}</b><small>{(a.missingMaps || []).join(', ')}</small>
+            <ExplainFinding page="health" kind="bpf-maps-missing" subject={a.node} message={(a.missingMaps || []).join(', ')} />
+          </div>
         ))}
       </section>
     )}
@@ -66,7 +69,10 @@ export default function Health() {
       <div className="list">
         {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No destination has been rate-dropped yet.</p>}
         {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
-          <div className="agent wide" key={i}><b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small></div>
+          <div className="agent wide" key={i}>
+            <b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small>
+            <ExplainFinding page="health" kind="rate-drop" subject={c.name} message={`${c.count} dropped at ${c.node}`} />
+          </div>
         ))}
       </div>
     </section>

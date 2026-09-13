@@ -29,6 +29,8 @@ Live requests reuse `NETRA_URL`, `NETRA_API_KEY`, and the CLI TLS configuration.
 - `icmp-pmtu`, `icmp-unreachable`, `icmp-time-exceeded`, `icmp-parameter-problem`: node/interface-scoped TC error observations and next checks. These appear only for node-wide or `--all` scope; see [ICMP diagnostics](icmp-diagnostics.md).
 - `dns-response`, `dns-response-error`: matched native UDP/53 response code, resolver, query, and code-specific next check; see [DNS response diagnostics](dns-response-diagnostics.md).
 - `dns-counters`: observed query, matched-response, and failure counters. Unmatched queries must not be interpreted as confirmed timeouts.
+- `bpf-maps-missing`: an agent's BPF object is missing one or more expected pinned maps — allow/rate/ICMP controls fail open until the agent image is rebuilt and rolled. Node-wide or `--all` scope only.
+- `rate-drop`: a destination's PPS ceiling has cumulative dropped packets since the map was created. Available at node-wide/`--all` scope and, unlike ICMP/`bpf-maps-missing`, also when scoped with `--destination`.
 
 Each finding includes a next investigation step. Text output escapes dynamic metadata before displaying it in the terminal; JSON output uses schema version 1 and preserves typed fields. `evidence-found` only means there are matching findings, not that the connection is healthy or unhealthy. Successful diagnosis returns exit code 0 even when no evidence matches; argument, input, and transport errors return 1. Consumers should inspect the report fields.
 
@@ -37,6 +39,8 @@ Each finding includes a next investigation step. Text output escapes dynamic met
 Selectors combine with AND. Pod scope requires `namespace/name` or `--namespace`. PID scope requires `--node`, because PIDs repeat across hosts. Event PIDs can refer to an earlier process incarnation; TCP rows with stale ownership are excluded from PID queries. `--container` requires an exact reported container ID. For local Docker names, use the separate `--docker` discovery path below.
 
 `--destination` accepts a literal IP, optionally with a port, and compares packet destinations for events or remote peers for TCP counters. It performs no DNS lookup. `--dns` matches a normalized observed query name and may be combined with node/namespace/pod scope. It cannot be combined with PID, container, or destination scope: the existing DNS counters lack those identities, and DNS-to-IP/TCP correlation is not available.
+
+`bpf-maps-missing` and `rate-drop` are node-level agent-health signals, not workload-scoped evidence: they appear only under node-wide/`--all` scope (any namespace/pod/PID/container/`--dns` selector excludes them), except `rate-drop`, which additionally matches `--destination` since a rate-drop row already identifies a destination IP.
 
 Freshness uses each agent's `observedAt` plus its `stale` flag. Reports are excluded if they are marked stale, lack node/time, exceed `--max-age` (default 2m, maximum 24h), or are more than one minute in the future. For a saved report, choose a larger age bound explicitly when needed. Event timestamps may be older than the report timestamp and are displayed as reported. TCP/DNS counters are cumulative, not restricted to a time window.
 

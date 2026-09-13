@@ -47,6 +47,58 @@ func TestDraftRuleAllowException(t *testing.T) {
 	}
 }
 
+func TestDraftRuleAllowCIDR(t *testing.T) {
+	d := DraftRule("allow 10.0.0.0/24 egress")
+	if !d.Understood || d.Kind != "cidr-allow" || d.ApplyPath != "/api/v1/ebpf/allow-cidr" || d.Body["cidr"] != "10.0.0.0/24" {
+		t.Fatalf("%+v", d)
+	}
+	deny := DraftRule("deny 10.0.0.0/8 ingress")
+	if deny.Kind != "cidr" {
+		t.Fatalf("deny regressed: %+v", deny)
+	}
+}
+
+func TestDraftRuleAllowPort(t *testing.T) {
+	d := DraftRule("allow port 443")
+	if !d.Understood || d.Kind != "port-allow" || d.ApplyPath != "/api/v1/ebpf/allow-port" || d.Body["port"] != uint16(443) {
+		t.Fatalf("%+v", d)
+	}
+	udp := DraftRule("allow udp port 53")
+	if !udp.Understood || udp.Kind != "port-allow" || udp.Body["protocol"] != "UDP" {
+		t.Fatalf("%+v", udp)
+	}
+	deny := DraftRule("deny port 445")
+	if deny.Kind != "port" || deny.ApplyPath != "/api/v1/ebpf/port" {
+		t.Fatalf("deny regressed: %+v", deny)
+	}
+}
+
+func TestDraftRuleAllowUID(t *testing.T) {
+	d := DraftRule("except uid 1000")
+	if !d.Understood || d.Kind != "uid-allow" || d.ApplyPath != "/api/v1/ebpf/allow-uid" || d.Body["uid"] != uint32(1000) {
+		t.Fatalf("%+v", d)
+	}
+	root := DraftRule("allow uid 0")
+	if !root.Understood || root.Kind != "uid-allow" || root.Confidence != "medium" {
+		t.Fatalf("root=%+v", root)
+	}
+	deny := DraftRule("deny uid 1000")
+	if deny.Kind != "uid" {
+		t.Fatalf("deny regressed: %+v", deny)
+	}
+}
+
+func TestDraftRuleAllowProcess(t *testing.T) {
+	d := DraftRule("allow process coredns")
+	if !d.Understood || d.Kind != "process-allow" || d.ApplyPath != "/api/v1/ebpf/allow-process" || d.Body["name"] != "coredns" {
+		t.Fatalf("%+v", d)
+	}
+	deny := DraftRule("deny process curl")
+	if deny.Kind != "process" || deny.Body["name"] != "curl" {
+		t.Fatalf("deny regressed: %+v", deny)
+	}
+}
+
 func TestDraftRuleIPv6(t *testing.T) {
 	deny := DraftRule("deny 2001:db8::1")
 	if !deny.Understood || deny.Kind != "ip" || deny.Body["ip"] != "2001:db8::1" {

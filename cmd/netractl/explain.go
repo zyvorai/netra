@@ -83,13 +83,15 @@ type explainDNS struct {
 	Failures  uint64 `json:"failures"`
 }
 type explainAgent struct {
-	ICMP       []explainICMP  `json:"icmpErrors"`
-	Node       string         `json:"node"`
-	Stale      bool           `json:"stale"`
-	ObservedAt time.Time      `json:"observedAt"`
-	Events     []explainEvent `json:"events"`
-	TCP        []explainTCP   `json:"tcpHealth"`
-	DNS        []explainDNS   `json:"dnsHealth"`
+	ICMP        []explainICMP       `json:"icmpErrors"`
+	MissingMaps []string            `json:"missingMaps"`
+	RateDrops   []explainNamedCount `json:"rateDrops"`
+	Node        string              `json:"node"`
+	Stale       bool                `json:"stale"`
+	ObservedAt  time.Time           `json:"observedAt"`
+	Events      []explainEvent      `json:"events"`
+	TCP         []explainTCP        `json:"tcpHealth"`
+	DNS         []explainDNS        `json:"dnsHealth"`
 }
 type explainFinding struct {
 	Kind      string `json:"kind"`
@@ -289,6 +291,8 @@ func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explai
 		"A passed/observed event does not prove end-to-end delivery. Events lack a stable historical winning rule ID and policy generation.",
 		"ICMP errors are cumulative TC observations by node/interface/direction; one packet may be seen at multiple interfaces. No workload or quoted-flow attribution is inferred. Missing ICMP data can mean an older agent, unattached TC hooks, or no observed errors. Fragmented ICMP errors are excluded.",
 		"DNS response findings use reported matched UDP/53 events and the four-bit base-header RCODE only. EDNS extended errors, answer records, TCP DNS, DoH, and DoT are not inferred. Event latency is the reported query-response interval, not resolver execution time.",
+		"bpf-maps-missing reports an agent's BPF object load state, not a specific dropped connection; it appears only at node-wide or --all scope.",
+		"Rate-drop findings are cumulative PPS-ceiling drop counters by destination IP since the map was created; they do not identify which flows or ports were affected.",
 		"No active probes, DNS resolution, policy changes, or packet payload collection are performed.",
 	}}
 	if o.dockerDetails != nil {
@@ -328,6 +332,19 @@ func buildExplain(agents []explainAgent, o explainOptions, now time.Time) explai
 			for _, e := range a.ICMP {
 				kind, evidence, next := icmpFinding(e)
 				if kind != "" {
+					add(kind, a.Node, explainIdentity{}, evidence, next)
+				}
+			}
+			if kind, evidence, next := bpfMapsMissingFinding(a.MissingMaps); kind != "" {
+				add(kind, a.Node, explainIdentity{}, evidence, next)
+			}
+		}
+		if o.includesRateDrops() {
+			for _, d := range a.RateDrops {
+				if !o.destination(d.Name, 0) {
+					continue
+				}
+				if kind, evidence, next := rateDropFinding(d); kind != "" {
 					add(kind, a.Node, explainIdentity{}, evidence, next)
 				}
 			}

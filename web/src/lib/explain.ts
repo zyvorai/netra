@@ -1,5 +1,6 @@
 import { dnsResponseFinding, type DNSResponseEvent } from './dns';
 import { icmpFinding, type ICMPError } from './icmp';
+import { bpfMapsMissingFinding, rateDropFinding, type NamedCount } from './bpfhealth';
 
 // Client-side port of cmd/netractl/explain.go's parseExplain/buildExplain,
 // so the web dashboard can offer the same passive, read-only connection
@@ -185,6 +186,8 @@ export type ExplainTCP = ExplainIdentity & {
 export type ExplainDNS = { namespace?: string; pod?: string; name: string; queries: number; responses: number; failures: number };
 export type ExplainAgentStatus = {
   icmpErrors?: ICMPError[];
+  missingMaps?: string[];
+  rateDrops?: NamedCount[];
   node: string;
   stale: boolean;
   observedAt: string;
@@ -228,6 +231,8 @@ export function buildExplainReport(agents: ExplainAgentStatus[], o: NormalizedSc
   const limitations: string[] = [
     'ICMP errors are cumulative TC observations by node/interface/direction; one packet may be seen at multiple interfaces. No workload or quoted-flow attribution is inferred. Missing ICMP data can mean an older agent, unattached TC hooks, or no observed errors. Fragmented ICMP errors are excluded.',
     'DNS response findings use reported matched UDP/53 events and the four-bit base-header RCODE only. EDNS extended errors, answer records, TCP DNS, DoH, and DoT are not inferred. Event latency is the reported query-response interval, not resolver execution time.',
+    'bpf-maps-missing reports an agent\'s BPF object load state, not a specific dropped connection; it appears only at node-wide or all-node scope.',
+    'Rate-drop findings are cumulative PPS-ceiling drop counters by destination IP since the map was created; they do not identify which flows or ports were affected.',
     'Evidence is sampled or aggregated from agent reports; missing evidence does not prove no traffic or a healthy connection.',
     'TCP/DNS counters are cumulative snapshots, not measurements for a selected time window. Event timestamps are agent observation times.',
     'A passed/observed event does not prove end-to-end delivery. Events lack a stable historical winning rule ID and policy generation.',
@@ -260,6 +265,15 @@ export function buildExplainReport(agents: ExplainAgentStatus[], o: NormalizedSc
     if (!o.namespace && !o.pod && !o.pid && !o.container && !o.destination && !o.dns) {
       for (const e of a.icmpErrors || []) {
         const f = icmpFinding(e);
+        if (f) add(f.kind, a.node, {}, f.evidence, f.nextCheck);
+      }
+      const missing = bpfMapsMissingFinding(a.missingMaps);
+      if (missing) add(missing.kind, a.node, {}, missing.evidence, missing.nextCheck);
+    }
+    if (!o.namespace && !o.pod && !o.pid && !o.container && !o.dns) {
+      for (const d of a.rateDrops || []) {
+        if (!destinationMatches(o, d.name, 0)) continue;
+        const f = rateDropFinding(d);
         if (f) add(f.kind, a.node, {}, f.evidence, f.nextCheck);
       }
     }

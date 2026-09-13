@@ -69,6 +69,18 @@ func DraftRule(question string) RuleDraft {
 
 	if m := reCIDR.FindString(q); m != "" {
 		if p, err := netip.ParsePrefix(m); err == nil {
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "cidr-allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow-cidr"
+				out.Body = map[string]any{"cidr": p.String(), "direction": dir}
+				out.CLI = "netractl ebpf allow-cidr add " + p.String() + " " + dir
+				out.Summary = "CIDR allow-exception " + p.String() + " (" + dir + ")"
+				out.Warnings = append(out.Warnings, "Allow is evaluated before deny/CIDR/port/rate. It does not itself enable enforce mode.")
+				return out
+			}
 			out.Understood = true
 			out.Confidence = "high"
 			out.Kind = "cidr"
@@ -82,6 +94,18 @@ func DraftRule(question string) RuleDraft {
 	}
 	if m := reCIDR6.FindString(q); m != "" {
 		if p, err := netip.ParsePrefix(m); err == nil {
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "cidr-allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow-cidr"
+				out.Body = map[string]any{"cidr": p.String(), "direction": dir}
+				out.CLI = "netractl ebpf allow-cidr add " + p.String() + " " + dir
+				out.Summary = "CIDR allow-exception " + p.String() + " (" + dir + ")"
+				out.Warnings = append(out.Warnings, "Allow is evaluated before deny/CIDR/port/rate. It does not itself enable enforce mode.")
+				return out
+			}
 			out.Understood = true
 			out.Confidence = "high"
 			out.Kind = "cidr"
@@ -177,6 +201,22 @@ func DraftRule(question string) RuleDraft {
 			} else if strings.Contains(ql, "tcp") {
 				proto = "TCP"
 			}
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "port-allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow-port"
+				out.Body = map[string]any{"protocol": proto, "port": uint16(port), "direction": dir}
+				out.CLI = "netractl ebpf allow-port add " + proto + " " + m[1] + " " + dir
+				out.Summary = proto + "/" + m[1] + " allow-exception (" + dir + ")"
+				out.Warnings = append(out.Warnings, "Allow is evaluated before deny/CIDR/port/rate. It does not itself enable enforce mode.")
+				if proto == "ANY" {
+					out.Warnings = append(out.Warnings, "Protocol was not named; drafted as ANY.")
+					out.Confidence = "medium"
+				}
+				return out
+			}
 			out.Understood = true
 			out.Confidence = "high"
 			out.Kind = "port"
@@ -203,6 +243,22 @@ func DraftRule(question string) RuleDraft {
 	if m := reUID.FindStringSubmatch(q); len(m) == 2 {
 		uid, err := strconv.ParseUint(m[1], 10, 32)
 		if err == nil {
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "uid-allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow-uid"
+				out.Body = map[string]any{"uid": uint32(uid)}
+				out.CLI = "netractl ebpf allow-uid add " + m[1]
+				out.Summary = "UID allow-exception " + m[1] + " on new sockets"
+				out.Warnings = append(out.Warnings, "Allow is evaluated before UID/comm deny at the socket hook. It does not itself enable enforce mode.")
+				if uid == 0 {
+					out.Warnings = append(out.Warnings, "UID 0 is root — confirm this is the intended blast radius.")
+					out.Confidence = "medium"
+				}
+				return out
+			}
 			out.Understood = true
 			out.Confidence = "high"
 			out.Kind = "uid"
@@ -221,12 +277,24 @@ func DraftRule(question string) RuleDraft {
 
 	if m := reProc.FindStringSubmatch(q); len(m) == 2 {
 		comm := m[1]
+		if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+			out.Understood = true
+			out.Confidence = "medium"
+			out.Kind = "process-allow"
+			out.ApplyMethod = "POST"
+			out.ApplyPath = "/api/v1/ebpf/allow-process"
+			out.Body = map[string]any{"name": comm}
+			out.CLI = "netractl ebpf allow-process add " + comm
+			out.Summary = "Process comm allow-exception " + comm
+			out.Warnings = append(out.Warnings, "comm is a 16-byte kernel name, not a full path.", "Allow is evaluated before UID/comm deny at the socket hook. It does not itself enable enforce mode.")
+			return out
+		}
 		out.Understood = true
 		out.Confidence = "medium"
 		out.Kind = "process"
 		out.ApplyMethod = "POST"
 		out.ApplyPath = "/api/v1/ebpf/process"
-		out.Body = map[string]any{"comm": comm}
+		out.Body = map[string]any{"name": comm}
 		out.CLI = "netractl ebpf process add " + comm
 		out.Summary = "Process comm deny " + comm
 		out.Warnings = append(out.Warnings, "comm is a 16-byte kernel name, not a full path.")

@@ -22,8 +22,10 @@ For ordinary UDP/53 only, Netra correlates DNS transaction IDs between egress qu
 - >= 5 resets and >= 2% reset ratio over >= 100 TCP packets: warning.
 - DNS failures >= 10% over >= 5 responses: warning.
 - DNS average latency >= 200 ms or maximum >= 1 s: warning.
+- Any agent reporting `missingMaps` (its BPF object is missing an expected pinned map — allow/rate/ICMP controls fail open until it is rebuilt and rolled): warning.
+- Any destination with a nonzero `rateDrops` count (its PPS ceiling has actually fired): warning.
 
-Use the exact counters as evidence and correlate with application/runtime data before declaring root cause.
+Use the exact counters as evidence and correlate with application/runtime data before declaring root cause. `missingMaps`/`rateDrops` findings are also available via `netractl explain`/the web Explain page as `bpf-maps-missing`/`rate-drop`, in addition to the raw dashboard cards — see [Explain](explain.md).
 
 ## Privacy and limits
 
