@@ -1675,3 +1675,15 @@ code {
   border-radius: var(--radius-base);
   background: var(--bg-elevated-2);
 }
+.digest-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated-2);
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.digest-chip.warning { border-color: var(--accent-amber); }
+.digest-chip.critical { border-color: var(--danger); color: var(--danger); }
+.digest-chip.changed { font-weight: 600; }

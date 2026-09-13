@@ -83,6 +83,10 @@ The Overview page hosts a read-only **Ask Netra** card
 - If the question looks like deny/rate, shows a rule preview (never an Apply button)
 - Copy on-call card + incident fingerprint from `/api/v1/ai/digest`
 
+The nav bar (`web/src/components/DigestChip.tsx`) shows a small severity/fingerprint chip, polling `GET /api/v1/ai/digest` every 30s while any page is open; clicking it jumps to Overview. Because the dashboard now polls this endpoint continuously, it's an active participant in the shared "last fingerprint" state described above alongside the alert poller and any interactive CLI/MCP calls.
+
+Every **Explain** popover (`web/src/components/ExplainFinding.tsx`, on Health/Drops/Path/Insights/Explain findings) can additionally try to draft a rule from that finding: it regex-extracts an IP, CIDR, or DNS/SNI name from the finding's kind/subject/message and, if found, offers a "Draft rule from this" button that calls `POST /api/v1/ai/draft` — same preview-only endpoint the Ask Netra card and `netractl ai draft` use, never applies anything.
+
 ## CLI
 
 ```bash

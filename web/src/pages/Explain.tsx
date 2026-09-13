@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import ExplainFinding from '../components/ExplainFinding';
 import {
   buildExplainReport,
   emptyExplainScope,
@@ -120,6 +121,12 @@ export default function Explain() {
                   </summary>
                   <p>{f.evidence}</p>
                   <p>Next: {f.nextCheck}</p>
+                  <ExplainFinding
+                    page="explain"
+                    kind={f.kind}
+                    subject={`${f.namespace || ''}/${f.pod || ''}@${f.node || ''}`}
+                    message={f.evidence}
+                  />
                 </details>
               ))}
             </div>

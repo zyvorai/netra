@@ -1,4 +1,5 @@
 import type { Theme } from '../theme';
+import DigestChip from './DigestChip';
 
 export type Page =
   | 'overview'
@@ -69,6 +70,7 @@ export default function Nav({
           ))}
         </div>
         <div className="nav-actions">
+          <DigestChip onOpen={() => setPage('overview')} />
           <button type="button" className="theme-toggle" onClick={onLogout} aria-label="Log out" title="Log out">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
               <path d="M15 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8" strokeLinecap="round" strokeLinejoin="round" />

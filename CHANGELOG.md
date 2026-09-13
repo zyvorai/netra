@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.12 — 2026-09-13
+
+- **Rounded out the AI layer's dashboard reach** (0.27.11) with a fifth external PR kit continuing the same feature — same recurring pattern (explain-deletion hunk rejected, this project's already-more-complete docs kept over the kit's stale copies).
+  - **Nav digest chip** (`web/src/components/DigestChip.tsx`, new): a small severity/fingerprint pill in the nav bar, polling `GET /api/v1/ai/digest` every 30s while any page is open, jumping to Overview on click. Since it's always mounted once logged in, it's now a third continuous participant (alongside the webhook alert poller and any interactive callers) in the digest's shared, in-process "last fingerprint" state documented in 0.27.10 — extended that doc note to say so explicitly.
+  - **Draft-from-finding**: every Explain popover (`ExplainFinding.tsx`) can now regex-extract an IP, CIDR, or DNS/SNI name from the finding it's showing and offer a "Draft rule from this" button — calls the same preview-only `POST /api/v1/ai/draft` the Ask Netra card already uses, never applies anything.
+  - **Extended per-finding Explain to this project's own Explain page** (0.27.7's `netractl explain`-equivalent connection diagnostics): each raw-evidence finding there now also gets an Explain button that asks the AI layer to narrate it — a deliberate, additive pairing of "raw agent-report evidence" (existing) with "AI narration of that evidence" (new), not a rewrite of the page.
+  - Fixed two hardcoded hex colors (`#d97706`, `#dc2626`) in the kit's own new `.digest-chip.warning`/`.digest-chip.critical` CSS that would have rendered identically in light and dark mode, bypassing this app's token system entirely — swapped for the existing `--accent-amber`/`--danger` tokens (and `999px` for the existing `--radius-pill` token) before merging, consistent with every other rule in this file.
+  - Verified: `go build/vet/test ./...`, `helm lint`, web typecheck/test (56/56, including new `DigestChip.test.ts`/`ExplainFinding.test.ts`)/build.
+- Version bumped to 0.27.12 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.11 — 2026-09-13
 
 - **Extended the AI digest and Explain-button reach** (0.27.10) with a fourth external PR kit continuing the same feature — same recurring pattern once more (full loose-file snapshot, `explain` command deletion in `cmd/netractl/main.go` rejected, this project's already-more-complete `docs/ai.md`/`docs/mcp-integration.md`/`README.md`/`CHANGELOG.md` kept over the kit's stale copies), plus one packaging slip: the kit's real edit to `docs/alerting.md` landed as a stray, misnamed `alerting.md` at the repo root instead of `docs/alerting.md` — used its content at the correct path rather than creating the stray file.
