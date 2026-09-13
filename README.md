@@ -98,8 +98,11 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - IPv4/IPv6 CIDR deny for ingress, egress or both using BPF LPM tries.
 - IPv4/IPv6 CIDR allow-exception for ingress, egress or both — same precedence as the exact-IP allow-exception.
 - TCP/UDP/ANY destination-port deny for ingress, egress or both.
+- TCP/UDP/ANY destination-port allow-exception for ingress, egress or both — same precedence as the exact-IP allow-exception.
 - Linux UID deny for new socket operations.
+- Linux UID allow-exception for new socket operations — skips UID/comm deny at the socket hook.
 - Linux process-`comm` deny for new socket operations.
+- Linux process-`comm` allow-exception for new socket operations — skips UID/comm deny at the socket hook.
 - Exact cleartext DNS-name deny for UDP/53 queries.
 - Exact TLS SNI deny when an ordinary ClientHello SNI is successfully parsed in the current egress skb.
 - Exact IPv4/IPv6 destination PPS ceiling using a simple fixed one-second window.
