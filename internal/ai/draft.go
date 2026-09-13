@@ -28,6 +28,7 @@ type RuleDraft struct {
 var (
 	reIPv4   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	reCIDR   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}\b`)
+	reCIDR6  = regexp.MustCompile(`\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}/\d{1,3}\b`)
 	reIPv6   = regexp.MustCompile(`\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b`)
 	rePort   = regexp.MustCompile(`(?i)\bport\s+(\d{1,5})\b`)
 	rePPS    = regexp.MustCompile(`(?i)\b(\d{1,9})\s*(?:pps|pkt/s|packets?/s(?:ec)?)\b`)
@@ -79,6 +80,19 @@ func DraftRule(question string) RuleDraft {
 			return out
 		}
 	}
+	if m := reCIDR6.FindString(q); m != "" {
+		if p, err := netip.ParsePrefix(m); err == nil {
+			out.Understood = true
+			out.Confidence = "high"
+			out.Kind = "cidr"
+			out.ApplyMethod = "POST"
+			out.ApplyPath = "/api/v1/ebpf/cidr"
+			out.Body = map[string]any{"cidr": p.String(), "direction": dir}
+			out.CLI = "netractl ebpf cidr add " + p.String() + " " + dir
+			out.Summary = "CIDR deny " + p.String() + " (" + dir + ")"
+			return out
+		}
+	}
 
 	if m := reIPv4.FindString(q); m != "" {
 		if addr, err := netip.ParseAddr(m); err == nil && addr.Is4() {
@@ -103,6 +117,43 @@ func DraftRule(question string) RuleDraft {
 				out.Body = map[string]any{"destination": addr.String(), "pps": pps}
 				out.CLI = "netractl ebpf rate set " + addr.String() + " " + strconv.FormatUint(uint64(pps), 10)
 				out.Summary = "IPv4 destination PPS ceiling " + addr.String() + " @ " + strconv.FormatUint(uint64(pps), 10)
+				return out
+			}
+			out.Understood = true
+			out.Confidence = "high"
+			out.Kind = "ip"
+			out.ApplyMethod = "POST"
+			out.ApplyPath = "/api/v1/ebpf/deny"
+			out.Body = map[string]any{"ip": addr.String()}
+			out.CLI = "netractl ebpf deny add " + addr.String()
+			out.Summary = "Exact IP deny " + addr.String()
+			return out
+		}
+	}
+
+	if m := reIPv6.FindString(q); m != "" {
+		if addr, err := netip.ParseAddr(m); err == nil && addr.Is6() {
+			if containsAny(ql, "allow", "except", "whitelist", "exception") && !containsAny(ql, "deny", "block") {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "allow"
+				out.ApplyMethod = "POST"
+				out.ApplyPath = "/api/v1/ebpf/allow"
+				out.Body = map[string]any{"ip": addr.String()}
+				out.CLI = "netractl ebpf allow add " + addr.String()
+				out.Summary = "Exact IP allow-exception " + addr.String()
+				out.Warnings = append(out.Warnings, "Allow is evaluated before deny/rate. It does not itself enable enforce mode.")
+				return out
+			}
+			if pps := parsePPS(ql); pps > 0 {
+				out.Understood = true
+				out.Confidence = "high"
+				out.Kind = "rate"
+				out.ApplyMethod = "PUT"
+				out.ApplyPath = "/api/v1/ebpf/rate"
+				out.Body = map[string]any{"destination": addr.String(), "pps": pps}
+				out.CLI = "netractl ebpf rate set " + addr.String() + " " + strconv.FormatUint(uint64(pps), 10)
+				out.Summary = "IPv6 destination PPS ceiling " + addr.String() + " @ " + strconv.FormatUint(uint64(pps), 10)
 				return out
 			}
 			out.Understood = true

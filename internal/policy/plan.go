@@ -63,6 +63,14 @@ func AnalyzeChange(current, candidate []byte) (ChangePlan, error) {
 		Name:                next.Metadata.Name,
 		Risk:                "low",
 		ProposedEgressRules: egressCount(nextRules),
+		// Non-nil so the JSON response always carries "[]" rather than "null" —
+		// a nil slice here previously crashed the dashboard's Policies page
+		// (Preflight on a brand-new policy left RemovedDestinations nil, and
+		// the frontend unconditionally reads .length on these fields).
+		Changes:             []string{},
+		Warnings:            []string{},
+		AddedDestinations:   []string{},
+		RemovedDestinations: []string{},
 	}
 	if len(nextRules) == 0 {
 		plan.Warnings = append(plan.Warnings, "policy contains neither spec nor specs; Kubernetes dry-run is expected to reject or normalize it")

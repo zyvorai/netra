@@ -47,6 +47,25 @@ func TestDraftRuleAllowException(t *testing.T) {
 	}
 }
 
+func TestDraftRuleIPv6(t *testing.T) {
+	deny := DraftRule("deny 2001:db8::1")
+	if !deny.Understood || deny.Kind != "ip" || deny.Body["ip"] != "2001:db8::1" {
+		t.Fatalf("deny=%+v", deny)
+	}
+	allow := DraftRule("allow 2001:db8::55")
+	if !allow.Understood || allow.Kind != "allow" || allow.ApplyPath != "/api/v1/ebpf/allow" || allow.Body["ip"] != "2001:db8::55" {
+		t.Fatalf("allow=%+v", allow)
+	}
+	rate := DraftRule("rate limit 2001:db8::99 to 500 pps")
+	if !rate.Understood || rate.Kind != "rate" || rate.Body["destination"] != "2001:db8::99" {
+		t.Fatalf("rate=%+v", rate)
+	}
+	cidr := DraftRule("block 2001:db8::/32 ingress")
+	if !cidr.Understood || cidr.Kind != "cidr" || cidr.Body["cidr"] != "2001:db8::/32" {
+		t.Fatalf("cidr=%+v", cidr)
+	}
+}
+
 func TestDraftRuleRefusesDiagnostics(t *testing.T) {
 	d := DraftRule("why is DNS failing?")
 	if d.Understood {

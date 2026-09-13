@@ -272,10 +272,10 @@ export default function Policies() {
         {plan && (
           <>
             <div className={`risk risk-${plan.plan.risk.toLowerCase()}`}><b>{plan.plan.risk.toUpperCase()}</b><span>{plan.dryRun.passed ? 'Kubernetes dry-run passed' : 'Kubernetes dry-run failed'}</span></div>
-            {plan.plan.changes.map((x) => <p key={x}>• {x}</p>)}
-            {plan.plan.warnings.map((x) => <p className="warning" key={x}>{x}</p>)}
-            {plan.plan.addedDestinations.length > 0 && <p><b>Added:</b> {plan.plan.addedDestinations.join(', ')}</p>}
-            {plan.plan.removedDestinations.length > 0 && <p><b>Removed:</b> {plan.plan.removedDestinations.join(', ')}</p>}
+            {(plan.plan.changes || []).map((x) => <p key={x}>• {x}</p>)}
+            {(plan.plan.warnings || []).map((x) => <p className="warning" key={x}>{x}</p>)}
+            {(plan.plan.addedDestinations || []).length > 0 && <p><b>Added:</b> {plan.plan.addedDestinations.join(', ')}</p>}
+            {(plan.plan.removedDestinations || []).length > 0 && <p><b>Removed:</b> {plan.plan.removedDestinations.join(', ')}</p>}
             {plan.receipt && <p><b>Apply receipt:</b> expires {new Date(plan.receipt.expiresAt).toLocaleTimeString()}</p>}
             {plan.dryRun.error && <p className="warning">{plan.dryRun.error}</p>}
           </>
