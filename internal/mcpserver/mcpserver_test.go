@@ -239,3 +239,35 @@ func mustRegister(t *testing.T, srv *Server, tool Tool) {
 		t.Fatalf("register %s: %v", tool.Name, err)
 	}
 }
+
+func TestPromptsListAndGet(t *testing.T) {
+	srv := New("s", "v")
+	if err := srv.RegisterPrompt(Prompt{
+		Name:        "netra_triage",
+		Description: "triage",
+		Arguments:   []PromptArg{{Name: "namespace", Description: "ns", Required: false}},
+		Messages:    []PromptMessage{{Role: "user", Text: "Look at {{namespace}}"}},
+	}); err != nil {
+		t.Fatalf("register prompt: %v", err)
+	}
+	list := serveOne(t, srv, `{"jsonrpc":"2.0","id":1,"method":"prompts/list"}`)
+	if list.Error != nil {
+		t.Fatalf("list error: %+v", list.Error)
+	}
+	var listed struct {
+		Prompts []struct{ Name string `json:"name"` } `json:"prompts"`
+	}
+	if err := json.Unmarshal(list.Result, &listed); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if len(listed.Prompts) != 1 || listed.Prompts[0].Name != "netra_triage" {
+		t.Fatalf("prompts=%+v", listed.Prompts)
+	}
+	got := serveOne(t, srv, `{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"netra_triage","arguments":{"namespace":"prod"}}}`)
+	if got.Error != nil {
+		t.Fatalf("get error: %+v", got.Error)
+	}
+	if !strings.Contains(string(got.Result), "prod") {
+		t.Fatalf("expected substitution, got %s", got.Result)
+	}
+}

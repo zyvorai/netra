@@ -42,6 +42,9 @@ func buildServer(c *client, allowMutations bool) (*mcpserver.Server, error) {
 	if err := registerReadTools(srv, c); err != nil {
 		return nil, err
 	}
+	if err := registerPrompts(srv); err != nil {
+		return nil, err
+	}
 	if allowMutations {
 		if err := registerMutateTools(srv, c); err != nil {
 			return nil, err

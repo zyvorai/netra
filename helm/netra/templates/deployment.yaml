@@ -124,6 +124,22 @@ spec:
             secretKeyRef:
               name: {{ include "netra.authSecretName" . }}
               key: agent-key
+        {{- if .Values.ai.enabled }}
+        - name: NETRA_AI_BASE_URL
+          value: {{ .Values.ai.baseURL | quote }}
+        - name: NETRA_AI_MODEL
+          value: {{ .Values.ai.model | quote }}
+        {{- if .Values.ai.existingSecret }}
+        - name: NETRA_AI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.ai.existingSecret | quote }}
+              key: api-key
+        {{- else if .Values.ai.apiKey }}
+        - name: NETRA_AI_API_KEY
+          value: {{ .Values.ai.apiKey | quote }}
+        {{- end }}
+        {{- end }}
         resources: {{- toYaml .Values.resources | nindent 10 }}
         {{- if or .Values.tls.enabled .Values.persistence.enabled }}
         volumeMounts:

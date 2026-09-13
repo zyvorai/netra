@@ -251,6 +251,26 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"window"},
 		},
 		{
+			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
+			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ai_brief", method: "GET", path: "/api/v1/ai/brief",
+			description: "Deterministic cluster network brief built from live agent/health/insights aggregates. No packet payloads. Read-only.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ai_ask", method: "POST", path: "/api/v1/ai/ask",
+			description: "Ask a natural-language question about the current Netra snapshot. Answers from aggregates only. Optional LLM rewrite when NETRA_AI_API_KEY is set on the controller. Never mutates.",
+			schema: objSchema(map[string]any{
+				"question":  strProp("Operator question, e.g. \"why is DNS failing in kube-system?\"."),
+				"namespace": strProp("Optional namespace hint included in the answer context."),
+				"preferLlm": map[string]any{"type": "boolean", "description": "Hint only; the controller uses the configured provider when a key is set."},
+			}, "question"),
+			bodyFields: true,
+		},
+		{
 			name: "netra_insights_remediations", method: "GET", path: "/api/v1/insights/remediations",
 			description: "Proposed remediations combining exposure and drift findings. Always requires human review before applying (reviewRequired is always true, autoApply always false in the result).",
 			schema: objSchema(map[string]any{

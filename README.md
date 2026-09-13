@@ -86,7 +86,8 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Prometheus control-plane/aggregate metrics at `/metrics`.
 - Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). See `docs/alerting.md`.
 - Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
-- `netra-mcp`, a Model Context Protocol server exposing the controller API as ~62 stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. ~34 read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, policy list/history/build/lockdown-preview) are always available; ~28 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as ~62 stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. ~34 read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, AI brief/ask, policy list/history/build/lockdown-preview) are always available; ~28 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Also advertises three MCP prompt templates (`prompts/list`/`prompts/get`) for canned triage/drops/policy-review workflows. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`.
+- Built-in AI briefs: `GET /api/v1/ai/brief` and `POST /api/v1/ai/ask` turn live agent/health/insights aggregates into an operator brief, heuristic by default (no vendor SDK, no extra process) with an optional OpenAI-compatible rewrite when `NETRA_AI_API_KEY` is set on the controller. Read-only — never flips enforce mode or applies policy; the snapshot it can see contains only aggregates and short findings, never payloads, argv, or secrets. See `docs/ai.md`.
 - Cgroup-side TLS SNI / cleartext HTTP / DNS query-name observability runs in its own dedicated eBPF program (`NETRA_L7=auto|off|required`, attach-with-fallback), isolated from the conntrack/NetworkPolicy-deny program's verifier budget so the two can evolve independently. See `docs/l7-metadata.md`.
 - IPv6 extension-header and fragmentation diagnostics (`docs/ipv6-diagnostics.md`), per-interface flow attribution for TC/TCX-attached NICs (`docs/interface-flow-attribution.md`), and XDP Shield per-class/per-source breakdowns (`docs/tcx-and-shield.md`) — all additive counters over data the eBPF datapath already computed internally.
 
@@ -217,7 +218,8 @@ cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
-cmd/netra-mcp/          MCP server: controller API as stdio tools for AI agents
+cmd/netra-mcp/          MCP server: controller API as stdio tools + prompts for AI agents
+internal/ai/             heuristic briefs + optional OpenAI-compatible rewrite
 internal/agent/          BPF loading, hook attachment and reporting
 internal/doctor/         host readiness checks used by netra-doctor
 internal/observability/  standalone eBPF summaries and workload topology
@@ -250,6 +252,7 @@ docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
 docs/mcp-integration.md   MCP server runbook: tool reference, security, plan/apply flow, troubleshooting
+docs/ai.md                heuristic briefs + optional LLM rewrite: HTTP/CLI/MCP surface, safety boundaries
 docs/ipv6-diagnostics.md  IPv6 extension-header/fragmentation counters and anomalies
 docs/interface-flow-attribution.md per-interface flow counters (TC/TCX hooks only)
 ```
@@ -370,6 +373,14 @@ netractl insights rate-baseline capture 5m
 netractl insights rate-drift 5m
 netractl insights exposure 5m
 netractl insights remediations 5m
+```
+
+AI briefs (heuristic by default; see `docs/ai.md`):
+
+```bash
+netractl ai status
+netractl ai brief
+netractl ai ask why is DNS failing in kube-system?
 ```
 
 ## Safety and persistence

@@ -131,6 +131,18 @@ Every tool call returns an MCP `tools/call` result of the form:
 
 `text` is the controller's JSON response, pretty-printed. On a non-2xx HTTP status, `isError` is `true` and `text` contains `{"status": <code>, "body": <parsed or raw body>}`. On a transport failure (DNS, connection refused, TLS handshake failure, timeout), `isError` is also `true` and `text` is the Go error string (e.g. `dial tcp ...: connect: connection refused`). A tool call is **never** a JSON-RPC protocol-level error — only a genuinely malformed request (bad JSON, unknown method, unknown tool name) is; see `internal/mcpserver`'s doc comments for the exact rationale.
 
+## Prompts
+
+`netra-mcp` advertises MCP prompts (`prompts/list`, `prompts/get`) in addition to tools. They are canned operator workflows — the client still has to call tools to do any work.
+
+| Prompt | Arguments | Intent |
+|---|---|---|
+| `netra_triage` | — | Start with `netra_ai_brief`, stay read-only |
+| `netra_explain_drops` | `namespace`, `pod` (optional) | Combine `netra_ai_ask` with drop/diagnose tools |
+| `netra_policy_review` | `namespace`, `workload` (optional) | Review drafts; forbids apply / mode changes |
+
+See `docs/ai.md` for the controller-side brief/ask engines those prompts lean on.
+
 ## Complete tool reference
 
 All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controller endpoint (`internal/api/server.go`), so behavior, validation, and error responses are identical to calling that endpoint directly with `netractl` or `curl`. Parameters listed as **(path)** are required and substituted directly into the URL; everything else is optional unless marked **required**.
@@ -139,6 +151,9 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 
 | Tool | Endpoint | Parameters | Notes |
 |---|---|---|---|
+| `netra_ai_status` | `GET /api/v1/ai/status` | — | Whether the optional LLM rewrite path is configured. Heuristic briefs always work |
+| `netra_ai_brief` | `GET /api/v1/ai/brief` | — | Deterministic cluster brief from live aggregates. Read-only, no payloads |
+| `netra_ai_ask` | `POST /api/v1/ai/ask` | `question` **(required)**, `namespace`, `preferLlm` | Natural-language question over the same snapshot. Optional LLM rewrite lives on the controller (`NETRA_AI_API_KEY`), not in `netra-mcp` |
 | `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |
 | `netra_agents` | `GET /api/v1/agents` | — | One entry per reporting node agent |
 | `netra_audit` | `GET /api/v1/audit` | `limit` (1-500, default 100) | Every mutating action recorded by the controller, including this MCP server's own |

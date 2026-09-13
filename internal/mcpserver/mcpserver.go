@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -40,19 +41,43 @@ type Tool struct {
 	Handler func(ctx context.Context, args json.RawMessage) (result any, isError bool, err error)
 }
 
+// Prompt is one MCP prompt template. Arguments are substituted into
+// Messages as {{name}} placeholders.
+type Prompt struct {
+	Name        string
+	Description string
+	Arguments   []PromptArg
+	Messages    []PromptMessage
+}
+
+// PromptArg describes one input the client should collect before
+// prompts/get.
+type PromptArg struct {
+	Name        string
+	Description string
+	Required    bool
+}
+
+// PromptMessage is one chat message returned by prompts/get.
+type PromptMessage struct {
+	Role string
+	Text string
+}
+
 // Server holds a registered set of tools and serves them over the MCP
 // stdio transport.
 type Server struct {
 	name, version string
 
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu      sync.RWMutex
+	tools   map[string]Tool
+	prompts map[string]Prompt
 }
 
 // New returns an empty Server. name/version are reported to clients in
 // the initialize response's serverInfo.
 func New(name, version string) *Server {
-	return &Server{name: name, version: version, tools: map[string]Tool{}}
+	return &Server{name: name, version: version, tools: map[string]Tool{}, prompts: map[string]Prompt{}}
 }
 
 // Register adds a tool. It returns an error if a tool with the same
@@ -65,6 +90,17 @@ func (s *Server) Register(t Tool) error {
 		return fmt.Errorf("mcpserver: tool %q already registered", t.Name)
 	}
 	s.tools[t.Name] = t
+	return nil
+}
+
+// RegisterPrompt adds a prompt template. Duplicate names are rejected.
+func (s *Server) RegisterPrompt(p Prompt) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.prompts[p.Name]; exists {
+		return fmt.Errorf("mcpserver: prompt %q already registered", p.Name)
+	}
+	s.prompts[p.Name] = p
 	return nil
 }
 
@@ -134,7 +170,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte, w io.Writer, write
 	case "initialize":
 		s.respond(w, writeMu, msg, map[string]any{
 			"protocolVersion": protocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}},
 			"serverInfo":      map[string]any{"name": s.name, "version": s.version},
 		}, nil)
 
@@ -143,6 +179,15 @@ func (s *Server) handleLine(ctx context.Context, line []byte, w io.Writer, write
 
 	case "tools/list":
 		s.respond(w, writeMu, msg, map[string]any{"tools": s.toolDescriptors()}, nil)
+
+	case "prompts/list":
+		s.respond(w, writeMu, msg, map[string]any{"prompts": s.promptDescriptors()}, nil)
+
+	case "prompts/get":
+		if isNotification {
+			return
+		}
+		s.handlePromptsGet(w, writeMu, msg)
 
 	case "tools/call":
 		if isNotification {
@@ -203,6 +248,67 @@ func toText(v any) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return string(b)
+}
+
+func (s *Server) handlePromptsGet(w io.Writer, writeMu *sync.Mutex, msg rpcMessage) {
+	var params struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.respond(w, writeMu, msg, nil, &rpcError{Code: codeInvalidParams, Message: "invalid params: " + err.Error()})
+		return
+	}
+	s.mu.RLock()
+	p, ok := s.prompts[params.Name]
+	s.mu.RUnlock()
+	if !ok {
+		s.respond(w, writeMu, msg, nil, &rpcError{Code: codeInvalidParams, Message: "unknown prompt: " + params.Name})
+		return
+	}
+	messages := make([]map[string]any, 0, len(p.Messages))
+	for _, m := range p.Messages {
+		text := m.Text
+		for k, v := range params.Arguments {
+			text = strings.ReplaceAll(text, "{{"+k+"}}", v)
+		}
+		messages = append(messages, map[string]any{
+			"role":    m.Role,
+			"content": map[string]any{"type": "text", "text": text},
+		})
+	}
+	s.respond(w, writeMu, msg, map[string]any{
+		"description": p.Description,
+		"messages":    messages,
+	}, nil)
+}
+
+func (s *Server) promptDescriptors() []map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	names := make([]string, 0, len(s.prompts))
+	for name := range s.prompts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		p := s.prompts[name]
+		args := make([]map[string]any, 0, len(p.Arguments))
+		for _, a := range p.Arguments {
+			args = append(args, map[string]any{
+				"name":        a.Name,
+				"description": a.Description,
+				"required":    a.Required,
+			})
+		}
+		out = append(out, map[string]any{
+			"name":        p.Name,
+			"description": p.Description,
+			"arguments":   args,
+		})
+	}
+	return out
 }
 
 func (s *Server) toolDescriptors() []map[string]any {

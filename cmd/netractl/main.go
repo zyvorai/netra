@@ -50,6 +50,8 @@ func main() {
 		err = ebpf()
 	case "insights":
 		err = insightCmd()
+	case "ai":
+		err = aiCmd()
 	default:
 		usage()
 		return
@@ -98,7 +100,32 @@ func usage() {
   insights summary | dependencies [limit] | drift | recommendations [namespace] [workload]
   insights baseline show | capture | clear
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
-  insights rate-baseline show | capture [window] | clear`)
+  insights rate-baseline show | capture [window] | clear
+  ai status | brief | ask QUESTION...`)
+}
+
+func aiCmd() error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("ai status|brief|ask QUESTION...")
+	}
+	switch os.Args[2] {
+	case "status":
+		return request("GET", "/api/v1/ai/status", nil)
+	case "brief":
+		return request("GET", "/api/v1/ai/brief", nil)
+	case "ask":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("ai ask QUESTION...")
+		}
+		q := strings.Join(os.Args[3:], " ")
+		b, err := json.Marshal(map[string]any{"question": q})
+		if err != nil {
+			return err
+		}
+		return request("POST", "/api/v1/ai/ask", b)
+	default:
+		return fmt.Errorf("ai status|brief|ask QUESTION...")
+	}
 }
 func policy() error {
 	if len(os.Args) < 3 {
