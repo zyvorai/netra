@@ -75,7 +75,11 @@ export default function EBPF() {
   const [historyId, setHistoryId] = useState('');
   const [history, setHistory] = useState<any[]>([]);
 
-  const load = () => Promise.all([
+  // silent=true is used by the 5s background poll: a routine poll succeeding
+  // should not erase an error the user hasn't had a chance to see yet, and a
+  // transient poll failure shouldn't flash a scary banner every 5s. Explicit
+  // loads (initial mount, after a mutating action) still surface load errors.
+  const load = (silent?: boolean) => Promise.all([
     api<any>('/api/v1/ebpf/config'),
     api<any>('/api/v1/agents'),
     api<any>('/api/v1/ebpf/capabilities'),
@@ -86,10 +90,11 @@ export default function EBPF() {
     api<any>('/api/v1/ebpf/ipv6?limit=50'),
     api<any>('/api/v1/ebpf/interfaces?limit=10'),
   ]).then(([c, a, k, w, t, sd, rl, i6, ifl]) => {
-    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setIpv6Diag(i6); setIfaceFlows(ifl.nodes || []); setErr('');
-  }).catch(e => setErr(String(e)));
+    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setIpv6Diag(i6); setIfaceFlows(ifl.nodes || []);
+    if (!silent) setErr('');
+  }).catch(e => { if (!silent) setErr(String(e)); });
 
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(() => load(true), 5000); return () => clearInterval(t); }, []);
 
   // Sync the shield form from server state only when the server's config
   // actually changed (generation bump), not on every 5s poll — otherwise
@@ -304,6 +309,7 @@ export default function EBPF() {
   }
 
   return <div className="grid">
+    {err && <p className="warning" style={{ gridColumn: '1 / -1' }}>{err}</p>}
     <section className="card span3">
       <p className="eyebrow">FIREWALL RULES</p>
       <h3>All configured rules</h3>
@@ -348,7 +354,7 @@ export default function EBPF() {
       </div>}
     </section>
 
-    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'btn-success' : 'btn-secondary'} onClick={() => mode('observe')}>Observe</button><input aria-label="Enforcement lease duration" value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : 'btn-warn'} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}{err && <p className="warning">{err}</p>}</section>
+    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'btn-success' : 'btn-secondary'} onClick={() => mode('observe')}>Observe</button><input aria-label="Enforcement lease duration" value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : 'btn-warn'} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}</section>
 
     <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input aria-label="Namespace" value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input aria-label="Pod" value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input aria-label="Owner kind" value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input aria-label="Owner name" value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input aria-label="Label selector" value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-secondary" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.19 — 2026-09-13
+
+- **Found and fixed a page-wide error-visibility bug in the Firewall dashboard**, via another round of live Chrome testing. `web/src/pages/EBPF.tsx` uses one shared `err` state for roughly a dozen different actions across the whole page (workload-scope preview/apply, rules patch/delete/rollback/history, default-deny plan/apply, and the background data poll itself) — but it was rendered in exactly one place (inside the unrelated ENFORCEMENT LEASE card), and the page's own 5-second background poll unconditionally cleared it (`setErr('')`) on every successful tick regardless of whether the user had even seen it. In practice this meant a validation error like "Choose at least one workload selector" (clicking Preview under WORKLOAD SCOPE with all fields empty) would render nowhere near the button the user clicked, and would usually be gone before they noticed — confirmed by testing with a tight click→read round-trip; a slightly slower check showed nothing at all. Found by deliberately testing an edge case (an empty-selector Preview click) that the earlier phases of testing hadn't covered.
+  - Fixed by (1) moving the error banner to a page-top, full-width location so it's visible immediately regardless of which action produced it, and (2) giving `load()` a `silent` parameter used only by the 5s background-poll `setInterval` call, so a routine poll tick no longer clears an error the user hasn't acted on yet — while explicit loads (initial mount, and the refresh every mutating action already triggers via `call()`) still clear and re-surface errors normally.
+  - Also exercised, this round, every remaining untested Firewall add-flow (CIDR, port, UID, process, DNS, SNI — all correct), Shield apply, NetPol v2 enable + rule add, the default-deny plan/preflight step (stopped short of actually activating default-deny on live workloads), and Insights baseline capture/clear — all working correctly, no further bugs found.
+  - Verified: `go build/vet/test ./...`, web typecheck/test (56/56)/build.
+- Version bumped to 0.27.19 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.18 — 2026-09-13
 
 - **Found and fixed two real bugs via live Chrome testing** of the deployed dashboard, following on from the earlier phases' verification:
