@@ -32,6 +32,9 @@ type EBPFPortRule struct {
 type EBPFRateLimit struct {
 	Destination string `json:"destination"` // exact IPv4 or IPv6 destination
 	PPS         uint32 `json:"pps"`
+	// BPS is an independent byte-rate ceiling for the same destination —
+	// a rule may set PPS, BPS, or both. Zero means "no cap of that kind."
+	BPS uint32 `json:"bps,omitempty"`
 }
 
 type WorkloadIdentity struct {
@@ -802,6 +805,9 @@ type AgentReport struct {
 	// resolved) whose new-TCP-connection-rate cap (EBPFConnRateLimit) has
 	// actually fired, mirroring RateDrops' shape/semantics.
 	ConnRateDrops []NamedCount `json:"connRateDrops,omitempty"`
+	// ByteRateDrops names destinations whose byte-rate cap (EBPFRateLimit.BPS)
+	// has fired, distinct from RateDrops (the packet-rate/PPS cap).
+	ByteRateDrops []NamedCount `json:"byteRateDrops,omitempty"`
 	// ProcessMeta is /proc-derived process metadata for PIDs observed in
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
@@ -921,6 +927,7 @@ type FirewallRule struct {
 	Direction   string    `json:"direction,omitempty"`
 	Destination string    `json:"destination,omitempty"`
 	PPS         uint32    `json:"pps,omitempty"`
+	BPS         uint32    `json:"bps,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	CreatedBy   string    `json:"createdBy,omitempty"`
 	UpdatedAt   time.Time `json:"updatedAt,omitempty"`

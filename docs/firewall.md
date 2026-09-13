@@ -11,8 +11,9 @@ The table at the top of the page flattens every rule type into one view:
 exact IPv4/IPv6 deny (egress or ingress), exact IPv4/IPv6 allow-exception,
 CIDR deny, CIDR allow-exception, port, port allow-exception, UID,
 UID allow-exception, process, process allow-exception, DNS, SNI, rate
-limit, plus a synthetic row each for the DDoS shield (when its mode isn't
-`off`) and NetPol (when enabled).
+limit (independent PPS and/or BPS caps on the same rule — see
+[Byte-rate (BPS) cap](#byte-rate-bps-cap)), plus a synthetic row each for
+the DDoS shield (when its mode isn't `off`) and NetPol (when enabled).
 
 Every real rule (the 17 flat types — not the Shield/NetPol synthetic rows)
 has a **stable ID** (e.g. `cidr-3`) assigned the first time it's created,
@@ -129,6 +130,33 @@ Both the rule-add and default-deny forms resolve their selector against the
 live cluster server-side — they require a working Kubernetes client
 (`s.kube`) and will show a plain error if run against a controller instance
 without one (e.g. a local, non-cluster test run).
+
+## Byte-rate (BPS) cap
+
+The RATE CONTROL card's per-destination cap was PPS-only until this
+release. `EBPFRateLimit` (the existing "rate" flat rule type — no new type,
+no new endpoint, no new stable-ID namespace) gained an independent `bps`
+field alongside `pps`: a destination rule can set either, both, or neither
+(all-zero is refused as a no-op). `PUT`/`PATCH /api/v1/ebpf/rate[/{id}]`
+accept both fields; the unified rules table's rate rows and the RATE
+CONTROL card's chips show both when set (`500pps · 5000000Bps`).
+
+This is the first Tier-3-class change in this project's "tons of eBPF
+feats" push: it required changing `decide4`/`decide6`'s signature to take
+a packet-length argument, rippling through all 8 existing call sites (the
+two TC/cgroup_skb branches of `handle_v4`/`handle_v6`, `socket4`,
+`socket6`, and the two XDP-ingress paths). Only the two `handle_v4`/
+`handle_v6` call sites pass a real length — `socket4`/`socket6` and the XDP
+callers already pass `apply_rate=0` (rate limiting has always been
+packet-path-only), so the new length argument is inert there. New parallel
+maps `rate_bps_v4`/`rate_bps_v6` (config) and `rate_byte_state_v4`/
+`rate_byte_state_v6` (per-second byte counters, reusing the existing
+`rate_state` struct — its `count` field holds cumulative bytes here, not a
+packet count) sit alongside the existing PPS maps, never resizing them.
+Byte-rate drops surface separately from packet-rate drops in
+`GET /api/v1/agents`' new `byteRateDrops` (Health page's BYTE-RATE DROPS
+card), since a destination's PPS and BPS caps fire independently and
+conflating them would lose which one actually triggered.
 
 ## Connection-rate limit
 

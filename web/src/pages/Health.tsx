@@ -96,6 +96,18 @@ export default function Health() {
       </div>
     </section>
     <section className="card span3">
+      <p className="eyebrow">BYTE-RATE DROPS</p>
+      <h3>BPS ceilings that actually fired</h3>
+      <div className="list">
+        {agents.flatMap((a: any) => (a.byteRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No destination has hit its byte-rate cap yet.</p>}
+        {agents.flatMap((a: any) => (a.byteRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
+          <div className="agent wide" key={i}>
+            <b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small>
+          </div>
+        ))}
+      </div>
+    </section>
+    <section className="card span3">
       <p className="eyebrow">CONNECTION-RATE DROPS</p>
       <h3>New-TCP-connection caps that actually fired</h3>
       <div className="list">

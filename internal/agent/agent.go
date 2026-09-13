@@ -153,6 +153,7 @@ var mapNames = []string{
 	"rate_v4", "rate_state_v4", "rate_v6", "rate_state_v6", "icmp_type_stats", "icmp6_type_stats", "blocked_sni", "config_map", "scope_config", "enforced_cgroups", "events",
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health", "quic_observed",
 	"conn_rate_limits", "conn_rate_state",
+	"rate_bps_v4", "rate_byte_state_v4", "rate_bps_v6", "rate_byte_state_v6",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -501,6 +502,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	byteRateDrops, err := a.readByteRateDrops()
+	if err != nil {
+		return err
+	}
 	connRateDrops, err := a.readConnRateDrops()
 	if err != nil {
 		return err
@@ -573,7 +578,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
-		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
+		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
@@ -686,6 +691,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.replaceRates(cfg.RateLimits); err != nil {
+		return err
+	}
+	if err := a.replaceByteRates(cfg.RateLimits); err != nil {
 		return err
 	}
 	if err := a.applyShield(cfg.Shield); err != nil {
@@ -1021,6 +1029,72 @@ func (a *Agent) replaceRates(values []models.EBPFRateLimit) error {
 		var q6 [16]byte
 		copy(q6[:], ip.To16())
 		if err := m6.Put(q6, r.PPS); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// replaceByteRates is replaceRates' BPS counterpart — same full
+// clear-then-rewrite convention, writing to the parallel rate_bps_v4/v6
+// maps instead. A destination can have a PPS entry, a BPS entry, both, or
+// neither; the two maps are independent.
+func (a *Agent) replaceByteRates(values []models.EBPFRateLimit) error {
+	m4 := a.collection.Maps["rate_bps_v4"]
+	if m4 == nil {
+		return fmt.Errorf("map rate_bps_v4 unavailable")
+	}
+	var k [4]byte
+	var v uint32
+	var keys [][4]byte
+	it := m4.Iterate()
+	for it.Next(&k, &v) {
+		keys = append(keys, k)
+	}
+	for _, x := range keys {
+		_ = m4.Delete(x)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return err
+	}
+	m6 := a.collection.Maps["rate_bps_v6"]
+	if m6 != nil {
+		var k6 [16]byte
+		var v6 uint32
+		var keys6 [][16]byte
+		it6 := m6.Iterate()
+		for it6.Next(&k6, &v6) {
+			keys6 = append(keys6, k6)
+		}
+		for _, x := range keys6 {
+			_ = m6.Delete(x)
+		}
+		if err := mapIterErr(it6.Err()); err != nil {
+			return err
+		}
+	}
+	for _, r := range values {
+		if r.BPS == 0 {
+			continue
+		}
+		ip := net.ParseIP(r.Destination)
+		if ip == nil {
+			continue
+		}
+		if v4 := ip.To4(); v4 != nil {
+			var q [4]byte
+			copy(q[:], v4)
+			if err := m4.Put(q, r.BPS); err != nil {
+				return err
+			}
+			continue
+		}
+		if m6 == nil {
+			continue
+		}
+		var q6 [16]byte
+		copy(q6[:], ip.To16())
+		if err := m6.Put(q6, r.BPS); err != nil {
 			return err
 		}
 	}
@@ -1858,6 +1932,58 @@ func (a *Agent) readRateDrops() ([]models.NamedCount, error) {
 	return out, nil
 }
 
+// readByteRateDrops is readRateDrops' BPS counterpart, reading
+// rate_byte_state_v4/v6 (the parallel maps replaceByteRates populates)
+// instead — a separate signal from RateDrops since a destination's PPS and
+// BPS caps fire independently.
+func (a *Agent) readByteRateDrops() ([]models.NamedCount, error) {
+	out := make([]models.NamedCount, 0, 16)
+	if m := a.collection.Maps["rate_byte_state_v4"]; m != nil {
+		var k [4]byte
+		var v struct {
+			Second  uint64
+			Count   uint64
+			Dropped uint64
+		}
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			if v.Dropped == 0 {
+				continue
+			}
+			out = append(out, models.NamedCount{Name: net.IP(k[:]).String(), Count: v.Dropped})
+			if len(out) >= 32 {
+				break
+			}
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
+	}
+	if m := a.collection.Maps["rate_byte_state_v6"]; m != nil && len(out) < 32 {
+		var k [16]byte
+		var v struct {
+			Second  uint64
+			Count   uint64
+			Dropped uint64
+		}
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			if v.Dropped == 0 {
+				continue
+			}
+			out = append(out, models.NamedCount{Name: net.IP(k[:]).String(), Count: v.Dropped})
+			if len(out) >= 32 {
+				break
+			}
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	return out, nil
+}
+
 // readConnRateDrops names entries by workload identity when resolvable
 // (mirroring every other cgroup-keyed reader's enrichment), falling back to
 // "cgroup N" — unlike readRateDrops, an IP string isn't meaningful here
@@ -2620,6 +2746,8 @@ func reasonName(v byte) string {
 		return "netpol-default-deny"
 	case 12:
 		return "conn-rate-limit"
+	case 13:
+		return "byte-rate-limit"
 	default:
 		return ""
 	}

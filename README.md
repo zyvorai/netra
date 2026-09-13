@@ -105,7 +105,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Linux process-`comm` allow-exception for new socket operations — skips UID/comm deny at the socket hook.
 - Exact cleartext DNS-name deny for UDP/53 queries.
 - Exact TLS SNI deny when an ordinary ClientHello SNI is successfully parsed in the current egress skb.
-- Exact IPv4/IPv6 destination PPS ceiling using a simple fixed one-second window.
+- Exact IPv4/IPv6 destination PPS and/or independent BPS ceiling using a simple fixed one-second window.
 - Per-workload new-TCP-connection-rate ceiling (namespace/pod/owner/labels selector, checked on `connect()` only; UDP excluded).
 - Optional XDP early-ingress CIDR/port drop on explicitly selected interfaces.
 - Workload-scoped enforcement by namespace, pod, immediate owner, exact labels, or cgroup ID.

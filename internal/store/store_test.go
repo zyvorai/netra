@@ -706,6 +706,38 @@ func TestNetPolRuleCRUD(t *testing.T) {
 	}
 }
 
+// TestSetRateLimitPPSAndBPSIndependent guards BPS being additive to the
+// existing PPS-only rate-limit rule, not a replacement type: a rule can
+// carry PPS, BPS, or both, and is only removed when both are zero.
+func TestSetRateLimitPPSAndBPSIndependent(t *testing.T) {
+	s := New()
+	cfg, err := s.SetRateLimit(models.EBPFRateLimit{Destination: "10.0.0.5", PPS: 100, BPS: 5000}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RateLimits) != 1 || cfg.RateLimits[0].PPS != 100 || cfg.RateLimits[0].BPS != 5000 {
+		t.Fatalf("expected both PPS and BPS set: %#v", cfg.RateLimits)
+	}
+
+	// BPS-only (PPS: 0) must survive — this is not delete semantics.
+	cfg, err = s.SetRateLimit(models.EBPFRateLimit{Destination: "10.0.0.6", BPS: 2000}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RateLimits) != 2 {
+		t.Fatalf("expected a BPS-only rule to be kept: %#v", cfg.RateLimits)
+	}
+
+	// All-zero (neither PPS nor BPS) is delete semantics.
+	cfg, err = s.SetRateLimit(models.EBPFRateLimit{Destination: "10.0.0.5"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RateLimits) != 1 || cfg.RateLimits[0].Destination != "10.0.0.6" {
+		t.Fatalf("expected the all-zero rule to be deleted: %#v", cfg.RateLimits)
+	}
+}
+
 func TestConnRateLimitCRUD(t *testing.T) {
 	s := New()
 	rule := models.EBPFConnRateLimit{

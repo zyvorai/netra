@@ -679,17 +679,17 @@ func (s *Store) SetRateLimit(rule models.EBPFRateLimit, actor string) (models.EB
 			out = append(out, x)
 		}
 	}
-	if rule.PPS > 0 {
+	if rule.PPS > 0 || rule.BPS > 0 {
 		out = append(out, rule)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Destination < out[j].Destination })
 	s.config.RateLimits = out
 	s.config.Revision++
 	action := "ebpf.rate.set"
-	if rule.PPS == 0 {
+	if rule.PPS == 0 && rule.BPS == 0 {
 		action = "ebpf.rate.delete"
 	}
-	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: rule.Destination, Details: map[string]any{"pps": rule.PPS}})
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: action, Target: rule.Destination, Details: map[string]any{"pps": rule.PPS, "bps": rule.BPS}})
 	s.reconcileRuleIndexLocked(actor, time.Now().UTC())
 	if err := s.persistLocked(); err != nil {
 		s.config = before
@@ -718,9 +718,9 @@ func (s *Store) RuleType(id string) (string, bool) {
 func (s *Store) ListRules() []models.FirewallRule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rateByDest := make(map[string]uint32, len(s.config.RateLimits))
+	rateByDest := make(map[string]models.EBPFRateLimit, len(s.config.RateLimits))
 	for _, r := range s.config.RateLimits {
-		rateByDest[r.Destination] = r.PPS
+		rateByDest[r.Destination] = r
 	}
 	out := make([]models.FirewallRule, 0, len(s.ruleIndex))
 	for id, idx := range s.ruleIndex {
@@ -777,8 +777,12 @@ func (s *Store) ListRules() []models.FirewallRule {
 			fr.Summary = fmt.Sprintf("allow %s · %s/%d", fr.Direction, fr.Protocol, fr.Port)
 		case "rate":
 			fr.Destination = idx.Key
-			fr.PPS = rateByDest[idx.Key]
+			r := rateByDest[idx.Key]
+			fr.PPS, fr.BPS = r.PPS, r.BPS
 			fr.Summary = fmt.Sprintf("%s · %dpps", fr.Destination, fr.PPS)
+			if fr.BPS > 0 {
+				fr.Summary += fmt.Sprintf(" · %dBps", fr.BPS)
+			}
 		default:
 			continue
 		}

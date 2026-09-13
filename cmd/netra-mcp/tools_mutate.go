@@ -215,11 +215,12 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_ebpf_rate_set", method: "PUT", path: "/api/v1/ebpf/rate",
-			description: "Set a packets-per-second rate limit for an exact IPv4 or IPv6 destination. Returns the full updated fast-path config.",
+			description: "Set a packets-per-second and/or bytes-per-second rate limit for an exact IPv4 or IPv6 destination — at least one of pps/bps is required (the server refuses an all-zero rule as a no-op). Returns the full updated fast-path config.",
 			schema: objSchema(map[string]any{
 				"destination": strProp("Exact IPv4 or IPv6 destination address."),
-				"pps":         intProp("Rate limit in packets per second, 1-10000000."),
-			}, "destination", "pps"),
+				"pps":         intProp("Packets-per-second ceiling, 1-10000000. Omit or 0 to leave this destination's PPS cap unset (bps must then be set)."),
+				"bps":         intProp("Bytes-per-second ceiling. Independent of pps — a destination may have either, both, or (on delete) neither."),
+			}, "destination"),
 			bodyFields: true,
 		},
 		{

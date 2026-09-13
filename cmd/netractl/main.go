@@ -89,7 +89,7 @@ func usage() {
   ebpf process add COMM | process del COMM
   ebpf allow-process add COMM | allow-process del COMM
   ebpf sni add NAME | sni del NAME
-  ebpf rate set IP PPS | rate del IP
+  ebpf rate set IP PPS [BPS] | rate del IP
   ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
   ebpf netpol enable | disable
   ebpf netpol v2 enable | disable
@@ -1118,20 +1118,30 @@ func ebpf() error {
 		}
 	case "rate":
 		if len(os.Args) < 5 {
-			return fmt.Errorf("rate set IP PPS | rate del IP")
+			return fmt.Errorf("rate set IP PPS [BPS] | rate del IP")
 		}
 		if os.Args[3] == "del" {
 			return request("DELETE", "/api/v1/ebpf/rate/"+url.PathEscape(os.Args[4]), nil)
 		}
 		if os.Args[3] == "set" {
 			if len(os.Args) < 6 {
-				return fmt.Errorf("rate set IP PPS")
+				return fmt.Errorf("rate set IP PPS [BPS]")
 			}
 			pps, err := strconv.ParseUint(os.Args[5], 10, 32)
-			if err != nil || pps == 0 {
-				return fmt.Errorf("valid PPS required")
+			if err != nil {
+				return fmt.Errorf("valid PPS required (0 if BPS is given)")
 			}
-			b, _ := json.Marshal(map[string]any{"destination": os.Args[4], "pps": uint32(pps)})
+			body := map[string]any{"destination": os.Args[4], "pps": uint32(pps)}
+			if len(os.Args) > 6 {
+				bps, err := strconv.ParseUint(os.Args[6], 10, 32)
+				if err != nil || bps == 0 {
+					return fmt.Errorf("valid BPS required")
+				}
+				body["bps"] = uint32(bps)
+			} else if pps == 0 {
+				return fmt.Errorf("valid PPS required, or supply BPS")
+			}
+			b, _ := json.Marshal(body)
 			return request("PUT", "/api/v1/ebpf/rate", b)
 		}
 	case "rules":

@@ -13,7 +13,7 @@ const EDIT_FIELDS: Record<string, string[]> = {
   port: ['protocol', 'port', 'direction'],
   uid: ['uid'],
   dns: ['name'], sni: ['name'], process: ['name'],
-  rate: ['destination', 'pps'],
+  rate: ['destination', 'pps', 'bps'],
 };
 
 export default function EBPF() {
@@ -38,6 +38,7 @@ export default function EBPF() {
   const [allowProc, setAllowProc] = useState('');
   const [rateIP, setRateIP] = useState('');
   const [pps, setPPS] = useState('1000');
+  const [bps, setBPS] = useState('');
   const [allowIP, setAllowIP] = useState('');
   const [allowCIDR, setAllowCIDR] = useState('');
   const [allowCIDRDir, setAllowCIDRDir] = useState('egress');
@@ -275,14 +276,14 @@ export default function EBPF() {
     setEditForm({
       ip: r.value || '', name: r.value || '', uid: r.value || '',
       cidr: r.cidr || '', direction: r.direction || 'egress', protocol: r.protocol || 'TCP',
-      port: r.port ? String(r.port) : '', destination: r.destination || '', pps: r.pps ? String(r.pps) : '',
+      port: r.port ? String(r.port) : '', destination: r.destination || '', pps: r.pps ? String(r.pps) : '', bps: r.bps ? String(r.bps) : '',
     });
   }
   function cancelEdit() { setEditingId(''); }
   async function saveEdit(type: string) {
     const body: any = {};
     for (const f of EDIT_FIELDS[type] || []) {
-      body[f] = (f === 'port' || f === 'pps' || f === 'uid') ? Number(editForm[f]) : editForm[f];
+      body[f] = (f === 'port' || f === 'pps' || f === 'bps' || f === 'uid') ? Number(editForm[f] || 0) : editForm[f];
     }
     try {
       await api(`/api/v1/ebpf/rules/${encodeURIComponent(editingId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -318,7 +319,7 @@ export default function EBPF() {
     const out: UnifiedRule[] = ruleList.map((r: any) => ({
       id: r.id, type: r.type, raw: r,
       value: r.type === 'cidr' || r.type === 'allow-cidr' ? r.cidr : r.type === 'port' || r.type === 'allow-port' ? `${r.protocol}/${r.port}` : r.type === 'rate' ? r.destination : r.value,
-      detail: r.direction || '', extra: r.type === 'rate' ? `${r.pps}pps` : '',
+      detail: r.direction || '', extra: r.type === 'rate' ? `${r.pps || 0}pps${r.bps ? ` · ${r.bps}Bps` : ''}` : '',
       created: r.createdBy ? `${r.createdBy} · ${new Date(r.createdAt).toLocaleString()}` : '',
       del: () => { if (confirm(`Delete this ${r.type} rule?`)) call('/api/v1/ebpf/rules/' + encodeURIComponent(r.id), 'DELETE'); },
     }));
@@ -356,7 +357,7 @@ export default function EBPF() {
                 {(EDIT_FIELDS[r.type] || []).map(f => {
                   if (f === 'direction') return <select key={f} aria-label={f} value={editForm.direction} onChange={e => setEditForm({ ...editForm, direction: e.target.value })}><option>egress</option><option>ingress</option><option>both</option></select>;
                   if (f === 'protocol') return <select key={f} aria-label={f} value={editForm.protocol} onChange={e => setEditForm({ ...editForm, protocol: e.target.value })}><option>TCP</option><option>UDP</option><option>ANY</option></select>;
-                  return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} aria-label={f} inputMode={(f === 'port' || f === 'pps' || f === 'uid') ? 'numeric' : undefined} />;
+                  return <input key={f} value={editForm[f] || ''} onChange={e => setEditForm({ ...editForm, [f]: e.target.value })} placeholder={f} aria-label={f} inputMode={(f === 'port' || f === 'pps' || f === 'bps' || f === 'uid') ? 'numeric' : undefined} />;
                 })}
                 <button className="primary" onClick={() => saveEdit(r.type)}>Save</button>
                 <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
@@ -402,7 +403,7 @@ export default function EBPF() {
     <section className="card"><p className="eyebrow">DNS</p><h3>Exact DNS-name deny</h3><p>Parses and blocks exact cleartext DNS queries over UDP/53. This does not inspect TCP DNS, DoT, or DoH.</p>{cap((cfg?.blockedDns?.length||0), caps?.limits?.dns)}<div className="toolbar"><input aria-label="DNS name" value={dns} onChange={e => setDNS(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/dns', 'POST', { name: dns })}>Add DNS</button></div><div className="chips">{(cfg?.blockedDns || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/dns/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">SNI</p><h3>Exact TLS SNI deny</h3><p>Blocks connections whose TLS ClientHello Server Name Indication matches exactly. Best-effort parsing only.</p>{cap((cfg?.blockedSni?.length||0), caps?.limits?.sni)}<div className="toolbar"><input aria-label="SNI hostname" value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com"/><button className="primary" onClick={() => call('/api/v1/ebpf/sni', 'POST', { name: sni })}>Add SNI</button></div><div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/sni/delete', 'POST', { name: x })}>{x} ×</button>)}</div></section>
 
-    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 or IPv6 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input aria-label="Rate limit destination IP" value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20 or 2001:db8::1"/><input aria-label="Packets per second" value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} aria-label={`Remove ${x.destination}`} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
+    <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS/BPS ceiling</h3><p>Simple fixed-window IPv4 or IPv6 destination packet-rate and/or byte-rate guard — independent caps, set either or both. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input aria-label="Rate limit destination IP" value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20 or 2001:db8::1"/><input aria-label="Packets per second" value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric" placeholder="pps (optional)"/><input aria-label="Bytes per second" value={bps} onChange={e => setBPS(e.target.value)} inputMode="numeric" placeholder="bps (optional)"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps || 0), bps: Number(bps || 0) })}>Set rate</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} aria-label={`Remove ${x.destination}`} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps || 0}pps{x.bps ? ` · ${x.bps}Bps` : ''} ×</button>)}</div></section>
 
     <Reveal className="section-divider">
       <h2>Advanced engines</h2>
