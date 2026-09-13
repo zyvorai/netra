@@ -170,6 +170,9 @@ func (s *Store) reconcileRuleIndexLocked(actor string, now time.Time) {
 	for _, v := range s.config.BlockedProcesses {
 		touch("process", v)
 	}
+	for _, v := range s.config.DeniedCapabilities {
+		touch("capability", v)
+	}
 	for _, v := range s.config.RateLimits {
 		touch("rate", v.Destination)
 	}
@@ -781,9 +784,12 @@ func (s *Store) ListRules() []models.FirewallRule {
 	for id, idx := range s.ruleIndex {
 		fr := models.FirewallRule{ID: id, Type: idx.Type, CreatedAt: idx.CreatedAt, CreatedBy: idx.CreatedBy, UpdatedAt: idx.UpdatedAt, UpdatedBy: idx.UpdatedBy}
 		switch idx.Type {
-		case "ip4", "ip6", "allow4", "allow6", "ip4-in", "ip6-in", "dns", "sni", "process", "allow-process":
+		case "ip4", "ip6", "allow4", "allow6", "ip4-in", "ip6-in", "dns", "sni", "process", "allow-process", "capability":
 			fr.Value = idx.Key
 			fr.Summary = idx.Key
+			if idx.Type == "capability" {
+				fr.Summary = "deny socket for " + idx.Key
+			}
 			if idx.Type == "allow4" || idx.Type == "allow6" {
 				fr.Summary = "allow " + idx.Key
 			}
@@ -928,6 +934,8 @@ func (s *Store) DeleteRule(id, actor string) (models.EBPFFastPathConfig, error) 
 		return s.DelSNI(key, actor)
 	case "process":
 		return s.DelProcess(key, actor)
+	case "capability":
+		return s.DelDeniedCapability(key, actor)
 	case "rate":
 		return s.SetRateLimit(models.EBPFRateLimit{Destination: key, PPS: 0}, actor)
 	default:
@@ -1013,6 +1021,10 @@ func (s *Store) PatchRule(id string, edit RuleEdit, actor string) (models.EBPFFa
 		newKey = edit.Str
 		s.config.BlockedProcesses = replaceStr(s.config.BlockedProcesses, idx.Key, newKey)
 		sort.Strings(s.config.BlockedProcesses)
+	case "capability":
+		newKey = edit.Str
+		s.config.DeniedCapabilities = replaceStr(s.config.DeniedCapabilities, idx.Key, newKey)
+		sort.Strings(s.config.DeniedCapabilities)
 	case "rate":
 		newKey = edit.Rate.Destination
 		s.config.RateLimits = replaceRate(s.config.RateLimits, idx.Key, edit.Rate)
@@ -1113,7 +1125,7 @@ func (s *Store) FirewallRuleHistory(ruleID string, limit int) []models.FirewallR
 
 func currentRuleEditLocked(cfg models.EBPFFastPathConfig, idx firewallRuleIndex) (RuleEdit, error) {
 	switch idx.Type {
-	case "ip4", "ip6", "dns", "sni", "process":
+	case "ip4", "ip6", "dns", "sni", "process", "capability":
 		return RuleEdit{Str: idx.Key}, nil
 	case "uid":
 		uid, err := strconv.ParseUint(idx.Key, 10, 32)
@@ -1713,6 +1725,7 @@ func cloneConfig(c models.EBPFFastPathConfig) models.EBPFFastPathConfig {
 	c.BlockedUIDs = append([]uint32(nil), c.BlockedUIDs...)
 	c.BlockedDNS = append([]string(nil), c.BlockedDNS...)
 	c.BlockedProcesses = append([]string(nil), c.BlockedProcesses...)
+	c.DeniedCapabilities = append([]string(nil), c.DeniedCapabilities...)
 	c.BlockedSNI = append([]string(nil), c.BlockedSNI...)
 	c.RateLimits = append([]models.EBPFRateLimit(nil), c.RateLimits...)
 	c.WorkloadScopes = cloneScopes(c.WorkloadScopes)

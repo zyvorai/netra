@@ -88,6 +88,7 @@ func usage() {
   ebpf allow-uid add UID | allow-uid del UID
   ebpf dns add NAME | dns del NAME
   ebpf process add COMM | process del COMM
+  ebpf capability add CAP_NET_RAW|CAP_NET_ADMIN | capability del CAP_NET_RAW|CAP_NET_ADMIN
   ebpf allow-process add COMM | allow-process del COMM
   ebpf sni add NAME | sni del NAME
   ebpf rate set IP PPS [BPS] | rate del IP
@@ -1046,6 +1047,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/process/delete", b)
+		}
+	case "capability":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("capability add|del CAP_NET_RAW|CAP_NET_ADMIN")
+		}
+		b, _ := json.Marshal(map[string]string{"name": os.Args[4]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/capability", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/capability/delete", b)
 		}
 	case "allow-process":
 		if len(os.Args) < 5 {

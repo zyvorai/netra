@@ -738,6 +738,42 @@ func TestSetRateLimitPPSAndBPSIndependent(t *testing.T) {
 	}
 }
 
+func TestDeniedCapabilityCRUD(t *testing.T) {
+	s := New()
+	cfg, err := s.AddDeniedCapability("CAP_NET_RAW", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DeniedCapabilities) != 1 || cfg.DeniedCapabilities[0] != "CAP_NET_RAW" {
+		t.Fatalf("unexpected denied capabilities: %#v", cfg.DeniedCapabilities)
+	}
+
+	// Adding the identical entry again must be a no-op, not a duplicate.
+	cfg, err = s.AddDeniedCapability("CAP_NET_RAW", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DeniedCapabilities) != 1 {
+		t.Fatalf("expected no duplicate entry: %#v", cfg.DeniedCapabilities)
+	}
+
+	cfg, err = s.AddDeniedCapability("CAP_NET_ADMIN", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DeniedCapabilities) != 2 {
+		t.Fatalf("expected 2 distinct entries: %#v", cfg.DeniedCapabilities)
+	}
+
+	cfg, err = s.DelDeniedCapability("CAP_NET_RAW", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DeniedCapabilities) != 1 || cfg.DeniedCapabilities[0] != "CAP_NET_ADMIN" {
+		t.Fatalf("delete did not remove the right entry: %#v", cfg.DeniedCapabilities)
+	}
+}
+
 func TestSynDropCRUD(t *testing.T) {
 	s := New()
 	entry := models.EBPFSynDropEntry{Address: "203.0.113.5", Direction: "egress"}

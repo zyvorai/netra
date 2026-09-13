@@ -10,12 +10,13 @@ per-workload NetPol v2 allow-list/default-deny engine (see
 The table at the top of the page flattens every rule type into one view:
 exact IPv4/IPv6 deny (egress or ingress), exact IPv4/IPv6 allow-exception,
 CIDR deny, CIDR allow-exception, port, port allow-exception, UID,
-UID allow-exception, process, process allow-exception, DNS, SNI, rate
-limit (independent PPS and/or BPS caps on the same rule — see
-[Byte-rate (BPS) cap](#byte-rate-bps-cap)), plus a synthetic row each for
-the DDoS shield (when its mode isn't `off`) and NetPol (when enabled).
+UID allow-exception, process, process allow-exception, capability-gated
+socket deny (see [Capability-gated socket deny](capability-gated-deny.md)),
+DNS, SNI, rate limit (independent PPS and/or BPS caps on the same rule —
+see [Byte-rate (BPS) cap](#byte-rate-bps-cap)), plus a synthetic row each
+for the DDoS shield (when its mode isn't `off`) and NetPol (when enabled).
 
-Every real rule (the 17 flat types — not the Shield/NetPol synthetic rows)
+Every real rule (the 18 flat types — not the Shield/NetPol synthetic rows)
 has a **stable ID** (e.g. `cidr-3`) assigned the first time it's created,
 tracked in a server-side index kept separate from `EBPFFastPathConfig`
 itself — the wire shape every existing agent/CLI/MCP caller already depends
@@ -55,6 +56,11 @@ default-deny postures, 4096 for connection-rate-limit rules) — see
 `ebpfRuleLimits` in `internal/api/server.go`, also returned as `limits` on
 `GET /api/v1/ebpf/capabilities`. These are compile-time constants; raising
 one requires a source change and a program rebuild, not a runtime setting.
+The one exception is capability-gated deny's own `count/limit`, which
+reflects `deniedCapabilities`' fixed 2-name vocabulary (`CAP_NET_RAW`/
+`CAP_NET_ADMIN`), not a BPF map size — the actual per-PID `capgate_pids`
+map (8192 entries) isn't a rule-count limit at all, since it's populated
+by the agent's `/proc` scan, not by how many capability names are denied.
 
 ## Bulk deny-list import
 

@@ -155,6 +155,7 @@ var mapNames = []string{
 	"conn_rate_limits", "conn_rate_state",
 	"rate_bps_v4", "rate_byte_state_v4", "rate_bps_v6", "rate_byte_state_v6",
 	"syndrop_v4", "syndrop_v6",
+	"capgate_pids",
 }
 
 func (a *Agent) loadAndAttach() error {
@@ -668,6 +669,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.applySynDrop(cfg.SynDrop); err != nil {
+		return err
+	}
+	if err := a.applyCapabilityGate(cfg); err != nil {
 		return err
 	}
 	if err := a.replacePorts(cfg.BlockedPorts); err != nil {
@@ -2820,6 +2824,8 @@ func reasonName(v byte) string {
 		return "conn-rate-limit"
 	case 13:
 		return "byte-rate-limit"
+	case 14:
+		return "capability"
 	default:
 		return ""
 	}

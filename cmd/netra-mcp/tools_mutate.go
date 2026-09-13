@@ -208,6 +208,18 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			bodyFields:  true,
 		},
 		{
+			name: "netra_ebpf_capability_add", method: "POST", path: "/api/v1/ebpf/capability",
+			description: "Deny new socket() attempts for any process with a given Linux capability currently effective (CAP_NET_RAW/CAP_NET_ADMIN only — a small, fixed vocabulary, not arbitrary capability names). Agent-sourced: the agent periodically scans /proc and only catches a capability a process already had at the last scan — TOCTOU-caveated, not a live kernel credential read. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"name": enumProp("Capability to deny.", "CAP_NET_RAW", "CAP_NET_ADMIN")}, "name"),
+			bodyFields:  true,
+		},
+		{
+			name: "netra_ebpf_capability_delete", method: "POST", path: "/api/v1/ebpf/capability/delete",
+			description: "Remove a capability-gated socket deny entry. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"name": enumProp("Capability to stop denying.", "CAP_NET_RAW", "CAP_NET_ADMIN")}, "name"),
+			bodyFields:  true,
+		},
+		{
 			name: "netra_ebpf_allow_process_add", method: "POST", path: "/api/v1/ebpf/allow-process",
 			description: "Add a process name (Linux \"comm\", up to 15 bytes) exception evaluated before UID/comm deny at the socket hook. Returns the full updated fast-path config.",
 			schema:      objSchema(map[string]any{"name": strProp("Process comm name to except, e.g. \"coredns\".")}, "name"),

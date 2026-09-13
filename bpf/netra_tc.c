@@ -61,6 +61,7 @@
 #define REASON_NETPOL_DEFAULT_DENY 11 /* v2 default-deny posture, no matching allow rule */
 #define REASON_CONN_RATE 12           /* per-cgroup new-TCP-connection-rate cap (conn_rate_limits) */
 #define REASON_BPS 13                 /* per-destination byte-rate cap (rate_bps_v4/v6) */
+#define REASON_CAPABILITY 14          /* agent-sourced capability-gated socket deny (capgate_pids) */
 #define FAMILY_V4    4
 #define FAMILY_V6    6
 
@@ -316,6 +317,27 @@ struct {
     __type(key, struct comm_key);
     __type(value, __u8);
 } allowed_comms SEC(".maps");
+
+// Capability-gated socket deny: an agent-sourced, TOCTOU-caveated signal,
+// not a kernel credential read. Reading task_struct->real_cred->cap_effective
+// directly from cgroup/connect4|6 would require an unstable CO-RE
+// struct-offset read into unexported kernel internals — a new class of
+// fragility this project has avoided everywhere else in this file. Instead
+// the agent periodically scans /proc (internal/procmeta), decides per-PID
+// whether any currently-configured denied capability is effective, and
+// only writes PIDs that currently match into capgate_pids as a plain
+// presence flag (not the raw bitmask) — keeping the BPF-side check a
+// single O(1) lookup, same shape as blocked_uids/blocked_comms. Because
+// this is populated between agent sync intervals, a process's capability
+// can legitimately change (drop or gain one) in the window between the
+// last scan and this socket() call — this is a real, accepted limitation,
+// not a bug; see docs/capability-gated-deny.md.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 8192);
+    __type(key, __u32); /* pid */
+    __type(value, __u8);
+} capgate_pids SEC(".maps");
 
 struct rate_state { __u64 second; __u64 count; __u64 dropped; };
 struct {
@@ -2252,11 +2274,13 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u32 dst=ctx->user_ip4;__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u8 addr[16];copy4(addr,dst);
     __u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
+    __u32 pid=(__u32)(bpf_get_current_pid_tgid()>>32);
     int blocked=0;
     struct comm_key ck={}; bpf_get_current_comm(ck.name,sizeof(ck.name));
     if(enforcing()&&scope_allows(cgroup_id)&&!bpf_map_lookup_elem(&allowed_uids,&uid)&&!bpf_map_lookup_elem(&allowed_comms,&ck)){
         if(bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}
         else if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}
+        else if(bpf_map_lookup_elem(&capgate_pids,&pid)){reason=REASON_CAPABILITY;blocked=1;}
     }
     if(!blocked && proto==IPPROTO_TCP && conn_rate_limited(cgroup_id)){reason=REASON_CONN_RATE;blocked=1;}
     if(!blocked)blocked=decide4(DIR_EGRESS,dst,proto,dport,&reason,0,cgroup_id,0);
@@ -2267,11 +2291,13 @@ static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 static __always_inline int socket6(struct bpf_sock_addr *ctx,__u8 proto)
 {
     __u8 addr[16];__builtin_memcpy(addr,ctx->user_ip6,16);__u16 dport=(__u16)ctx->user_port;__u8 reason=0;__u32 uid=(__u32)bpf_get_current_uid_gid();__u64 cgroup_id=bpf_get_current_cgroup_id();
+    __u32 pid=(__u32)(bpf_get_current_pid_tgid()>>32);
     int blocked=0;
     struct comm_key ck={}; bpf_get_current_comm(ck.name,sizeof(ck.name));
     if(enforcing()&&scope_allows(cgroup_id)&&!bpf_map_lookup_elem(&allowed_uids,&uid)&&!bpf_map_lookup_elem(&allowed_comms,&ck)){
         if(bpf_map_lookup_elem(&blocked_uids,&uid)){reason=REASON_UID;blocked=1;}
         else if(bpf_map_lookup_elem(&blocked_comms,&ck)){reason=REASON_PROCESS;blocked=1;}
+        else if(bpf_map_lookup_elem(&capgate_pids,&pid)){reason=REASON_CAPABILITY;blocked=1;}
     }
     if(!blocked && proto==IPPROTO_TCP && conn_rate_limited(cgroup_id)){reason=REASON_CONN_RATE;blocked=1;}
     if(!blocked)blocked=decide6(DIR_EGRESS,addr,proto,dport,&reason,0,cgroup_id,0);

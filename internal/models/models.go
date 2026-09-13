@@ -116,10 +116,16 @@ type EBPFFastPathConfig struct {
 	ConnRateLimits []EBPFConnRateLimit `json:"connRateLimits,omitempty"`
 	// SynDrop lists exact-IP deny entries flagged for SYN-drop mode — see
 	// EBPFSynDropEntry.
-	SynDrop      []EBPFSynDropEntry `json:"synDrop,omitempty"`
-	Revision     uint64             `json:"revision"`
-	EnforceUntil *time.Time         `json:"enforceUntil,omitempty"`
-	LeaseSeconds int64              `json:"leaseSeconds,omitempty"`
+	SynDrop []EBPFSynDropEntry `json:"synDrop,omitempty"`
+	// DeniedCapabilities names Linux capabilities (see CapabilityBit for
+	// the accepted set) that, if effective for the process making a new
+	// socket() call, cause that connection attempt to be denied — an
+	// agent-sourced, TOCTOU-caveated signal, not a kernel credential read.
+	// See docs/capability-gated-deny.md.
+	DeniedCapabilities []string   `json:"deniedCapabilities,omitempty"`
+	Revision           uint64     `json:"revision"`
+	EnforceUntil       *time.Time `json:"enforceUntil,omitempty"`
+	LeaseSeconds       int64      `json:"leaseSeconds,omitempty"`
 }
 
 type DestinationStat struct {
@@ -331,6 +337,18 @@ type CapChangeEvent struct {
 	CurrentCapEff    uint64 `json:"currentCapEff"`
 	Namespace        string `json:"namespace,omitempty"`
 	Pod              string `json:"pod,omitempty"`
+}
+
+// CapabilityBit maps the capability names capability-gated socket deny
+// accepts (see EBPFFastPathConfig.DeniedCapabilities) to their Linux
+// capability bit position (<linux/capability.h>). Deliberately a small,
+// portable, hand-picked subset — not internal/procmeta's full capNames
+// table, which is Linux-only (//go:build linux) and therefore unusable
+// from portable packages like internal/store that must build everywhere
+// this project's tests run.
+var CapabilityBit = map[string]uint{
+	"CAP_NET_ADMIN": 12,
+	"CAP_NET_RAW":   13,
 }
 
 // NetworkHistogramReport mirrors histograms.Report JSON for AgentReport

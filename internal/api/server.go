@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,13 +69,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.33"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.34"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.33"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.34"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.33"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.34"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -129,6 +130,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/ebpf/dns/delete", s.auth(http.HandlerFunc(s.ebpfDNSDelete)))
 	mux.Handle("POST /api/v1/ebpf/process", s.auth(http.HandlerFunc(s.ebpfProcessAdd)))
 	mux.Handle("POST /api/v1/ebpf/process/delete", s.auth(http.HandlerFunc(s.ebpfProcessDelete)))
+	mux.Handle("POST /api/v1/ebpf/capability", s.auth(http.HandlerFunc(s.ebpfCapabilityAdd)))
+	mux.Handle("POST /api/v1/ebpf/capability/delete", s.auth(http.HandlerFunc(s.ebpfCapabilityDelete)))
 	mux.Handle("POST /api/v1/ebpf/allow-process", s.auth(http.HandlerFunc(s.ebpfAllowProcessAdd)))
 	mux.Handle("POST /api/v1/ebpf/allow-process/delete", s.auth(http.HandlerFunc(s.ebpfAllowProcessDelete)))
 	mux.Handle("POST /api/v1/ebpf/sni", s.auth(http.HandlerFunc(s.ebpfSNIAdd)))
@@ -263,7 +266,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.33", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.34", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -1366,6 +1369,55 @@ func (s *Server) ebpfProcessMutate(w http.ResponseWriter, r *http.Request, del b
 	writeJSON(w, 200, cfg)
 }
 
+// normalizeCapabilityName validates against models.CapabilityBit's small,
+// hand-picked set (CAP_NET_ADMIN/CAP_NET_RAW today) rather than accepting
+// an arbitrary string — unlike process names, there's a fixed, known-safe
+// vocabulary here and no reason to accept anything outside it.
+func normalizeCapabilityName(v string) (string, error) {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	if _, ok := models.CapabilityBit[v]; !ok {
+		names := make([]string, 0, len(models.CapabilityBit))
+		for n := range models.CapabilityBit {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		return "", fmt.Errorf("capability must be one of: %s", strings.Join(names, ", "))
+	}
+	return v, nil
+}
+func (s *Server) ebpfCapabilityAdd(w http.ResponseWriter, r *http.Request) {
+	s.ebpfCapabilityMutate(w, r, false)
+}
+func (s *Server) ebpfCapabilityDelete(w http.ResponseWriter, r *http.Request) {
+	s.ebpfCapabilityMutate(w, r, true)
+}
+func (s *Server) ebpfCapabilityMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	name, err := normalizeCapabilityName(x.Name)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelDeniedCapability(name, actor(r))
+	} else {
+		cfg, err = s.store.AddDeniedCapability(name, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist capability rule: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
+
 func (s *Server) ebpfAllowProcessAdd(w http.ResponseWriter, r *http.Request) {
 	s.ebpfAllowProcessMutate(w, r, false)
 }
@@ -1955,6 +2007,20 @@ func (s *Server) ebpfRulePatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		edit.Str = name
+	case "capability":
+		var x struct {
+			Name string `json:"name"`
+		}
+		if err := decodeJSON(r, &x, 1<<12); err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		name, err := normalizeCapabilityName(x.Name)
+		if err != nil {
+			errorJSON(w, 400, err.Error())
+			return
+		}
+		edit.Str = name
 	case "rate":
 		var x models.EBPFRateLimit
 		if err := decodeJSON(r, &x, 1<<12); err != nil {
@@ -2106,31 +2172,32 @@ func (s *Server) ebpfL7(w http.ResponseWriter, r *http.Request) {
 // bpf/netra_tc.c — these are compile-time constants, not runtime-tunable,
 // so raising any of them requires a source change and program reload.
 var ebpfRuleLimits = map[string]int{
-	"exactIPv4":           4096,  // blocked_v4
-	"exactIPv6":           4096,  // blocked_v6
-	"allowIPv4":           4096,  // allowed_v4
-	"allowIPv6":           4096,  // allowed_v6
-	"allowCidr":           8192,  // allowed_cidr_v4 + allowed_cidr_v6 (each)
-	"exactIngressIPv4":    4096,  // blocked_ingress_v4
-	"exactIngressIPv6":    4096,  // blocked_ingress_v6
-	"cidr":                8192,  // blocked_cidr_v4 + blocked_cidr_v6 (each)
-	"ports":               4096,  // blocked_ports
-	"allowPorts":          4096,  // allowed_ports
-	"uids":                4096,  // blocked_uids
-	"allowUids":           4096,  // allowed_uids
-	"dns":                 4096,  // blocked_dns
-	"sni":                 4096,  // blocked_sni
-	"processes":           4096,  // blocked_comms
-	"allowProcesses":      4096,  // allowed_comms
-	"rate":                4096,  // rate_v4
-	"netpol":              65536, // netpol_deny4
-	"netpolV2Rules":       65536, // netpol_rules4
-	"netpolV2DefaultDeny": 16384, // netpol_default4
-	"connRateLimit":       4096,  // conn_rate_limits (keyed by cgroup_id, not netpolV2Rules' peer)
+	"exactIPv4":           4096,                      // blocked_v4
+	"exactIPv6":           4096,                      // blocked_v6
+	"allowIPv4":           4096,                      // allowed_v4
+	"allowIPv6":           4096,                      // allowed_v6
+	"allowCidr":           8192,                      // allowed_cidr_v4 + allowed_cidr_v6 (each)
+	"exactIngressIPv4":    4096,                      // blocked_ingress_v4
+	"exactIngressIPv6":    4096,                      // blocked_ingress_v6
+	"cidr":                8192,                      // blocked_cidr_v4 + blocked_cidr_v6 (each)
+	"ports":               4096,                      // blocked_ports
+	"allowPorts":          4096,                      // allowed_ports
+	"uids":                4096,                      // blocked_uids
+	"allowUids":           4096,                      // allowed_uids
+	"dns":                 4096,                      // blocked_dns
+	"sni":                 4096,                      // blocked_sni
+	"processes":           4096,                      // blocked_comms
+	"allowProcesses":      4096,                      // allowed_comms
+	"rate":                4096,                      // rate_v4
+	"netpol":              65536,                     // netpol_deny4
+	"netpolV2Rules":       65536,                     // netpol_rules4
+	"netpolV2DefaultDeny": 16384,                     // netpol_default4
+	"connRateLimit":       4096,                      // conn_rate_limits (keyed by cgroup_id, not netpolV2Rules' peer)
+	"capability":          len(models.CapabilityBit), // deniedCapabilities: bounded by the known-name vocabulary, not a BPF map size
 }
 
 func (s *Server) ebpfCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters", "ICMPv4/ICMPv6 type histograms", "node/interface-scoped ICMPv4/ICMPv6 error diagnostics (unreachable, time-exceeded, parameter-problem, MTU/packet-too-big)", "cgroup-attributed UDP flow packet/byte counters beyond DNS", "UDP/443 long-header packet counter (QUIC-observed traffic heuristic, not SNI extraction)"}, "enforcement": []string{"exact IPv4/IPv6 deny (egress, ingress, or both)", "optional SYN-drop mode per exact-IP deny entry (TCP-only, drops only new connection attempts)", "exact IPv4/IPv6 allow-exception (evaluated before deny/CIDR/port/rate)", "IPv4/IPv6 CIDR ingress/egress deny", "IPv4/IPv6 CIDR allow-exception (evaluated before deny/CIDR/port/rate)", "TCP/UDP/ANY port deny", "TCP/UDP/ANY port allow-exception (evaluated before deny/CIDR/port/rate)", "UID socket deny", "UID socket allow-exception", "process-name (comm) socket deny", "process-name (comm) socket allow-exception", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4/IPv6 destination PPS and/or independent BPS limit", "per-workload new-TCP-connection-rate ceiling (connect() only, UDP excluded)", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
+	writeJSON(w, 200, map[string]any{"standalone": true, "ciliumRequired": false, "hubbleOptional": true, "limits": ebpfRuleLimits, "hooks": []string{"cgroup_skb/ingress", "cgroup_skb/egress", "cgroup/connect4", "cgroup/connect6", "cgroup/sendmsg4", "cgroup/sendmsg6", "sockops", "tcx/ingress(optional)", "tcx/egress(optional)", "xdp(optional)", "raw_tracepoint/kfree_skb(optional)"}, "observability": []string{"IPv4/IPv6 flow counters", "ingress/egress direction", "TCP/UDP/ICMP protocol", "sampled flow headers", "DNS query names over UDP/53", "PID/UID/process comm on socket events", "cgroup ID", "namespace/pod/workload/container attribution", "TCP flags", "per-hook attribution", "TCP RTT/retransmit/RTO/connection health", "exact TCP SYN/FIN/RST signals", "DNS response latency and rcode health", "best-effort TLS ClientHello SNI metadata", "best-effort cleartext HTTP/1 method and Host metadata", "exact per-workload socket connection-attempt counters", "TCP connect-establishment latency", "sockops cwnd/packets-out pressure", "kernel lost_out/retrans_out/total_retrans transport signals", "sockops delivered-rate and TCP-state samples", "kernel skb drop-reason counters via optional skb:kfree_skb tracepoint", "conntrack for established flows", "policy-drop detective findings", "optional XDP shield PPS", "optional cgroup NetworkPolicy deny maps", "Linux softnet backlog/drop counters", "interface rx/tx drop/error/missed/no-handler counters", "ICMPv4/ICMPv6 type histograms", "node/interface-scoped ICMPv4/ICMPv6 error diagnostics (unreachable, time-exceeded, parameter-problem, MTU/packet-too-big)", "cgroup-attributed UDP flow packet/byte counters beyond DNS", "UDP/443 long-header packet counter (QUIC-observed traffic heuristic, not SNI extraction)"}, "enforcement": []string{"exact IPv4/IPv6 deny (egress, ingress, or both)", "optional SYN-drop mode per exact-IP deny entry (TCP-only, drops only new connection attempts)", "exact IPv4/IPv6 allow-exception (evaluated before deny/CIDR/port/rate)", "IPv4/IPv6 CIDR ingress/egress deny", "IPv4/IPv6 CIDR allow-exception (evaluated before deny/CIDR/port/rate)", "TCP/UDP/ANY port deny", "TCP/UDP/ANY port allow-exception (evaluated before deny/CIDR/port/rate)", "UID socket deny", "UID socket allow-exception", "process-name (comm) socket deny", "process-name (comm) socket allow-exception", "capability-gated socket deny (CAP_NET_RAW/CAP_NET_ADMIN, agent-sourced from a periodic /proc scan, TOCTOU-caveated)", "exact plain-DNS-name deny over UDP/53", "best-effort exact TLS SNI deny when ClientHello SNI is parsed", "IPv4/IPv6 destination PPS and/or independent BPS limit", "per-workload new-TCP-connection-rate ceiling (connect() only, UDP excluded)", "workload-scoped enforcement by namespace/pod/owner/labels/cgroup ID", "leased enforcement with fail-open", "optional XDP early ingress CIDR/port drop (global scope only)"}})
 }
 
 func (s *Server) agents(w http.ResponseWriter, _ *http.Request) {

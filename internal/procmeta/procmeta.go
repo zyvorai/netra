@@ -154,6 +154,26 @@ func statPath(pid int) string {
 	return "/proc/" + strconv.Itoa(pid) + "/stat"
 }
 
+// ListPIDs returns every PID currently present under /proc, by reading the
+// directory listing and keeping only numeric entries. A PID that exits
+// between this call and a subsequent Read/Cache.Get is not an error there
+// (ErrNoProcess), so callers don't need to pre-filter this list.
+func ListPIDs() ([]int, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, fmt.Errorf("procmeta: list /proc: %w", err)
+	}
+	out := make([]int, 0, len(entries))
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		out = append(out, pid)
+	}
+	return out, nil
+}
+
 // readFromStat finishes reading a Meta given the already-loaded contents of
 // /proc/PID/stat. This exists so Cache.Get does not read stat twice on a
 // miss.
