@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import Reveal from '../components/Reveal';
 
 type UnifiedRule = { id?: string; type: string; value: string; detail: string; extra: string; created?: string; raw?: any; del?: () => void };
 
@@ -335,10 +336,10 @@ export default function EBPF() {
 
     <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input aria-label="Namespace" value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input aria-label="Pod" value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input aria-label="Owner kind" value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input aria-label="Owner name" value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input aria-label="Label selector" value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-secondary" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
 
-    <div className="section-divider">
+    <Reveal className="section-divider">
       <h2>Deny rules</h2>
       <p>Fast-path exact-match and prefix deny lists — lease-bound, fail-open.</p>
-    </div>
+    </Reveal>
 
     <section className="card"><p className="eyebrow">EXACT IP</p><h3>IPv4 + IPv6 egress deny</h3>{cap((cfg?.blockedIPv4?.length||0), caps?.limits?.exactIPv4)}<div className="toolbar"><input aria-label="IP address" value={ip} onChange={e => setIP(e.target.value)} placeholder="203.0.113.10 or 2001:db8::1"/><button className="primary" onClick={() => call('/api/v1/ebpf/deny', 'POST', { ip })}>Add</button></div><div className="chips">{[...(cfg?.blockedIPv4 || []), ...(cfg?.blockedIPv6 || [])].map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => call('/api/v1/ebpf/deny/' + encodeURIComponent(x), 'DELETE')}>{x} ×</button>)}</div></section>
     <section className="card"><p className="eyebrow">CIDR</p><h3>Ingress / egress prefixes</h3>{cap((cfg?.blockedCidrs?.length||0), caps?.limits?.cidr)}<div className="ruleform"><input aria-label="CIDR" value={cidr} onChange={e => setCIDR(e.target.value)} placeholder="10.0.0.0/8 or 2001:db8::/32"/><select aria-label="CIDR direction" value={cidrDir} onChange={e => setCIDRDir(e.target.value)}><option>egress</option><option>ingress</option><option>both</option></select><button className="primary" onClick={() => call('/api/v1/ebpf/cidr', 'POST', { cidr, direction: cidrDir })}>Add CIDR</button></div><div className="chips">{(cfg?.blockedCidrs || []).map((x: any) => <button key={x.cidr + x.direction} aria-label={`Remove ${x.direction} ${x.cidr}`} onClick={() => call('/api/v1/ebpf/cidr/delete', 'POST', x)}>{x.direction} · {x.cidr} ×</button>)}</div></section>
@@ -351,10 +352,10 @@ export default function EBPF() {
 
     <section className="card"><p className="eyebrow">RATE CONTROL</p><h3>Destination PPS ceiling</h3><p>Simple fixed-window IPv4 destination packet-rate guard. Intended as an emergency containment control, not QoS.</p>{cap((cfg?.rateLimits?.length||0), caps?.limits?.rate)}<div className="ruleform"><input aria-label="Rate limit destination IP" value={rateIP} onChange={e => setRateIP(e.target.value)} placeholder="203.0.113.20"/><input aria-label="Packets per second" value={pps} onChange={e => setPPS(e.target.value)} inputMode="numeric"/><button className="primary" onClick={() => call('/api/v1/ebpf/rate', 'PUT', { destination: rateIP, pps: Number(pps) })}>Set PPS</button></div><div className="chips">{(cfg?.rateLimits || []).map((x: any) => <button key={x.destination} aria-label={`Remove ${x.destination}`} onClick={() => call('/api/v1/ebpf/rate/' + encodeURIComponent(x.destination), 'DELETE')}>{x.destination} · {x.pps}pps ×</button>)}</div></section>
 
-    <div className="section-divider">
+    <Reveal className="section-divider">
       <h2>Advanced engines</h2>
       <p>DDoS shield and the two independent NetworkPolicy-style engines — each has its own enable toggle and state.</p>
-    </div>
+    </Reveal>
 
     <section className="card span3"><p className="eyebrow">SHIELD</p><h3>DDoS per-source-class PPS shield</h3><p>Independent XDP-layer token-bucket limiter for SYN/UDP/ICMP/other floods, decoupled from the enforcement lease above. {shieldDiag?.summary && <>Live: {shieldDiag.summary.allowed||0} allowed · {shieldDiag.summary.dropped||0} dropped · {shieldDiag.summary.audited||0} audited.</>}</p><div className="ruleform"><select aria-label="Shield mode" value={shieldMode} onChange={e => setShieldMode(e.target.value)}><option value="off">off</option><option value="audit">audit</option><option value="enforce">enforce</option></select><label><input type="checkbox" checked={shieldProtectAll} onChange={e => setShieldProtectAll(e.target.checked)}/> protect all</label><input aria-label="SYN packets per second" value={shieldSyn} onChange={e => setShieldSyn(e.target.value)} inputMode="numeric" placeholder="SYN pps"/><input aria-label="UDP packets per second" value={shieldUdp} onChange={e => setShieldUdp(e.target.value)} inputMode="numeric" placeholder="UDP pps"/><input aria-label="ICMP packets per second" value={shieldIcmp} onChange={e => setShieldIcmp(e.target.value)} inputMode="numeric" placeholder="ICMP pps"/><input aria-label="Other packets per second" value={shieldOther} onChange={e => setShieldOther(e.target.value)} inputMode="numeric" placeholder="other pps"/><input aria-label="Burst seconds" value={shieldBurst} onChange={e => setShieldBurst(e.target.value)} inputMode="numeric" placeholder="burst s"/><button className="primary" onClick={applyShield}>Apply shield config</button></div>{!shieldProtectAll && <div className="toolbar"><input aria-label="Protected IPv4 address" value={shieldIP} onChange={e => setShieldIP(e.target.value)} placeholder="protected IPv4"/><button className="primary" onClick={addShieldIP}>Add protected IP</button></div>}<div className="chips">{(cfg?.shield?.protectedIpv4 || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => delShieldIP(x)}>{x} ×</button>)}</div></section>
 
@@ -413,10 +414,10 @@ export default function EBPF() {
       </div>
     </section>
 
-    <div className="section-divider">
+    <Reveal className="section-divider">
       <h2>Diagnostics</h2>
       <p>Read-only: datapath capabilities, recent events, exact counters, and node coverage.</p>
-    </div>
+    </Reveal>
 
     <section className="card"><p className="eyebrow">CAPABILITIES</p><h3>Datapath capabilities</h3><p>{caps?.observability?.length || 0} observability classes and {caps?.enforcement?.length || 0} enforcement classes are exposed by this release.</p><div className="chips">{(caps?.hooks || []).map((x: string) => <span key={x}>{x}</span>)}</div></section>
 

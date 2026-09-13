@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import Reveal from '../components/Reveal';
 
 type Summary = {
   dependencyEdges: number; externalEdges: number; baselineEntries: number; driftFindings: number; recommendations: number;
@@ -128,10 +129,10 @@ export default function Insights() {
       <div className="recommendations">{remediations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.title}</b><span>{r.severity} · {r.source}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.action, null, 2)}</pre></details>)}{!remediations.length && <p className="empty-state">No remediation draft currently meets the thresholds.</p>}</div>
     </section>
 
-    <section className="card span3">
+    <Reveal className="card span3">
       <p className="eyebrow">POLICY RECOMMENDATIONS</p><h3>Observed-traffic CiliumNetworkPolicy drafts</h3>
       {!ciliumEnabled && <p className="warning">Cilium integration is disabled. Drafts remain export/review only.</p>}
       <div className="recommendations">{recommendations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.namespace}/{r.workloadName}</b><span>{r.confidence} · {r.kind}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.manifest, null, 2)}</pre></details>)}{!recommendations.length && <p className="empty-state">No policy recommendation drafts currently meet the thresholds.</p>}</div>
-    </section>
+    </Reveal>
   </div>;
 }

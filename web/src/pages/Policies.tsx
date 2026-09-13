@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, authHeaders } from '../api';
+import Reveal from '../components/Reveal';
 
 const sample = JSON.stringify(
   {
@@ -296,7 +297,7 @@ export default function Policies() {
         </div>
       </section>
 
-      <section className="card span3">
+      <Reveal className="card span3">
         <p className="eyebrow">DURABLE REVISION SAFETY NET</p>
         <div className="toolbar">
           <button className="btn-secondary" onClick={exportHistory}>Export history</button>
@@ -313,7 +314,7 @@ export default function Policies() {
             </div>
           ))}
         </div>
-      </section>
+      </Reveal>
     </div>
   );
 }

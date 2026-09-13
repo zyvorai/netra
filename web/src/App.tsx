@@ -14,13 +14,13 @@ import EBPF from './pages/EBPF';
 import Health from './pages/Health';
 import Audit from './pages/Audit';
 import Workloads from './pages/Workloads';
-import PageHero from './components/PageHero';
+import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
 import { token } from './api';
 import { logout } from './auth';
 import { applyTheme, readStoredTheme, toggleTheme, type Theme } from './theme';
 
-const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: string }>> = {
+const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: string; tint?: HeroTint }>> = {
   connections: {
     eyebrow: 'Investigation',
     title: 'Follow every clue.',
@@ -45,31 +45,37 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     eyebrow: 'Network Health',
     title: 'TCP and DNS from the kernel.',
     lede: 'Sockops and packet hooks measure RTT, retransmits, RTOs, resets, and cleartext DNS latency.',
+    tint: 'green',
   },
   path: {
     eyebrow: 'Path Diagnostics',
     title: 'Connect latency and pressure.',
     lede: 'Measured active TCP establishment and cwnd/packets-out pressure from standalone sockops.',
+    tint: 'green',
   },
   drops: {
     eyebrow: 'Drop Diagnostics',
     title: 'Where packets disappear.',
     lede: 'Kernel skb reasons, softnet pressure, interface counters, and Netra policy-drop detective findings.',
+    tint: 'amber',
   },
   l7: {
     eyebrow: 'L7 Metadata',
     title: 'TLS and cleartext HTTP context.',
     lede: 'Best-effort SNI and HTTP Host from the datapath — evidence for review, not a full proxy.',
+    tint: 'amber',
   },
   insights: {
     eyebrow: 'Insights',
     title: 'Behavior, rates, and exposure.',
     lede: 'Baselines, drift, and review-only remediation proposals derived from exact eBPF counters.',
+    tint: 'purple',
   },
   ebpf: {
     eyebrow: 'Firewall',
     title: 'Observe everywhere. Enforce when leased.',
     lede: 'Every configured rule in one place — deny lists, DDoS shield, and NetPol — plus emergency controls. Netra owns only /sys/fs/bpf/netra.',
+    tint: 'red',
   },
   flows: {
     eyebrow: 'Hubble',
@@ -85,6 +91,7 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     eyebrow: 'Audit',
     title: 'What changed.',
     lede: 'Controller audit trail for policy and datapath actions.',
+    tint: 'red',
   },
 };
 
@@ -151,21 +158,28 @@ export default function App() {
         }}
       />
       <main>
-        {page === 'overview' ? (
-          <header className="hero">
-            <div>
-              <p className="eyebrow">STANDALONE eBPF DATAPATH</p>
-              <h1>See the network. Diagnose it. Contain it.</h1>
-              <p>
-                Netra runs its own eBPF datapath for workload flows, TCP health, DNS timing, socket identity, and leased
-                emergency controls.
-              </p>
-            </div>
-          </header>
-        ) : (
-          hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} />
-        )}
-        {body}
+        {/* Keyed on `page` so the hero and body remount (rather than just
+            re-render in place) on every navigation, re-triggering their
+            fadeRise/glow entrance animations — otherwise PageHero, being
+            the same component type at the same tree position across page
+            switches, would just update props with no visible transition. */}
+        <div key={page}>
+          {page === 'overview' ? (
+            <header className="hero">
+              <div>
+                <p className="eyebrow">STANDALONE eBPF DATAPATH</p>
+                <h1>See the network. Diagnose it. Contain it.</h1>
+                <p>
+                  Netra runs its own eBPF datapath for workload flows, TCP health, DNS timing, socket identity, and leased
+                  emergency controls.
+                </p>
+              </div>
+            </header>
+          ) : (
+            hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} tint={hero.tint} />
+          )}
+          {body}
+        </div>
       </main>
     </>
   );
