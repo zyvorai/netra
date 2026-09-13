@@ -74,4 +74,5 @@ netractl ebpf l7
 netractl flows summary --direction EGRESS
 netractl insights summary
 netractl explain --all --format json   # passive, read-only — see docs/explain.md
+netractl ai brief                      # heuristic by default, no config needed — see docs/ai.md
 ```

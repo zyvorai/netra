@@ -66,6 +66,24 @@ The rolling rate window is computed from positive deltas between consecutive cum
 
 Rate drift thresholds and exposure scores are deterministic operational heuristics, not statistical guarantees, vulnerability scores, or intrusion verdicts. Remediation proposals are review-only objects and are never auto-executed. An operator must still deliberately stage a rule and enable a time-limited enforcement lease, or use the existing Cilium preflight/apply path.
 
+## MCP server safety
+
+`netra-mcp` is a translation layer over the existing authenticated HTTP API — every tool call is one HTTP request with the same auth, validation, and error responses as calling that endpoint directly. It introduces no new privilege boundary of its own.
+
+Read tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, AI brief/ask/draft/digest/suggestions/explain, policy list/history/build/lockdown-preview) are always available. Mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) do not exist in the process at all unless `NETRA_MCP_ALLOW_MUTATIONS=true` is set — not merely hidden from `tools/list`. When enabled, they go through the exact same plan-token/risk-confirmation/lease machinery as `netractl` or the dashboard, and every mutating call is tagged with a distinct actor label (`NETRA_MCP_ACTOR`, default `mcp:hermes`) in the existing audit log, distinguishable from human use.
+
+MCP prompts (`prompts/list`/`prompts/get`) are canned text templates, not a technical enforcement mechanism — a prompt telling a client "never call the apply tool" is advisory to whatever agent consumes it; the actual mutation gate is still `NETRA_MCP_ALLOW_MUTATIONS`. MCP resources (`resources/list`/`resources/read`) are read-only, URI-addressed fetches of the same data a matching read tool would return.
+
+## AI layer safety
+
+The AI endpoints (`GET/POST /api/v1/ai/*`) turn data the controller already computes into operator-facing text. The heuristic engine (default, always on) does this deterministically with no external calls. An optional LLM rewrite is off unless `NETRA_AI_API_KEY` is set **on the controller process**; `netra-mcp` never receives that key, it only calls `/api/v1/ai/*` with the existing API token.
+
+The snapshot sent to an LLM provider, when configured, is bounded aggregates only: agent/stale/workload counts, fast-path mode, packet/byte/blocked totals, health score, top-N destinations/DNS/processes, and a handful of drift/exposure findings. It never contains packet payloads, HTTP bodies, TLS certificates, `argv`/cmdline, Kubernetes Secrets, either API key, or raw Hubble flow streams. The provider system prompt repeats those boundaries and forbids inventing counters or recommending unbounded enforce mode; provider failures fall back to the heuristic brief rather than failing the request.
+
+Two AI-adjacent features never apply anything on their own: `POST /api/v1/ai/draft` (and the dashboard's "Draft rule from this" buttons) only preview a natural-language deny/rate request as the exact eBPF API body plus a `netractl` line — actually applying it is a separate, deliberate action through the normal mutating path. The optional webhook alert poller can additionally emit a `source=ai kind=digest` event when the cluster is not quiet, through the same dedup/cooldown/delivery path as every other alert source; this adds no new anomaly-detection logic, only a narrative rollup over counters that already power the other events.
+
+The digest's incident fingerprint (a 12-hex hash over mode/health-bucket/stale-flag/finding-kinds, deliberately not raw packet counters) is in-process, unpersisted, and shared: the webhook poller, the dashboard's nav chip (polling every 30s while any page is open), and any interactive `GET /api/v1/ai/digest` caller all read and write one "last seen" slot, not one per caller. This is a UX convenience trade-off, not a security boundary — treat it as informational only.
+
 ## Authentication defaults
 
 The controller refuses startup when either `NETRA_API_KEY` or `NETRA_AGENT_KEY` is missing. `NETRA_ALLOW_UNAUTHENTICATED=true` is an explicit local-development escape hatch and should not be used on shared networks. Helm enforces the same default and supports `auth.existingSecret`.

@@ -49,7 +49,7 @@ Each line you type after startup should produce one corresponding JSON-RPC respo
 | `NETRA_API_KEY` | unset | Bearer token; must match the controller's `NETRA_API_KEY`. If the controller has no API key configured, leave this unset too |
 | `NETRA_TLS_INSECURE` | `false` | Set `true` to skip TLS verification against a local/self-signed controller. Never set this against a controller reachable over an untrusted network |
 | `NETRA_MCP_ACTOR` | `mcp:hermes` | Recorded as `X-Netra-Actor` on every call, so mutations show up distinctly from human `netractl` use in `netra_audit`. Set a more specific value (e.g. `mcp:hermes:oncall-bot`) if you run several agent identities against the same controller |
-| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 28 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
+| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 38 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
 
 Example:
 
@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the ~34 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 47 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -114,7 +114,7 @@ mcp_servers:
 ## Security considerations
 
 - **One API key, one privilege level.** Netra's controller has a single `NETRA_API_KEY` bearer token with no scoping — `netra-mcp` inherits whatever that token can do. There is no way to hand an MCP client a token that can read but not mutate; the *only* mutation gate is `NETRA_MCP_ALLOW_MUTATIONS` on the `netra-mcp` process itself. Run a dedicated `netra-mcp` process (with mutations enabled) separately from any process serving human dashboards or other integrations, so a compromised or misbehaving agent's blast radius is limited to what this specific process was allowed to do.
-- **Every mutation is attributed and audited.** All 28 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
+- **Every mutation is attributed and audited.** All 38 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
 - **Policy apply is the highest-consequence tool, and it's the most guarded.** `netra_policy_apply` requires a fresh `plan_token` from `netra_policy_plan` (single-use, content-hash-bound, 5-minute expiry) and, for high/critical-risk changes, an explicit `confirm_risk` echo. An agent cannot apply a policy it hasn't just planned, and cannot silently escalate past a risk warning — the confirmation string must appear as a literal argument value, which means the calling model has to have "read" the risk level and intentionally repeated it back, not just retried blindly.
 - **Enforce mode is time-bounded by design.** `netra_ebpf_mode` can flip the whole fast path from observe to enforce, but every enforce period requires a lease (1m-24h, default 15m) and the controller auto-reverts to observe on expiry (`store.SetMode`'s fail-open behavior) — an agent cannot leave the cluster in enforce mode indefinitely by mistake; the lease must be actively renewed.
 - **Baseline/rate-baseline clears require a literal confirmation value**, sent automatically by `netra-mcp` itself (`X-Netra-Confirm-Baseline-Clear: clear`) — this exists to stop an accidental clear via a generic scripted client, not to add friction for `netra-mcp`'s own calls; treat `netra_insights_baseline_clear`/`netra_insights_rate_baseline_clear` as fully live once mutations are enabled.
@@ -194,6 +194,12 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ebpf_drops` | `GET /api/v1/ebpf/drops` | `limit` (1-500, default 50) | Kernel skb drop-reason counters aggregated across agents |
 | `netra_ebpf_diagnose` | `GET /api/v1/ebpf/diagnose` | `limit` (default 50) | Drop-detective root-cause findings correlated with current fast-path config |
 | `netra_ebpf_l7` | `GET /api/v1/ebpf/l7` | `limit` (1-1000, default 100) | Best-effort TLS SNI / cleartext HTTP metadata |
+| `netra_ebpf_ipv6` | `GET /api/v1/ebpf/ipv6` | `limit` (1-500, default 50) | IPv6 extension-header/fragmentation counts and anomalies per node |
+| `netra_ebpf_interfaces` | `GET /api/v1/ebpf/interfaces` | `limit` (1-200, default 10) | Per-interface packets/bytes/blocked + top destinations, from TC/TCX-attached hooks only (not cgroup or XDP-early-deny traffic) |
+| `netra_ebpf_shield` | `GET /api/v1/ebpf/shield` | `limit` (1-500, default 50) | XDP DDoS shield diagnostics: allowed/dropped/audited by class (SYN/UDP/ICMP/other) per node, plus top offending sources, with anomaly detection |
+| `netra_ebpf_rules_list` | `GET /api/v1/ebpf/rules` | — | Every eBPF fast-path deny rule with its stable ID, for use with `netra_ebpf_rules_patch`/`_delete`/`_history` instead of the legacy value-keyed add/delete tools |
+| `netra_ebpf_rules_get` | `GET /api/v1/ebpf/rules/{id}` | `id` **(path, required)** | One rule by its stable ID |
+| `netra_ebpf_rules_history` | `GET /api/v1/ebpf/rules/{id}/history` | `id` **(path, required)**, `limit` (1-200, default 50) | Before/after revision history for one rule's edits via `netra_ebpf_rules_patch`. Creation/deletion remain visible via `netra_audit` instead |
 
 ### Insights (always available)
 
@@ -248,6 +254,16 @@ None of these mutate the cluster or Netra's store, and none record an audit even
 | `netra_ebpf_process_add` / `netra_ebpf_process_delete` | `POST /api/v1/ebpf/process` / `POST .../process/delete` | `name` **(required)** | Linux `comm`, up to 15 bytes |
 | `netra_ebpf_sni_add` / `netra_ebpf_sni_delete` | `POST /api/v1/ebpf/sni` / `POST .../sni/delete` | `name` **(required)** | Exact TLS SNI, best-effort (requires ClientHello parsing); no wildcards |
 | `netra_ebpf_rate_set` / `netra_ebpf_rate_delete` | `PUT /api/v1/ebpf/rate` / `DELETE .../rate/{ip}` | `destination` **(required, exact IPv4)**, `pps` **(required, 1-10000000, set only)** | |
+| `netra_ebpf_shield_set` | `PUT /api/v1/ebpf/shield` | `mode` **(`off`\|`audit`\|`enforce`)**, `protectAll` (bool), `protectedIpv4` (array, ignored if `protectAll`), `synPps`/`udpPps`/`icmpPps`/`otherPps` (0-10000000, 0 disables that class), `burstSeconds` | XDP DDoS shield: per-source-class PPS token-bucket limiter, independent of the fast-path deny-list. Use `audit` before `enforce` to preview what would be dropped |
+| `netra_ebpf_netpol_config_set` | `PUT /api/v1/ebpf/netpol/config` | `enabled` **(required, bool)** | Enable/disable the legacy per-workload NetPol-emulation deny engine (independent of the fast-path deny-list and the v2 engine below) |
+| `netra_ebpf_netpol_v2_config_set` | `PUT /api/v1/ebpf/netpol/v2/config` | `enabled` **(required, bool)** | Enable/disable the v2 per-workload allow-list/default-deny engine. An explicit `allow` rule (`netra_ebpf_netpol_rule_add`) can override even the flat fast-path deny-list for that workload+peer — deliberate, not a bug |
+| `netra_ebpf_netpol_rule_add` | `POST /api/v1/ebpf/netpol/rules` | `selector` **(required, object: namespace/pod/workloadKind/workloadName/labels/cgroupId, at least one field)**, `peerIpv4` **(required, exact)**, `port`, `protocol` (default `ANY`), `direction` (default `egress`), `action` **(required, `allow`\|`deny`)** | Returns the updated fast-path config with the new rule's assigned `id` |
+| `netra_ebpf_netpol_rule_delete` | `DELETE /api/v1/ebpf/netpol/rules/{id}` | `id` **(path, required)** | From the fast-path config's `netPolRules`, or the `rule_add` response |
+| `netra_ebpf_netpol_default_deny_plan` | `POST /api/v1/ebpf/netpol/default-deny/plan` | `selector` **(required, object)**, `enabled` **(required, bool)**, `lease` (default `5m`, 1m-60m), `allowNoRules` (bool) | Mandatory first step for v2 default-deny: assesses risk (zero covering allow rules ⇒ `critical`, refused unless `allowNoRules`) and issues a single-use, 5-minute `receipt.token`. Deactivating is always `low` risk. Mutates nothing else |
+| `netra_ebpf_netpol_default_deny_set` | *(PUT, path not separately listed)* | `selector`/`enabled`/`lease` **(must exactly match the prior plan call)**, `plan_token` **(required)**, `confirm_risk` (required if the plan's risk was `medium`+) | The single highest-blast-radius mutation in the firewall feature — a workload in default-deny posture only accepts traffic an explicit allow rule permits. Requires a fresh `netra_ebpf_netpol_default_deny_plan` token |
+| `netra_ebpf_rules_patch` | `PATCH /api/v1/ebpf/rules/{id}` | `id` **(path, required)**, plus the fields matching the rule's type (`ip` for ip4/ip6; `cidr`+`direction` for cidr; `protocol`+`port`+`direction` for port; `uid` for uid; `name` for dns/sni/process; `destination`+`pps` for rate) | Edits one rule in place by its stable ID, preserving the ID and recording a before/after revision (see `netra_ebpf_rules_history`). Same validation as the corresponding add tool |
+| `netra_ebpf_rules_delete` | `DELETE /api/v1/ebpf/rules/{id}` | `id` **(path, required)** | Stable-ID equivalent of the legacy value-keyed delete tools |
+| `netra_ebpf_rules_rollback` | `POST /api/v1/ebpf/rules/{id}/rollback/{revision}` | `id` **(path, required)**, `revision` **(path, required)** | Undoes one specific edit, restoring its pre-edit value — recorded as a new revision rather than rewriting history |
 
 Every eBPF mutating tool returns the full updated `EBPFFastPathConfig` on success.
 

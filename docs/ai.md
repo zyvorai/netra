@@ -85,7 +85,7 @@ The Overview page hosts a read-only **Ask Netra** card
 
 The nav bar (`web/src/components/DigestChip.tsx`) shows a small severity/fingerprint chip, polling `GET /api/v1/ai/digest` every 30s while any page is open; clicking it jumps to Overview. Because the dashboard now polls this endpoint continuously, it's an active participant in the shared "last fingerprint" state described above alongside the alert poller and any interactive CLI/MCP calls.
 
-Every **Explain** popover (`web/src/components/ExplainFinding.tsx`, on Health/Drops/Path/Insights/Explain findings) can additionally try to draft a rule from that finding: it regex-extracts an IP, CIDR, or DNS/SNI name from the finding's kind/subject/message and, if found, offers a "Draft rule from this" button that calls `POST /api/v1/ai/draft` — same preview-only endpoint the Ask Netra card and `netractl ai draft` use, never applies anything.
+Every **Explain** popover (`web/src/components/ExplainFinding.tsx`, on Health/Drops/Path/Insights/L7/Explain findings) can additionally try to draft a rule from that finding: it regex-extracts an IP, CIDR, or DNS/SNI name from the finding's kind/subject/message and, if found, offers a "Draft rule from this" button that calls `POST /api/v1/ai/draft` — same preview-only endpoint the Ask Netra card and `netractl ai draft` use, never applies anything.
 
 ## CLI
 
@@ -105,12 +105,24 @@ Always-on read tools:
 - `netra_ai_status`
 - `netra_ai_brief`
 - `netra_ai_ask` (`question` required)
+- `netra_ai_draft` (`question` required) — preview only, never applies
+- `netra_ai_digest` — on-call card + incident fingerprint
+- `netra_ai_suggestions` — live follow-up questions
+- `netra_ai_explain` (`kind`, `subject`, `message`, `severity`, `page`, `question`, all optional)
 
 Prompts (MCP `prompts/list` / `prompts/get`):
 
 - `netra_triage` — start with the brief, stay read-only
 - `netra_explain_drops` — optional `namespace` / `pod`
+- `netra_draft_rule` (`request` required) — draft via `netra_ai_draft`; never applies
+- `netra_oncall_digest` — the on-call card via `netra_ai_digest`; reports whether the fingerprint changed
 - `netra_policy_review` — optional `namespace` / `workload`; forbids apply
+
+Resources (MCP `resources/list` / `resources/read`) — read-only, URI-addressed, no tool call needed:
+
+- `netra://ai/brief`, `netra://ai/digest`, `netra://ai/suggestions`, `netra://status`
+
+See `docs/mcp-integration.md` for the full tool/prompt/resource reference.
 
 ## Optional LLM provider
 
@@ -163,3 +175,5 @@ inventing counters or recommending unbounded enforce mode.
 - Policy drafts stay drafts. `reviewRequired` / plan→apply is unchanged.
 - AI routes are authenticated the same way as `/api/v1/insights/*`.
 - No new BPF maps. No new privileged agent capabilities.
+- The optional webhook alert poller (`docs/alerting.md`) also emits a `source=ai kind=digest` event when the cluster isn't quiet, through the exact same dedup/cooldown/delivery path as every other alert source — no new thresholds, no new detector, and it's a narrative over counters that already power the other events.
+- The digest's incident fingerprint is in-process, unpersisted, **shared** state: the webhook poller, the nav's digest chip (30s poll while any page is open), and any interactive `GET /api/v1/ai/digest` call all read and write the same single "last fingerprint" slot, not one per caller. Running more than one of these concurrently means each can affect the others' `changed` flag.

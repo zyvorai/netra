@@ -7,7 +7,7 @@ sidebar_position: 1
 Netra has two workloads: a controller (`netrad`) that serves the API/UI and holds desired configuration, and a node agent (`netra-agent`) that owns the eBPF programs and maps on each Linux node.
 
 ```text
-                        Browser / netractl
+                  Browser / netractl / netra-mcp
                                |
                                v
                     +---------------------+
@@ -42,11 +42,12 @@ cmd/netrad/             controller/API/UI server
 cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
-cmd/netra-mcp/          MCP server: controller API as stdio tools for AI agents
+cmd/netra-mcp/          MCP server: controller API as stdio tools + prompts + resources for AI agents
 internal/agent/         BPF loading, hook attachment and reporting
 internal/doctor/        host readiness checks used by netra-doctor
 internal/observability/ standalone eBPF summaries and workload topology
 internal/health/        TCP/DNS/connect health scoring and anomaly signals
+internal/ai/            heuristic briefs + optional OpenAI-compatible rewrite
 bpf/netra_tc.c           the eBPF program itself
 ```
 
