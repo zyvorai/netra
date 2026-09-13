@@ -22,7 +22,9 @@ fails open to observe. The node agent owns programs under
 ## AI surface
 
 - Heuristic briefs + optional OpenAI-compatible rewrite: `internal/ai`,
-  `GET/POST /api/v1/ai/*`, `netractl ai`, MCP `netra_ai_*`.
+  `GET/POST /api/v1/ai/*` (`status`, `brief`, `ask`, `draft`, `digest`,
+  `suggestions`, `explain`), `netractl ai`, MCP `netra_ai_*` plus
+  `netra://ai/*` resources.
 - Docs: `docs/ai.md`, `docs/mcp-integration.md`.
 - AI endpoints are read-only. Do not wire them to mode/rule/policy apply.
 

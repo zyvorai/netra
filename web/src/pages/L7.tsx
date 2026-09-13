@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import ExplainFinding from '../components/ExplainFinding';
 
 export default function L7() {
   const [data, setData] = useState<any>();
@@ -67,6 +68,7 @@ export default function L7() {
           const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
           return <div className="datarow obs" key={i}>
             <span className="truncate" title={who} aria-label={who}>{who}</span><span className="truncate" title={x.sni} aria-label={x.sni}>{x.sni}</span><span>{x.handshakes}</span><span className={x.blocked ? 'blocked' : ''}>{x.blocked}</span><span>{x.cgroupId || 0}</span>
+            <ExplainFinding page="l7" kind="sni" subject={who} message={x.sni} />
           </div>;
         })}
       </div>}
@@ -81,6 +83,7 @@ export default function L7() {
           const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
           return <div className="datarow obs" key={i}>
             <span className="truncate" title={who} aria-label={who}>{who}</span><span>{x.method}</span><span className="truncate" title={x.host} aria-label={x.host}>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
+            <ExplainFinding page="l7" kind="http-host" subject={who} message={`${x.method || ''} ${x.host || ''}`} />
           </div>;
         })}
       </div>}

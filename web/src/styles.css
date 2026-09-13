@@ -1666,7 +1666,11 @@ code {
   padding: 2px 8px;
   border-radius: var(--radius-md);
 }
-.explain-finding { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+/* Explain buttons live inside several fixed-column-count grid rows
+   (.datarow.obs, .insightrow, .agent.wide) as a trailing child with no
+   explicit grid placement — without this, each one falls into whatever
+   implicit cell comes next instead of sitting under the row it explains. */
+.explain-finding { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; grid-column: 1 / -1; }
 .explain-pop {
   flex-basis: 100%;
   margin-top: 8px;

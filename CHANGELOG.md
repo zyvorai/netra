@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.13 — 2026-09-13
+
+- **Extended Explain to L7** (0.27.12) with a sixth external PR kit continuing the same feature — same recurring pattern (explain-deletion hunk rejected, stale docs rejected in favor of this project's already-more-complete copies). Two things this round:
+  - The Explain button (with draft-from-finding) is now on L7's SNI and HTTP-host rows too, alongside Health/Drops/Path/Insights/Explain. L7's third table (socket attempts) intentionally does not get one, matching the kit's own scope.
+  - The kit's own `styles.css` still had the hardcoded hex colors on `.digest-chip.warning`/`.critical` from before the 0.27.12 token fix (its branch predates that fix, same class of staleness as the recurring `explain`/test-assertion reversions) — rejected, kept the token-based version.
+  - **Found and fixed a real, previously-unverified layout bug**, not something any kit introduced or could have caught: `.explain-finding`'s wrapper had no explicit grid placement, but every page it's used on (`.datarow.obs`, `.insightrow`, `.agent.wide`) is a fixed-column-count CSS Grid. Without `grid-column: 1 / -1` (the same technique `.agent small` already uses for exactly this reason), the Explain button falls into whatever implicit grid cell comes next — sitting under just the first column's width instead of spanning the full row — on every page it appears on, going back to when it was first added in 0.27.10. Fixed once, centrally, rather than per-page.
+  - Also picked up a real, accurate `AGENTS.md` update the kit did get right: the AI surface note now lists all seven `/api/v1/ai/*` endpoints and the `netra://ai/*` resources instead of just three.
+  - Verified: `go build/vet/test ./...`, `helm lint`, web typecheck/test (56/56)/build.
+- Version bumped to 0.27.13 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.12 — 2026-09-13
 
 - **Rounded out the AI layer's dashboard reach** (0.27.11) with a fifth external PR kit continuing the same feature — same recurring pattern (explain-deletion hunk rejected, this project's already-more-complete docs kept over the kit's stale copies).
