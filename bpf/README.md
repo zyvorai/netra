@@ -10,6 +10,7 @@ Netra owns these programs and maps independently of Cilium. It does not read, mu
 - `tc/ingress`, `tc/egress`: optional TCX interface attachment from the agent.
 - `sockops`: TCP lifecycle, RTT, connect latency and transport-pressure telemetry.
 - `xdp`: optional early-ingress CIDR/port drop.
+- `xdp` (shield variant, `netra_xdp_shield`): optional per-source-class (SYN/UDP/ICMP/other) PPS token-bucket DDoS shield, attached instead of the generic early-deny `xdp` program above when enabled. Independent of the fast-path deny-list and its own mode; see `docs/tcx-and-shield.md`.
 - `raw_tracepoint/kfree_skb`: optional node-level kernel skb drop-reason counting on kernels whose tracepoint exposes a reason field.
 
 ## Maps
@@ -73,3 +74,13 @@ v0.8 limitations: no IPv6 extension-header walk, no TCP DNS parser, no DoH/DoT i
 - `blocked_sni`: exact normalized TLS SNI emergency deny entries.
 
 TLS and HTTP parsing is metadata-only and best-effort on a single skb. Netra does not reassemble TCP streams or export payload bytes. SNI-specific enforcement applies only when an ordinary ClientHello hostname is fully parsed; fragmented ClientHello, ECH and QUIC traffic fail open for the SNI rule.
+
+## v0.18+ XDP Shield maps
+
+- `shield_cfg`: generation-published mode/thresholds/burst config for the shield.
+- `shield_protected4`, `shield_protected6`: exact-IP allow-list of destinations the shield applies to when `protectAll` is off (v6 added 0.27.16, mirrors `shield_protected4`'s key/value shape).
+- `shield_sources`: per-source-class token-bucket state (LRU).
+- `shield_stats`, `shield_class_stats`: aggregate and per-class (syn/udp/icmp/other) allowed/dropped/audited counters.
+- `shield_source_hits`: per-source "would-be-denied" hit counts for diagnostics.
+
+See `docs/tcx-and-shield.md` for the full config shape, attach requirements, and per-class/per-source diagnostics.

@@ -150,17 +150,17 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_ebpf_rate_set", method: "PUT", path: "/api/v1/ebpf/rate",
-			description: "Set a packets-per-second rate limit for an exact IPv4 destination. Returns the full updated fast-path config.",
+			description: "Set a packets-per-second rate limit for an exact IPv4 or IPv6 destination. Returns the full updated fast-path config.",
 			schema: objSchema(map[string]any{
-				"destination": strProp("Exact IPv4 destination address."),
+				"destination": strProp("Exact IPv4 or IPv6 destination address."),
 				"pps":         intProp("Rate limit in packets per second, 1-10000000."),
 			}, "destination", "pps"),
 			bodyFields: true,
 		},
 		{
 			name: "netra_ebpf_rate_delete", method: "DELETE", path: "/api/v1/ebpf/rate/{ip}",
-			description: "Remove the rate limit for an IPv4 destination. Returns the full updated fast-path config.",
-			schema:      objSchema(map[string]any{"ip": strProp("Exact IPv4 destination address.")}, "ip"),
+			description: "Remove the rate limit for an IPv4 or IPv6 destination. Returns the full updated fast-path config.",
+			schema:      objSchema(map[string]any{"ip": strProp("Exact IPv4 or IPv6 destination address.")}, "ip"),
 			pathParams:  []string{"ip"},
 		},
 		{

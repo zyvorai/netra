@@ -63,8 +63,8 @@ raw packet counters — so two operators can tell whether they are looking
 at the same incident cluster after counters have moved.
 
 `POST /api/v1/ai/draft` turns "deny dns malware.example" / "rate limit
-1.2.3.4 to 100 pps" into a preview of the existing eBPF API body and the
-matching `netractl` line. It never applies the rule.
+1.2.3.4 to 100 pps" / "allow 10.0.0.5" into a preview of the existing eBPF
+API body and the matching `netractl` line. It never applies the rule.
 
 `POST /api/v1/ai/explain` narrates one structured finding (kind /
 subject / message / page) against the live snapshot.
@@ -80,7 +80,7 @@ The Overview page hosts a read-only **Ask Netra** card
 - Surfaces whether the controller is heuristic-only or has an LLM rewrite configured
 - Contains no enforce / apply / rule-edit controls
 - Loads live suggestion chips from `/api/v1/ai/suggestions`
-- If the question looks like deny/rate, shows a rule preview (never an Apply button)
+- If the question looks like deny/rate/allow, shows a rule preview (never an Apply button)
 - Copy on-call card + incident fingerprint from `/api/v1/ai/digest`
 
 The nav bar (`web/src/components/DigestChip.tsx`) shows a small severity/fingerprint chip, polling `GET /api/v1/ai/digest` every 30s while any page is open; clicking it jumps to Overview. Because the dashboard now polls this endpoint continuously, it's an active participant in the shared "last fingerprint" state described above alongside the alert poller and any interactive CLI/MCP calls.

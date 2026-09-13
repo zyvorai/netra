@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.27.17 — 2026-09-13
+
+- **Documentation audit pass** covering the doc drift left behind by 0.27.15/0.27.16 (allow-exceptions, dual-stack rate limiting, Shield IPv6). A research pass found the two live deployments (`80.79.5.173`, verified via Chrome earlier this release) were functioning correctly, but several docs — including one source-of-truth spot inside the MCP server itself — hadn't caught up:
+  - **`cmd/netra-mcp/tools_mutate.go`**: `netra_ebpf_rate_set`/`netra_ebpf_rate_delete`'s tool descriptions and field descriptions still said "exact IPv4 destination" — stale since 0.27.16 made rate limiting dual-stack. This is source-of-truth text surfaced directly to MCP clients (Hermes, Claude Desktop, etc.), so it was misleading any AI agent using the tool, not just human readers. Fixed to say "IPv4 or IPv6".
+  - **`docs/mcp-integration.md`**: matching fix for the `netra_ebpf_rate_set`/`_delete` row; `netra_ebpf_shield_set`'s row was missing the `protectedIpv6` field entirely (added 0.27.16) — added.
+  - **`docs/firewall.md`**: the unified rules table's own description never mentioned the allow-exception rule types (`allow4`/`allow6`, added 0.27.15) and still said "9 flat types" (now 11, confirmed against `internal/store/store.go`'s type-keyed switches). Also clarified that allow rules are add/delete-only — no in-place PATCH — so the doc doesn't imply Edit support that doesn't exist.
+  - **`docs/ai.md`**: the `POST /api/v1/ai/draft` example and the Ask Netra card's behavior description didn't mention "allow" as a recognized phrasing, even though `DraftRule` has drafted `allow` rules since 0.27.15.
+  - **`README.md`**: the "Emergency enforcement" feature list — the most user-facing bullet list in the whole README — never got an allow-exception bullet added in 0.27.15, and its PPS-ceiling bullet still said "Exact IPv4" instead of "Exact IPv4/IPv6" after 0.27.16. Both fixed.
+  - **`docs/high-availability.md`**: "exact IPv4 emergency deny entries" in the durable-state list was narrow/stale (deny has been dual-stack for a while, predating this session, and the list didn't cover allow/rate/Shield/NetPol either) — folded into the adjacent "fast-path configuration" bullet with an explicit list of what that covers.
+  - **`bpf/README.md`**: the entire XDP Shield subsystem (`netra_xdp_shield` program, all seven `shield_*` maps including the new `shield_protected6`) was undocumented in this file even before this session — added a Programs entry and a new "v0.18+ XDP Shield maps" section, cross-referencing `docs/tcx-and-shield.md` for the full config shape.
+  - Confirmed clean, no changes needed: `docs/standalone-ebpf.md`, `docs/tcx-and-shield.md`, `helm/netra/values.yaml`, `helm/netra/Chart.yaml`, all of `website/`, and `docs/native-netpol.md` (its "IPv4 only" NetPol v2 peer-rule note is correct by design, not stale — left alone).
+  - Verified: `go build/vet/test ./...`, `helm lint`.
+- Version bumped to 0.27.17 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.16 — 2026-09-13
 
 - **Closed four gaps found in a "what's missing" audit** of the whole product surface (docs, backend API, web dashboard, CLI, MCP, and the eBPF fast-path controls) — three parallel research passes (TODO/gap-marker sweep, marketing-vs-implementation check, API/web/CLI/MCP surface-parity check) found the codebase unusually honest overall, but surfaced these concrete, closeable gaps:

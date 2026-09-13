@@ -48,8 +48,7 @@ Durable across leader change:
 
 - CiliumNetworkPolicy revision history;
 - audit events;
-- exact IPv4 emergency deny entries;
-- fast-path configuration;
+- fast-path configuration (deny/allow-exception/CIDR/port/UID/process/DNS/SNI/rate entries, Shield, NetPol);
 - unexpired preflight receipts.
 
 Intentionally ephemeral:

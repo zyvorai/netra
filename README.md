@@ -94,13 +94,14 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 ### Emergency enforcement
 
 - Exact IPv4 and IPv6 egress deny.
+- Exact IPv4/IPv6 allow-exception, evaluated before deny/CIDR/port/rate — does not itself enable enforce mode.
 - IPv4/IPv6 CIDR deny for ingress, egress or both using BPF LPM tries.
 - TCP/UDP/ANY destination-port deny for ingress, egress or both.
 - Linux UID deny for new socket operations.
 - Linux process-`comm` deny for new socket operations.
 - Exact cleartext DNS-name deny for UDP/53 queries.
 - Exact TLS SNI deny when an ordinary ClientHello SNI is successfully parsed in the current egress skb.
-- Exact IPv4 destination PPS ceiling using a simple fixed one-second window.
+- Exact IPv4/IPv6 destination PPS ceiling using a simple fixed one-second window.
 - Optional XDP early-ingress CIDR/port drop on explicitly selected interfaces.
 - Workload-scoped enforcement by namespace, pod, immediate owner, exact labels, or cgroup ID.
 - Scope preview plus per-node selected-cgroup coverage before enforcement.
