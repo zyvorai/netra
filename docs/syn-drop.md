@@ -92,10 +92,21 @@ reverting the flag restores full-drop behavior.
 already-proven LPM_TRIE map type** (`blocked_cidr_v4`/`blocked_cidr_v6`
 already load and enforce correctly on real kernels) and adds one more
 `||` disjunct to the existing bounded `blocked==1` conditional — no new
-branch shape, no ABI change. It has not yet been separately load-tested
-on real hardware; that check is the same shape as the exact-IP
-verification above (CIDR deny rule as a control, then the SYN-drop-CIDR
-flag, confirming new connections are refused while a pre-existing
-connection through the same CIDR keeps flowing), run on two different
-live kernels to catch any instruction-count/complexity-budget surprise
-specific to one kernel version.
+branch shape, no ABI change. Live-deployed and confirmed to load and
+attach with zero verifier rejections (0.27.51); the full-block control
+and new-connection-refused behavior were also confirmed live, but the
+specific "a pre-existing connection keeps flowing" distinction couldn't
+be cleanly proven against a live, shared cluster — every raw-socket test
+client tried had its connection die within 15-30s regardless of whether
+any rule was active, a test-fixture problem, not a firewall effect (see
+CHANGELOG.md's 0.27.51 entry).
+
+**That exact distinction is now covered deterministically instead**:
+`bpf/integration/syndrop_cidr_test.go` (`TestSynDropCIDR`,
+`TestSynDropExactIP`) loads the real compiled BPF program and runs it
+against synthetic packets via the kernel's `BPF_PROG_TEST_RUN`, in CI, on
+every push — proving `!syn_new` is a pure per-packet TCP-flag check (SYN
+set, ACK clear), independent of conntrack state, so a non-SYN packet for
+a flagged address/direction is let through with zero dependency on a real
+connection's lifecycle. See `bpf/integration/helpers.go`'s package doc
+comment for how this harness works and why it exists.

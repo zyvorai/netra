@@ -80,6 +80,27 @@ the kernel and can be enabled independently.
   has no real discriminator and can't exist (rejected at the API layer, so
   no such row is ever written to `netpol_rules4`).
 
+  **Live-deployed and confirmed to load and attach with zero verifier
+  rejections (0.27.51)**, and the write path was confirmed correct via a
+  direct `bpftool map dump` of `netpol_rules4`. Live traffic admission
+  itself couldn't be cleanly proven against a real cluster — the only
+  available in-pod HTTPS test client (a `kubectl debug` ephemeral
+  container) runs in a cgroup outside the target pod's resolved workload
+  set, so the rule correctly never applied to it, not a sign anything was
+  broken (see CHANGELOG.md's 0.27.51 entry). **That fallback-ordering
+  logic is now covered deterministically instead**:
+  `bpf/integration/netpol_portonly_test.go` (`TestNetPolPortOnly`) loads
+  the real compiled BPF program and runs it via the kernel's
+  `BPF_PROG_TEST_RUN` against synthetic packets, in CI, on every push —
+  including the priority case that matters most: an exact peer+port match
+  wins over a coexisting port-only rule, which still applies to every
+  *other* peer on that port. Building this test surfaced and fixed a real,
+  separate, pre-existing bug: `internal/agent.applyNetPolV2` stored the
+  port field in host-native byte order instead of the packet's wire order,
+  silently making every NetPol v2 rule with a *specific* non-palindromic
+  port (not just port-only ones) a dead entry that could never match real
+  traffic — see the 0.27.52 CHANGELOG entry for the full explanation.
+
   **No UID/process-name allow-exceptions — deliberately deferred, different
   hook family, not just unfinished work.** The flat global engine's
   `allowed_uids`/`allowed_comms` exceptions are checked in `socket4`/`socket6`

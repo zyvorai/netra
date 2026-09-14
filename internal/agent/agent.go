@@ -2816,6 +2816,19 @@ func (a *Agent) applyNetPolV2(cfg models.EBPFFastPathConfig) error {
 			}
 			peer = native.Uint32(ip.To4())
 		}
+		// netpol_v2_lookup4 compares this key's raw bytes against .port
+		// (bpf/netra_tc.c), which is copied verbatim from the packet's
+		// big-endian wire bytes with no byte-swap. ruleKey is a typed Go
+		// struct, so cilium/ebpf marshals Port using the host's native
+		// (little-endian) byte order — storing r.Port's decimal value
+		// directly would therefore never match a real, non-palindromic
+		// port (e.g. 443) on any little-endian host. Round-tripping
+		// through a big-endian buffer then native.Uint16, mirroring the
+		// Peer field's native.Uint32(ip.To4()) trick two lines up, makes
+		// the final marshaled bytes equal the wire-order bytes instead.
+		var portBE [2]byte
+		binary.BigEndian.PutUint16(portBE[:], r.Port)
+		port := native.Uint16(portBE[:])
 		proto := uint8(0)
 		switch strings.ToUpper(r.Protocol) {
 		case "TCP":
@@ -2839,7 +2852,7 @@ func (a *Agent) applyNetPolV2(cfg models.EBPFFastPathConfig) error {
 				continue
 			}
 			for _, dir := range dirs {
-				desired[ruleKey{CgroupID: cg, Peer: peer, Port: r.Port, Protocol: proto, Direction: dir}] = action
+				desired[ruleKey{CgroupID: cg, Peer: peer, Port: port, Protocol: proto, Direction: dir}] = action
 			}
 		}
 	}
