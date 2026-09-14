@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zyvorai/netra/internal/forecast"
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/store"
@@ -201,6 +202,24 @@ func (s *Server) insightsExposure(w http.ResponseWriter, r *http.Request) {
 	behavior := insights.Drift(s.store.Baseline(), s.store.AgentStatuses(time.Now(), s.agentStaleAfter))
 	rates := s.rateDrift(r)
 	writeJSON(w, 200, map[string]any{"items": insights.Exposure(graph, behavior, rates), "rateWarming": rates.Window.Warming})
+}
+
+func (s *Server) insightsHealthTrend(w http.ResponseWriter, r *http.Request) {
+	threshold := forecast.DefaultBreachThreshold
+	if raw := r.URL.Query().Get("threshold"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 99 {
+			errorJSON(w, 400, "threshold must be an integer between 0 and 99")
+			return
+		}
+		threshold = n
+	}
+	now := time.Now()
+	// HealthHistory retains at most 2h (internal/store/history.go), well
+	// inside forecast.MaxHorizon, so a zero `since` already returns
+	// everything usable — no separate window computation needed here.
+	history := s.store.HealthHistory(time.Time{})
+	writeJSON(w, 200, forecast.Project(history, threshold, now))
 }
 
 func (s *Server) insightsBlastRadius(w http.ResponseWriter, r *http.Request) {

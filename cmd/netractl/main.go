@@ -111,6 +111,7 @@ func usage() {
   insights baseline show | capture | clear
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
   insights blast-radius <root> [hops]
+  insights health-trend [threshold]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
@@ -1268,6 +1269,15 @@ func insightCmd() error {
 			q.Set("hops", os.Args[4])
 		}
 		return request("GET", "/api/v1/insights/blast-radius?"+q.Encode(), nil)
+	case "health-trend":
+		p := "/api/v1/insights/health-trend"
+		if len(os.Args) > 3 {
+			if _, err := strconv.Atoi(os.Args[3]); err != nil {
+				return fmt.Errorf("threshold must be numeric")
+			}
+			p += "?threshold=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
 	case "rate-baseline":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("rate-baseline show|capture [window]|clear")

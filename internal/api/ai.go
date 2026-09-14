@@ -30,7 +30,9 @@ func (s *Server) aiBrief(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 503, err.Error())
 		return
 	}
-	writeJSON(w, 200, ai.BuildBrief(snap))
+	brief := ai.BuildBrief(snap)
+	s.recordHealthSample(snap, brief.Severity, brief.Fingerprint)
+	writeJSON(w, 200, brief)
 }
 
 func (s *Server) aiAsk(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +86,23 @@ func (s *Server) aiDigest(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 503, err.Error())
 		return
 	}
-	writeJSON(w, 200, ai.BuildDigest(ai.BuildBrief(snap)))
+	digest := ai.BuildDigest(ai.BuildBrief(snap))
+	s.recordHealthSample(snap, digest.Severity, digest.Fingerprint)
+	writeJSON(w, 200, digest)
+}
+
+// recordHealthSample feeds the shared bounded health-history (see
+// internal/store/history.go) from an already-computed ai.Snapshot plus the
+// overall severity/fingerprint its caller (aiBrief or aiDigest) derived from
+// it, rather than recomputing either here.
+func (s *Server) recordHealthSample(snap ai.Snapshot, severity, fingerprint string) {
+	s.store.RecordHealthSample(models.ClusterHealthSample{
+		HealthScore: snap.HealthScore,
+		AgentsStale: snap.AgentsStale,
+		Mode:        snap.Mode,
+		Severity:    severity,
+		Fingerprint: fingerprint,
+	}, time.Now())
 }
 
 func (s *Server) aiSuggestions(w http.ResponseWriter, r *http.Request) {

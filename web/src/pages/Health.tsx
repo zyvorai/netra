@@ -6,19 +6,22 @@ import ExplainFinding from '../components/ExplainFinding';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
 const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
+const dur = (sec: number) => sec < 60 ? `${Math.round(sec)}s` : sec < 3600 ? `${Math.round(sec / 60)}m` : `${(sec / 3600).toFixed(1)}h`;
 
 export default function Health() {
   const [data, setData] = useState<any>();
   const [summary, setSummary] = useState<any>();
   const [agents, setAgents] = useState<any[]>([]);
   const [capDrift, setCapDrift] = useState<any>();
+  const [trend, setTrend] = useState<any>();
   const [err, setErr] = useState('');
   const load = () => Promise.all([
     api<any>('/api/v1/ebpf/health?limit=50'),
     api<any>('/api/v1/ebpf/summary'),
     api<any>('/api/v1/agents'),
     api<any>('/api/v1/ebpf/capdrift'),
-  ]).then(([x, s, a, cd]) => { setData(x); setSummary(s); setAgents(a.items || []); setCapDrift(cd); setErr(''); }).catch(e => setErr(String(e)));
+    api<any>('/api/v1/insights/health-trend'),
+  ]).then(([x, s, a, cd, tr]) => { setData(x); setSummary(s); setAgents(a.items || []); setCapDrift(cd); setTrend(tr); setErr(''); }).catch(e => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
   const s = data?.summary || {};
   const anomalies = data?.summary?.anomalies || [];
@@ -36,6 +39,20 @@ export default function Health() {
         <div><b>{s.tcpRtos || 0}</b><span>RTOs</span></div>
         <div><b>{s.tcpResets || 0}</b><span>RST packets</span></div><div><b>{s.healthScore ?? 100}</b><span>health score /100</span></div><div><b>{s.connectionAttempts || 0}</b><span>socket attempts</span></div><div><b>{s.estimatedConnectFailures || 0}</b><span>est. TCP failures</span></div>
       </div>
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">TREND</p>
+      <h3>Health-score projection</h3>
+      <p>A linear heuristic over recent health-score samples — never a statistical guarantee. Confidence is at most "medium", never "high". History accumulates only while something polls the controller (this page, netra-mcp, or the alert poller).</p>
+      {trend?.timeToBreachSeconds != null ? (
+        <div className="metrics">
+          <div><b>{dur(trend.timeToBreachSeconds)}</b><span>to breach {trend.breachThreshold}/100</span></div>
+          <div><b>{trend.currentScore}</b><span>current score</span></div>
+          <div><b>{trend.confidence}</b><span>confidence</span></div>
+          <div><b>{trend.samples}</b><span>samples</span></div>
+        </div>
+      ) : <p className="empty-state">{trend?.note || 'No trend projection yet.'}</p>}
     </section>
 
     <section className="card span3">

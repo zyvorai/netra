@@ -99,8 +99,8 @@ func TestEvaluateSkipsDeadAgentsImplicitlyViaSources(t *testing.T) {
 	agents := []models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1"}}}
 
 	now := time.Unix(2000, 0)
-	first := p.evaluate(now, agents)
-	second := p.evaluate(now.Add(time.Second), agents)
+	first, _ := p.evaluate(now, agents)
+	second, _ := p.evaluate(now.Add(time.Second), agents)
 	if len(first) != 0 && len(second) != 0 {
 		// Both should be empty for an agent with no data triggering any
 		// threshold, but if any anomaly logic ever changes to fire on an
@@ -123,7 +123,10 @@ func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
 		},
 	}}
 	now := time.Unix(3000, 0)
-	evs := p.evaluate(now, agents)
+	evs, sample := p.evaluate(now, agents)
+	if sample.Severity == "" {
+		t.Fatalf("expected a populated cluster-health sample alongside events, got %#v", sample)
+	}
 	var digest *webhook.Event
 	for i := range evs {
 		if evs[i].Source == "ai" && evs[i].Kind == "digest" {
@@ -136,12 +139,40 @@ func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
 	if digest.Fingerprint == "" || digest.Card == "" || digest.Text == "" {
 		t.Fatalf("digest missing fingerprint/card/text: %+v", digest)
 	}
-	again := p.evaluate(now.Add(time.Second), agents)
+	again, _ := p.evaluate(now.Add(time.Second), agents)
 	for _, ev := range again {
 		if ev.Source == "ai" && ev.Kind == "digest" {
 			t.Fatal("digest should be deduped within cooldown while fingerprint is unchanged")
 		}
 	}
+}
+
+func TestTickRecordsHealthSampleEvenWhenQuiet(t *testing.T) {
+	var recorded []models.ClusterHealthSample
+	p := &Poller{
+		log:     discardLogger(),
+		fetch:   func(now time.Time, staleAfter time.Duration) []models.AgentStatus { return nil },
+		publish: func(webhook.Event) bool { return true },
+		record: func(s models.ClusterHealthSample, now time.Time) {
+			recorded = append(recorded, s)
+		},
+		now:   time.Now,
+		cfg:   Config{Cooldown: time.Minute},
+		dedup: newDedupState(),
+	}
+	p.tick()
+	if len(recorded) != 1 {
+		t.Fatalf("recorded=%d, want 1 (a sample must be recorded even for a quiet tick with no events)", len(recorded))
+	}
+	if recorded[0].Severity == "" {
+		t.Fatalf("recorded sample missing severity: %#v", recorded[0])
+	}
+}
+
+func TestTickToleratesNilRecord(t *testing.T) {
+	p := newTestPoller(Config{}, &[]webhook.Event{})
+	p.record = nil
+	p.tick() // must not panic
 }
 
 // TestEndToEndDispatch wires a real Poller to a real webhook.Dispatcher and

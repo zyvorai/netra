@@ -266,6 +266,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"root", "hops"},
 		},
 		{
+			name: "netra_insights_health_trend", method: "GET", path: "/api/v1/insights/health-trend",
+			description: "Linear time-to-breach projection from recent cluster health-score history. A heuristic trend over a coarse, step-function score, never a statistical guarantee — confidence is always \"low\" or \"medium\", never \"high\". Returns no projection (with an explanatory note) when there's too little history, the trend is flat/improving, the fit is too noisy, or the breach would be beyond a 24h horizon.",
+			schema:      objSchema(map[string]any{"threshold": intProp("Health-score breach threshold, 0-99. Default 50.")}),
+			queryParams: []string{"threshold"},
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

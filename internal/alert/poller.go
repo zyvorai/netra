@@ -63,21 +63,23 @@ type Poller struct {
 	log     *slog.Logger
 	fetch   func(now time.Time, staleAfter time.Duration) []models.AgentStatus
 	publish func(webhook.Event) bool
+	record  func(models.ClusterHealthSample, time.Time)
 	now     func() time.Time
 	cfg     Config
 
 	dedup *dedupState
 }
 
-// New returns a Poller bound to st (via st.AgentStatuses) and publish
-// (typically dispatcher.Publish). st and publish are captured once; New
-// itself performs no I/O.
+// New returns a Poller bound to st (via st.AgentStatuses/st.RecordHealthSample)
+// and publish (typically dispatcher.Publish). st and publish are captured
+// once; New itself performs no I/O.
 func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config) *Poller {
 	cfg.applyDefaults()
 	return &Poller{
 		log:     log,
 		fetch:   st.AgentStatuses,
 		publish: publish,
+		record:  st.RecordHealthSample,
 		now:     time.Now,
 		cfg:     cfg,
 		dedup:   newDedupState(),
@@ -104,7 +106,11 @@ func (p *Poller) Run(ctx context.Context) {
 func (p *Poller) tick() {
 	now := p.now()
 	agents := p.fetch(now, p.cfg.StaleAfter)
-	for _, ev := range p.evaluate(now, agents) {
+	events, sample := p.evaluate(now, agents)
+	if p.record != nil {
+		p.record(sample, now)
+	}
+	for _, ev := range events {
 		if !p.publish(ev) {
 			p.log.Warn("alert dropped: dispatcher queue full", "source", ev.Source, "kind", ev.Kind, "subject", ev.Subject)
 		}
@@ -112,9 +118,12 @@ func (p *Poller) tick() {
 }
 
 // evaluate is the pure core: given a point in time and an agent snapshot, it
-// returns the events that should fire right now, after dedup. No I/O, fully
-// unit-testable.
-func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) []webhook.Event {
+// returns the events that should fire right now, after dedup, plus the
+// cluster-health sample for this tick (recorded by tick() regardless of
+// whether any event fired — history needs regular samples, not just
+// anomaly ticks). No I/O itself; recording and publishing both stay in
+// tick(), fully unit-testable.
+func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) ([]webhook.Event, models.ClusterHealthSample) {
 	var out []webhook.Event
 	collect := func(source string, anomalies []models.NetworkHealthAnomaly) {
 		for _, a := range anomalies {
@@ -128,16 +137,18 @@ func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) []webhook.
 	collect("pathdiag", pathdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("dropdiag", dropdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("capdrift", capdrift.Build(agents, p.cfg.TopN).Anomalies)
-	if ev, ok := digestEvent(now, agents); ok && p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+	sample, ev, ok := digestEvent(now, agents)
+	if ok && p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
 		out = append(out, ev)
 	}
 	p.dedup.sweep(now, p.cfg.Cooldown)
-	return out
+	return out, sample
 }
 
-// digestEvent builds the on-call card for this agent snapshot. Quiet
-// clusters (info, unchanged fingerprint) do not emit a webhook event.
-func digestEvent(now time.Time, agents []models.AgentStatus) (webhook.Event, bool) {
+// digestEvent builds the on-call card for this agent snapshot, plus the
+// cluster-health sample computed along the way. Quiet clusters (info,
+// unchanged fingerprint) still return a valid sample but no webhook event.
+func digestEvent(now time.Time, agents []models.AgentStatus) (models.ClusterHealthSample, webhook.Event, bool) {
 	obs := observability.Summarize(agents, 8)
 	hs := health.Build(agents, 8)
 	stale, workloads := 0, 0
@@ -169,10 +180,11 @@ func digestEvent(now time.Time, agents []models.AgentStatus) (webhook.Event, boo
 		snap.Anomalies = append(snap.Anomalies, ai.Finding{Severity: a.Severity, Kind: a.Kind, Subject: a.Subject, Message: a.Message})
 	}
 	d := ai.BuildDigest(ai.BuildBrief(snap))
+	sample := models.ClusterHealthSample{HealthScore: hs.Summary.HealthScore, AgentsStale: stale, Mode: mode, Severity: d.Severity, Fingerprint: d.Fingerprint}
 	if d.Severity == "info" && !d.Changed {
-		return webhook.Event{}, false
+		return sample, webhook.Event{}, false
 	}
-	return webhook.Event{
+	return sample, webhook.Event{
 		Source:      "ai",
 		Kind:        "digest",
 		Severity:    d.Severity,

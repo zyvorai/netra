@@ -67,6 +67,7 @@ type Store struct {
 	baseline              models.BehaviorBaseline
 	rateBaseline          models.RateBaseline
 	rateSamples           map[string][]rateSample
+	healthSamples         []models.ClusterHealthSample
 	ruleIndex             map[string]firewallRuleIndex
 	ruleIndexByKey        map[string]string
 	nextRuleSeq           map[string]uint64

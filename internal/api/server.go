@@ -70,13 +70,13 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.37"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.38"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.37"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.38"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.37"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.38"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -179,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/insights/rate-drift", s.auth(http.HandlerFunc(s.insightsRateDrift)))
 	mux.Handle("GET /api/v1/insights/exposure", s.auth(http.HandlerFunc(s.insightsExposure)))
 	mux.Handle("GET /api/v1/insights/blast-radius", s.auth(http.HandlerFunc(s.insightsBlastRadius)))
+	mux.Handle("GET /api/v1/insights/health-trend", s.auth(http.HandlerFunc(s.insightsHealthTrend)))
 	mux.Handle("GET /api/v1/insights/remediations", s.auth(http.HandlerFunc(s.insightsRemediations)))
 	mux.Handle("GET /api/v1/agents", s.auth(http.HandlerFunc(s.agents)))
 	mux.Handle("GET /api/v1/audit", s.auth(http.HandlerFunc(s.audit)))
@@ -269,7 +270,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.37", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.38", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2109,7 +2110,39 @@ func (s *Server) ebpfHealth(w http.ResponseWriter, r *http.Request) {
 			topN = n
 		}
 	}
-	writeJSON(w, 200, health.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), topN))
+	now := time.Now()
+	agents := s.store.AgentStatuses(now, s.agentStaleAfter)
+	resp := health.Build(agents, topN)
+	stale := 0
+	for _, a := range agents {
+		if a.Stale {
+			stale++
+		}
+	}
+	s.store.RecordHealthSample(models.ClusterHealthSample{
+		HealthScore: resp.Summary.HealthScore,
+		AgentsStale: stale,
+		Mode:        s.store.Config().Mode,
+		Severity:    rollupHealthSeverity(resp.Summary.Anomalies),
+	}, now)
+	writeJSON(w, 200, resp)
+}
+
+// rollupHealthSeverity mirrors internal/ai.rollupSeverity's fold (critical
+// wins outright, high folds into warning) but operates directly on
+// NetworkHealthAnomaly rather than ai.Finding, since ebpfHealth has no
+// reason to build a full ai.Snapshot just to get an overall severity.
+func rollupHealthSeverity(anoms []models.NetworkHealthAnomaly) string {
+	sev := "info"
+	for _, a := range anoms {
+		switch strings.ToLower(a.Severity) {
+		case "critical":
+			return "critical"
+		case "warning", "high":
+			sev = "warning"
+		}
+	}
+	return sev
 }
 func (s *Server) ebpfCapDrift(w http.ResponseWriter, r *http.Request) {
 	topN := 50
