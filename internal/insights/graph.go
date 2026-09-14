@@ -91,10 +91,10 @@ func sourceNode(st models.DestinationStat) (string, models.DependencyNode) {
 		if kind == "" {
 			kind = "Workload"
 		}
-		id := "workload:" + st.Namespace + ":" + strings.ToLower(kind) + ":" + st.WorkloadName
+		id := models.CanonicalSource(st.Namespace, st.Pod, kind, st.WorkloadName, st.CgroupID)
 		return id, models.DependencyNode{ID: id, Kind: "workload", Namespace: st.Namespace, Name: st.WorkloadName, WorkloadKind: kind}
 	}
-	id := "pod:" + st.Namespace + ":" + st.Pod
+	id := models.CanonicalSource(st.Namespace, st.Pod, "", "", st.CgroupID)
 	return id, models.DependencyNode{ID: id, Kind: "pod", Namespace: st.Namespace, Name: st.Pod}
 }
 

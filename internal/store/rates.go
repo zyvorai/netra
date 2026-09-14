@@ -5,8 +5,6 @@ package store
 import (
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/zyvorai/netra/internal/models"
@@ -26,20 +24,10 @@ type rateSample struct {
 	totals map[string]rateTotals
 }
 
+// rateSource is a thin local alias for models.CanonicalSource, kept so this
+// file's call sites don't need a models. prefix at every call.
 func rateSource(ns, pod, kind, workload string, cgroup uint64) string {
-	if ns != "" && workload != "" {
-		if kind == "" {
-			kind = "workload"
-		}
-		return "workload:" + ns + ":" + strings.ToLower(kind) + ":" + workload
-	}
-	if ns != "" && pod != "" {
-		return "pod:" + ns + ":" + pod
-	}
-	if cgroup != 0 {
-		return "cgroup:" + strconv.FormatUint(cgroup, 10)
-	}
-	return "node"
+	return models.CanonicalSource(ns, pod, kind, workload, cgroup)
 }
 
 func sampleReport(r models.AgentReport) rateSample {

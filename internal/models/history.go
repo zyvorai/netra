@@ -60,3 +60,36 @@ type Timeline struct {
 	Prose       string          `json:"prose,omitempty"`
 	Engine      string          `json:"engine"` // "heuristic" or "llm"
 }
+
+// IncidentFinding is one signal folded into an IncidentCluster by
+// internal/incident.Build.
+type IncidentFinding struct {
+	Kind     string `json:"kind"` // health, drift, rate-drift, exposure, detective, audit
+	Severity string `json:"severity"`
+	// JoinConfidence is "exact" when this finding's own Source/SourceKey
+	// already matched the cluster's key directly, "probable" when it was
+	// matched by best-effort IP or namespace/name resolution against the
+	// live dependency graph (the same vocabulary internal/detective already
+	// uses for its own confidence field, reused here for a related but
+	// distinct meaning — see internal/incident's doc comment), and empty
+	// for an audit or detective finding that couldn't be resolved to any
+	// specific source at all (still included, never silently dropped,
+	// under the "control-plane" pseudo-source).
+	JoinConfidence string    `json:"joinConfidence,omitempty"`
+	Subject        string    `json:"subject"`
+	Message        string    `json:"message"`
+	At             time.Time `json:"at"`
+}
+
+// IncidentCluster groups findings from different packages that share a
+// SourceKey (see CanonicalSource). internal/incident.Build only returns a
+// cluster once at least two distinct Findings[].Kind values contributed to
+// it — a single-signal cluster is already visible on its own originating
+// page/tool and isn't cross-signal correlation.
+type IncidentCluster struct {
+	GeneratedAt time.Time         `json:"generatedAt"`
+	SourceKey   string            `json:"sourceKey"`
+	Subject     string            `json:"subject"`
+	Severity    string            `json:"severity"`
+	Findings    []IncidentFinding `json:"findings"`
+}

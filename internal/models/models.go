@@ -416,11 +416,18 @@ type DNSHealthStat struct {
 }
 
 type NetworkHealthAnomaly struct {
-	Severity     string   `json:"severity"`
-	Kind         string   `json:"kind"`
-	Subject      string   `json:"subject"`
-	Message      string   `json:"message"`
-	Value        float64  `json:"value,omitempty"`
+	Severity string  `json:"severity"`
+	Kind     string  `json:"kind"`
+	Subject  string  `json:"subject"`
+	Message  string  `json:"message"`
+	Value    float64 `json:"value,omitempty"`
+	// SourceKey is CanonicalSource() computed from the same fields Subject
+	// is derived from — added for internal/incident's cross-signal join,
+	// which needs to match this anomaly against insights/rate-sample
+	// sources keyed the same way. Subject itself is left untouched: it's
+	// already consumed verbatim by netractl explain, MCP resources, and
+	// internal/alert/dedup.go's dedup key.
+	SourceKey    string   `json:"sourceKey,omitempty"`
 	RelatedKinds []string `json:"relatedKinds,omitempty"`
 }
 

@@ -114,7 +114,7 @@ func usage() {
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
   insights blast-radius <root> [hops]
   insights health-trend [threshold]
-  incidents timeline [since-RFC3339]
+  incidents | incidents timeline [since-RFC3339]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
@@ -1333,7 +1333,7 @@ func insightCmd() error {
 
 func incidentsCmd() error {
 	if len(os.Args) < 3 {
-		return fmt.Errorf("incidents subcommand required")
+		return request("GET", "/api/v1/incidents", nil)
 	}
 	switch os.Args[2] {
 	case "timeline":

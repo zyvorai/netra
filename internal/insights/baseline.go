@@ -14,20 +14,10 @@ import (
 
 const BaselineSchemaVersion = 1
 
+// sourceKey is a thin local alias for models.CanonicalSource, kept so this
+// package's many call sites don't need a models. prefix at every call.
 func sourceKey(ns, pod, kind, workload string, cgroup uint64) string {
-	if ns != "" && workload != "" {
-		if kind == "" {
-			kind = "workload"
-		}
-		return "workload:" + ns + ":" + strings.ToLower(kind) + ":" + workload
-	}
-	if ns != "" && pod != "" {
-		return "pod:" + ns + ":" + pod
-	}
-	if cgroup != 0 {
-		return "cgroup:" + strconv.FormatUint(cgroup, 10)
-	}
-	return "node"
+	return models.CanonicalSource(ns, pod, kind, workload, cgroup)
 }
 
 func CaptureBaseline(agents []models.AgentStatus, now time.Time) models.BehaviorBaseline {
