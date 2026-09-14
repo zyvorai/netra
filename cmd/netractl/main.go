@@ -114,6 +114,7 @@ func usage() {
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
   insights blast-radius <root> [hops]
   insights health-trend [threshold]
+  insights policy-review <recommendationId>
   incidents | incidents timeline [since-RFC3339]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
@@ -1259,6 +1260,13 @@ func insightCmd() error {
 			p += "?window=" + url.QueryEscape(os.Args[3])
 		}
 		return request("GET", p, nil)
+	case "policy-review":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("policy-review requires a recommendation ID (see insights recommendations for ids)")
+		}
+		q := url.Values{}
+		q.Set("recommendationId", os.Args[3])
+		return request("GET", "/api/v1/insights/policy-review?"+q.Encode(), nil)
 	case "blast-radius":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("blast-radius requires a root node ID (see insights dependencies for IDs)")

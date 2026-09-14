@@ -33,6 +33,8 @@ export default function Insights() {
   const [rateBaseline, setRateBaseline] = useState<any>(null);
   const [window, setWindow] = useState('5m');
   const [msg, setMsg] = useState('');
+  const [reviews, setReviews] = useState<Record<string, any>>({});
+  const [reviewErr, setReviewErr] = useState<Record<string, string>>({});
   const [blastRoot, setBlastRoot] = useState('');
   const [blastHops, setBlastHops] = useState(3);
   const [blastResult, setBlastResult] = useState<BlastRadiusResult | null>(null);
@@ -67,6 +69,16 @@ export default function Insights() {
   async function clearBehavior() { if (!confirm('Clear the known-good behavior baseline?')) return; try { await api('/api/v1/insights/baseline', { method: 'DELETE', headers: { 'X-Netra-Confirm-Baseline-Clear': 'clear' } }); await refresh(); } catch (e) { setMsg(String(e)); } }
   async function captureRate() { try { const x = await api<any>(`/api/v1/insights/rate-baseline?window=${encodeURIComponent(window)}`, { method: 'POST' }); setMsg(`Rate baseline captured with ${x.baseline?.entries?.length || 0} entries.`); await refresh(); } catch (e) { setMsg(String(e)); } }
   async function clearRate() { if (!confirm('Clear the traffic-rate baseline?')) return; try { await api('/api/v1/insights/rate-baseline', { method: 'DELETE', headers: { 'X-Netra-Confirm-Rate-Baseline-Clear': 'clear' } }); await refresh(); } catch (e) { setMsg(String(e)); } }
+
+  async function reviewRecommendation(id: string) {
+    try {
+      const res = await api<any>(`/api/v1/insights/policy-review?recommendationId=${encodeURIComponent(id)}`);
+      setReviews((prev) => ({ ...prev, [id]: res }));
+      setReviewErr((prev) => ({ ...prev, [id]: '' }));
+    } catch (e) {
+      setReviewErr((prev) => ({ ...prev, [id]: String(e) }));
+    }
+  }
 
   async function runBlastRadius() {
     if (!blastRoot) { setBlastMsg('Pick a root node.'); return; }
@@ -175,7 +187,32 @@ export default function Insights() {
     <Reveal className="card span3">
       <p className="eyebrow">POLICY RECOMMENDATIONS</p><h3>Observed-traffic CiliumNetworkPolicy drafts</h3>
       {!ciliumEnabled && <p className="warning">Cilium integration is disabled. Drafts remain export/review only.</p>}
-      <div className="recommendations">{recommendations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.namespace}/{r.workloadName}</b><span>{r.confidence} · {r.kind}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.manifest, null, 2)}</pre></details>)}{!recommendations.length && <p className="empty-state">No policy recommendation drafts currently meet the thresholds.</p>}</div>
+      <div className="recommendations">{recommendations.map(r => {
+        const review = reviews[r.id];
+        return <details key={r.id} className="recommendation">
+          <summary><b>{r.namespace}/{r.workloadName}</b><span>{r.confidence} · {r.kind}</span></summary>
+          {r.rationale.map(x => <p key={x}>• {x}</p>)}
+          <pre>{JSON.stringify(r.manifest, null, 2)}</pre>
+          <button type="button" className="btn-secondary" onClick={() => reviewRecommendation(r.id)}>Review against live policy</button>
+          {reviewErr[r.id] && <p className="warning">{reviewErr[r.id]}</p>}
+          {review && <div className="list">
+            <div className="insightrow">
+              <b>{review.plan.risk} risk</b>
+              <span>{review.matchingPolicies.length} matching polic{review.matchingPolicies.length === 1 ? 'y' : 'ies'}{review.ambiguousMatch ? ' (ambiguous)' : ''}</span>
+              <small>{(review.plan.changes || []).join(' · ') || 'No changes detected'}</small>
+            </div>
+            {(review.plan.warnings || []).map((w: string, i: number) => <p key={i} className="warning">{w}</p>)}
+            {review.prose && <p>{review.prose}</p>}
+            {(review.blastRadius || []).map((b: any, i: number) => (
+              <div className={`insightrow ${b.activeTraffic ? 'warning' : 'info'}`} key={i}>
+                <b>{b.kind}</b>
+                <span>{b.correlated ? (b.activeTraffic ? 'active traffic' : 'no traffic observed') : 'not correlated'}</span>
+                <small>{b.destination} — {b.note}</small>
+              </div>
+            ))}
+          </div>}
+        </details>;
+      })}{!recommendations.length && <p className="empty-state">No policy recommendation drafts currently meet the thresholds.</p>}</div>
     </Reveal>
   </div>;
 }

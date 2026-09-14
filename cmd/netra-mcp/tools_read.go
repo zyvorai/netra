@@ -284,6 +284,14 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"since"},
 		},
 		{
+			name: "netra_insights_policy_review", method: "GET", path: "/api/v1/insights/policy-review",
+			description: "Full review for one policy recommendation (from netra_insights_recommendations): which live CiliumNetworkPolicy actually governs the workload (best-effort label match, may be ambiguous), a semantic diff against it, a traffic-aware blast-radius check for each destination the diff would remove (CIDR destinations checked against live traffic; FQDN/entity destinations honestly marked \"could not correlate\", never a false negative), and recent policy revision history. Read-only — never applies anything.",
+			schema: objSchema(map[string]any{
+				"recommendationId": strProp("Recommendation ID from netra_insights_recommendations."),
+			}, "recommendationId"),
+			queryParams: []string{"recommendationId"},
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

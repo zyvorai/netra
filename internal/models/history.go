@@ -61,6 +61,24 @@ type Timeline struct {
 	Engine      string          `json:"engine"` // "heuristic" or "llm"
 }
 
+// BlastRadiusItem is internal/insights.BlastRadius's per-removed-destination
+// result for a policy review — a different, narrower concept from
+// BlastRadiusResponse (the multi-hop dependency-graph traversal from
+// GET /api/v1/insights/blast-radius): this one asks "does live traffic
+// cross this specific destination a policy change would remove."
+type BlastRadiusItem struct {
+	Destination string `json:"destination"`
+	// Kind is "cidr", "fqdn", "fqdn-pattern", "entity", or "unknown".
+	Kind string `json:"kind"`
+	// Correlated is true only for a "cidr" destination the dependency
+	// graph could actually be checked against; false means the graph
+	// structurally cannot answer this (FQDN/entity forms) or the CIDR
+	// failed to parse — never treat Correlated:false as "no traffic."
+	Correlated    bool   `json:"correlated"`
+	ActiveTraffic bool   `json:"activeTraffic,omitempty"`
+	Note          string `json:"note"`
+}
+
 // IncidentFinding is one signal folded into an IncidentCluster by
 // internal/incident.Build.
 type IncidentFinding struct {

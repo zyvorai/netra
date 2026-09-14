@@ -58,14 +58,14 @@ func registerPrompts(srv *mcpserver.Server) error {
 		},
 		{
 			Name:        "netra_policy_review",
-			Description: "Review insight-generated policy drafts. Never apply them.",
+			Description: "Review insight-generated policy drafts, including a traffic-aware blast-radius check. Never apply them.",
 			Arguments: []mcpserver.PromptArg{
 				{Name: "namespace", Description: "Namespace to review.", Required: false},
 				{Name: "workload", Description: "Workload name to review.", Required: false},
 			},
 			Messages: []mcpserver.PromptMessage{{
 				Role: "user",
-				Text: "Review Netra policy drafts for namespace={{namespace}} workload={{workload}}. Call netra_insights_recommendations and netra_insights_remediations. Explain blast radius. Do not call netra_policy_apply, netra_ebpf_mode, or any other mutating tool. Remind the operator that plan→apply with a preflight token is mandatory.",
+				Text: "Review Netra policy drafts for namespace={{namespace}} workload={{workload}}. Call netra_insights_recommendations first, then netra_insights_policy_review with each candidate's id — it already resolves the governing live policy, diffs against it, and checks live traffic against every destination the diff would remove, so don't re-derive blast radius by hand from netra_insights_remediations. Explain the risk level, the diff, and which removed destinations show active live traffic vs. couldn't be correlated (FQDN/entity destinations honestly can't be checked — never claim they're safe to remove just because no CIDR match was found). Do not call netra_policy_apply, netra_ebpf_mode, or any other mutating tool. Remind the operator that plan→apply with a preflight token is mandatory.",
 			}},
 		},
 	}
