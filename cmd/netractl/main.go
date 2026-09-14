@@ -115,6 +115,7 @@ func usage() {
   insights blast-radius <root> [hops]
   insights health-trend [threshold]
   insights policy-review <recommendationId>
+  insights new-since-start [maxRestarts]
   incidents | incidents timeline [since-RFC3339]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
@@ -1267,6 +1268,15 @@ func insightCmd() error {
 		q := url.Values{}
 		q.Set("recommendationId", os.Args[3])
 		return request("GET", "/api/v1/insights/policy-review?"+q.Encode(), nil)
+	case "new-since-start":
+		p := "/api/v1/insights/new-since-start"
+		if len(os.Args) > 3 {
+			if _, err := strconv.Atoi(os.Args[3]); err != nil {
+				return fmt.Errorf("maxRestarts must be numeric")
+			}
+			p += "?maxRestarts=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
 	case "blast-radius":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("blast-radius requires a root node ID (see insights dependencies for IDs)")

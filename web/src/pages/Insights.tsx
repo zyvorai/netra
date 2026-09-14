@@ -18,6 +18,7 @@ type Recommendation = { id: string; kind: string; namespace: string; workloadKin
 type Remediation = { id: string; source: string; severity: string; kind: string; title: string; rationale: string[]; action: Record<string, any>; reviewRequired: boolean };
 type BlastRadiusNode = { id: string; hops: number };
 type BlastRadiusResult = { generatedAt: string; root: string; maxHops: number; nodes: BlastRadiusNode[]; edges: Edge[]; truncated: boolean; caveat: string };
+type NewSinceStartResult = { findings: { severity: string; kind: string; source: string; value: string; message: string }[]; count: number; limitation: string; note: string };
 
 export default function Insights() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -39,6 +40,8 @@ export default function Insights() {
   const [blastHops, setBlastHops] = useState(3);
   const [blastResult, setBlastResult] = useState<BlastRadiusResult | null>(null);
   const [blastMsg, setBlastMsg] = useState('');
+  const [newSinceStart, setNewSinceStart] = useState<NewSinceStartResult | null>(null);
+  const [newSinceStartMsg, setNewSinceStartMsg] = useState('');
 
   async function refresh() {
     try {
@@ -61,6 +64,11 @@ export default function Insights() {
     } catch (e) { setMsg(String(e)); }
   }
   useEffect(() => { void refresh(); }, [window]);
+  useEffect(() => {
+    api<NewSinceStartResult>('/api/v1/insights/new-since-start')
+      .then((x) => { setNewSinceStart(x); setNewSinceStartMsg(''); })
+      .catch((e) => setNewSinceStartMsg(String(e)));
+  }, []);
 
   const nodeByID = useMemo(() => new Map((graph?.nodes || []).map((n) => [n.id, n])), [graph]);
   const label = (id: string) => { const n = nodeByID.get(id); if (!n) return id; if (n.kind === 'external') return n.ip || n.name; return `${n.namespace || ''}/${n.name}`.replace(/^\//, ''); };
@@ -139,6 +147,14 @@ export default function Insights() {
       <p className="eyebrow">BEHAVIOR DRIFT</p><h3>New inventory</h3>
       {(drift?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${f.value}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code><ExplainFinding page="insights" kind={f.kind} subject={f.source} message={f.message || f.value} severity={f.severity} /></div>)}
       {drift?.baselineCapturedAt && !(drift.findings || []).length && <p className="empty-state">No new behavior crossed noise thresholds.</p>}
+    </section>
+
+    <section className="card">
+      <p className="eyebrow">NEW SINCE START</p><h3>First-egress-after-start correlation</h3>
+      <p><small>{newSinceStart?.limitation || 'Baseline-relative correlation only — not a precise "N ms after first packet" claim.'}</small></p>
+      {newSinceStartMsg && <p className="warning">{newSinceStartMsg}</p>}
+      {!newSinceStartMsg && (newSinceStart?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code><ExplainFinding page="insights" kind={`new-since-start:${f.kind}`} subject={f.source} message={f.message || f.value} severity={f.severity} /></div>)}
+      {!newSinceStartMsg && newSinceStart && !(newSinceStart.findings || []).length && <p className="empty-state">No new-destination finding correlates with a pod/workload start yet.</p>}
     </section>
 
     <section className="card span3">

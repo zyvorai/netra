@@ -19,6 +19,7 @@ import (
 	"github.com/zyvorai/netra/internal/capdrift"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/health"
+	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
@@ -41,6 +42,10 @@ type Config struct {
 	// TopN is passed through to each source package's Build(agents, topN).
 	// 0 lets each package apply its own tuned default.
 	TopN int
+	// MaxPodRestarts caps insights.NewSinceStart's own restart-count filter
+	// for the poller's new-since-start source. Default 5, matching
+	// GET /api/v1/insights/new-since-start's default.
+	MaxPodRestarts int
 }
 
 func (c *Config) applyDefaults() {
@@ -53,6 +58,9 @@ func (c *Config) applyDefaults() {
 	if c.StaleAfter <= 0 {
 		c.StaleAfter = 45 * time.Second
 	}
+	if c.MaxPodRestarts <= 0 {
+		c.MaxPodRestarts = 5
+	}
 }
 
 // Poller periodically evaluates anomaly sources and publishes new/escalated
@@ -60,29 +68,38 @@ func (c *Config) applyDefaults() {
 // Poller directly with fixture-backed fetch/publish/now functions instead of
 // a real store or HTTP server.
 type Poller struct {
-	log     *slog.Logger
-	fetch   func(now time.Time, staleAfter time.Duration) []models.AgentStatus
-	publish func(webhook.Event) bool
-	record  func(models.ClusterHealthSample, time.Time)
-	now     func() time.Time
-	cfg     Config
+	log       *slog.Logger
+	fetch     func(now time.Time, staleAfter time.Duration) []models.AgentStatus
+	publish   func(webhook.Event) bool
+	record    func(models.ClusterHealthSample, time.Time)
+	baseline  func() models.BehaviorBaseline
+	fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)
+	now       func() time.Time
+	cfg       Config
 
-	dedup *dedupState
+	dedup    *dedupState
+	restarts *restartTracker
 }
 
-// New returns a Poller bound to st (via st.AgentStatuses/st.RecordHealthSample)
-// and publish (typically dispatcher.Publish). st and publish are captured
-// once; New itself performs no I/O.
-func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config) *Poller {
+// New returns a Poller bound to st (via st.AgentStatuses/st.RecordHealthSample/
+// st.Baseline) and publish (typically dispatcher.Publish). fetchPods is
+// optional (typically k.ListPods) — nil disables the new-since-start source
+// entirely, e.g. when no Kubernetes client is configured (a real supported
+// standalone mode). st, publish, and fetchPods are captured once; New itself
+// performs no I/O.
+func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config, fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *Poller {
 	cfg.applyDefaults()
 	return &Poller{
-		log:     log,
-		fetch:   st.AgentStatuses,
-		publish: publish,
-		record:  st.RecordHealthSample,
-		now:     time.Now,
-		cfg:     cfg,
-		dedup:   newDedupState(),
+		log:       log,
+		fetch:     st.AgentStatuses,
+		publish:   publish,
+		record:    st.RecordHealthSample,
+		baseline:  st.Baseline,
+		fetchPods: fetchPods,
+		now:       time.Now,
+		cfg:       cfg,
+		dedup:     newDedupState(),
+		restarts:  newRestartTracker(),
 	}
 }
 
@@ -110,11 +127,46 @@ func (p *Poller) tick() {
 	if p.record != nil {
 		p.record(sample, now)
 	}
+	events = append(events, p.newSinceStartEvents(now, agents)...)
 	for _, ev := range events {
 		if !p.publish(ev) {
 			p.log.Warn("alert dropped: dispatcher queue full", "source", ev.Source, "kind", ev.Kind, "subject", ev.Subject)
 		}
 	}
+}
+
+// newSinceStartEvents is I/O (a live pod list), so it stays out of the pure
+// evaluate() core, same reasoning as record/publish. Returns nil whenever
+// fetchPods is unset, no baseline is captured yet (insights.NewSinceStart
+// would no-op anyway — skip the kube call entirely), or the pod list fetch
+// fails.
+func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+	if p.fetchPods == nil || p.baseline == nil {
+		return nil
+	}
+	baseline := p.baseline()
+	if baseline.CapturedAt.IsZero() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pods, err := p.fetchPods(ctx, "")
+	if err != nil {
+		p.log.Warn("new-since-start: list pods", "error", err)
+		return nil
+	}
+	restartCounts := restartCountsBySource(pods)
+	var out []webhook.Event
+	for _, f := range insights.NewSinceStart(baseline, agents, pods, p.cfg.MaxPodRestarts) {
+		if p.restarts.justRestarted(f.Source, restartCounts[f.Source]) {
+			continue // pod just restarted between polls; too ambiguous which start this traffic follows this cycle
+		}
+		ev := webhook.Event{Source: "new-since-start", Kind: f.Kind, Severity: f.Severity, Subject: f.Source, Message: f.Message, Value: float64(f.Count), Timestamp: now}
+		if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 // evaluate is the pure core: given a point in time and an agent snapshot, it

@@ -3,6 +3,7 @@
 package alert
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -144,6 +145,82 @@ func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
 		if ev.Source == "ai" && ev.Kind == "digest" {
 			t.Fatal("digest should be deduped within cooldown while fingerprint is unchanged")
 		}
+	}
+}
+
+func TestNewSinceStartEventsNilWithoutFetchPods(t *testing.T) {
+	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
+	if got := p.newSinceStartEvents(time.Now(), nil); got != nil {
+		t.Fatalf("expected nil with fetchPods unset, got %#v", got)
+	}
+}
+
+func TestNewSinceStartEventsNilWithoutCapturedBaseline(t *testing.T) {
+	p := &Poller{
+		cfg:       Config{Cooldown: time.Minute},
+		dedup:     newDedupState(),
+		baseline:  func() models.BehaviorBaseline { return models.BehaviorBaseline{} },
+		fetchPods: func(ctx context.Context, ns string) ([]models.PodInfo, error) { t.Fatal("must not fetch pods without a captured baseline"); return nil, nil },
+	}
+	if got := p.newSinceStartEvents(time.Now(), nil); got != nil {
+		t.Fatalf("expected nil, got %#v", got)
+	}
+}
+
+func TestNewSinceStartEventsFiresForPodStartedAfterBaseline(t *testing.T) {
+	baselineAt := time.Now().Add(-time.Hour)
+	agents := []models.AgentStatus{{AgentReport: models.AgentReport{TLSMetadata: []models.TLSMetadataStat{
+		{Namespace: "prod", Pod: "api-1", WorkloadKind: "Deployment", WorkloadName: "api", SNI: "new.example.com", Handshakes: 3},
+	}}}}
+	started := baselineAt.Add(time.Minute)
+	p := &Poller{
+		log:      discardLogger(),
+		cfg:      Config{Cooldown: time.Minute, MaxPodRestarts: 5},
+		dedup:    newDedupState(),
+		restarts: newRestartTracker(),
+		baseline: func() models.BehaviorBaseline {
+			return models.BehaviorBaseline{SchemaVersion: 1, CapturedAt: baselineAt}
+		},
+		fetchPods: func(ctx context.Context, ns string) ([]models.PodInfo, error) {
+			return []models.PodInfo{{Namespace: "prod", Name: "api-1", OwnerKind: "Deployment", OwnerName: "api", Started: &started}}, nil
+		},
+	}
+	evs := p.newSinceStartEvents(time.Now(), agents)
+	if len(evs) != 1 || evs[0].Source != "new-since-start" {
+		t.Fatalf("events=%#v", evs)
+	}
+}
+
+func TestNewSinceStartEventsSuppressedOnRestartBetweenPolls(t *testing.T) {
+	baselineAt := time.Now().Add(-time.Hour)
+	agents := []models.AgentStatus{{AgentReport: models.AgentReport{TLSMetadata: []models.TLSMetadataStat{
+		{Namespace: "prod", Pod: "api-1", WorkloadKind: "Deployment", WorkloadName: "api", SNI: "new.example.com", Handshakes: 3},
+	}}}}
+	started := baselineAt.Add(time.Minute)
+	restartCount := 1
+	p := &Poller{
+		log:      discardLogger(),
+		cfg:      Config{Cooldown: time.Millisecond, MaxPodRestarts: 5},
+		dedup:    newDedupState(),
+		restarts: newRestartTracker(),
+		baseline: func() models.BehaviorBaseline {
+			return models.BehaviorBaseline{SchemaVersion: 1, CapturedAt: baselineAt}
+		},
+		fetchPods: func(ctx context.Context, ns string) ([]models.PodInfo, error) {
+			return []models.PodInfo{{Namespace: "prod", Name: "api-1", OwnerKind: "Deployment", OwnerName: "api", Started: &started, RestartCount: restartCount}}, nil
+		},
+	}
+	// First tick establishes the restart-count baseline in the tracker.
+	first := p.newSinceStartEvents(time.Now(), agents)
+	if len(first) != 1 {
+		t.Fatalf("first tick events=%#v, want 1", first)
+	}
+	// Restart count increases between polls — this cycle must suppress.
+	restartCount = 2
+	time.Sleep(2 * time.Millisecond)
+	second := p.newSinceStartEvents(time.Now(), agents)
+	if len(second) != 0 {
+		t.Fatalf("expected suppression on a restart-count increase, got %#v", second)
 	}
 }
 

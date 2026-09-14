@@ -10,9 +10,44 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zyvorai/netra/internal/models"
 )
+
+// containerStatusJSON is the subset of Kubernetes' containerStatuses entry
+// this package parses. Shared between ListPods and GetPod so both decode
+// and interpret it identically.
+type containerStatusJSON struct {
+	Name         string `json:"name"`
+	Ready        bool   `json:"ready"`
+	RestartCount int    `json:"restartCount"`
+	ImageID      string `json:"imageID"`
+	State        struct {
+		Running *struct {
+			StartedAt time.Time `json:"startedAt"`
+		} `json:"running"`
+	} `json:"state"`
+}
+
+// podStartAndRestarts derives PodInfo.Started (the most recent Running
+// startedAt across containers, nil if none are running) and RestartCount
+// (summed across containers) from a pod's containerStatuses.
+func podStartAndRestarts(statuses []containerStatusJSON) (*time.Time, int) {
+	var started *time.Time
+	restarts := 0
+	for _, cs := range statuses {
+		restarts += cs.RestartCount
+		if cs.State.Running == nil || cs.State.Running.StartedAt.IsZero() {
+			continue
+		}
+		t := cs.State.Running.StartedAt
+		if started == nil || t.After(*started) {
+			started = &t
+		}
+	}
+	return started, restarts
+}
 
 func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, error) {
 	p := "/api/v1/pods"
@@ -35,9 +70,7 @@ func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, err
 			} `json:"spec"`
 			Status struct {
 				Phase, PodIP      string
-				ContainerStatuses []struct {
-					Ready bool `json:"ready"`
-				} `json:"containerStatuses"`
+				ContainerStatuses []containerStatusJSON `json:"containerStatuses"`
 			} `json:"status"`
 		} `json:"items"`
 	}
@@ -58,6 +91,7 @@ func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, err
 			p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 			p.OwnerName = it.Metadata.OwnerReferences[0].Name
 		}
+		p.Started, p.RestartCount = podStartAndRestarts(it.Status.ContainerStatuses)
 		out = append(out, p)
 	}
 	return out, nil
@@ -75,39 +109,43 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 			OwnerReferences []struct{ Kind, Name string } `json:"ownerReferences"`
 		} `json:"metadata"`
 		Spec struct {
-			NodeName          string `json:"nodeName"`
-			Containers        []struct{ Name string } `json:"containers"`
-			InitContainers    []struct{ Name string } `json:"initContainers"`
+			NodeName            string                  `json:"nodeName"`
+			Containers          []struct{ Name string } `json:"containers"`
+			InitContainers      []struct{ Name string } `json:"initContainers"`
 			EphemeralContainers []struct{ Name string } `json:"ephemeralContainers"`
 		} `json:"spec"`
 		Status struct {
 			Phase, PodIP      string
-			ContainerStatuses []struct {
-				Name  string `json:"name"`
-				Ready bool   `json:"ready"`
-			} `json:"containerStatuses"`
+			ContainerStatuses []containerStatusJSON `json:"containerStatuses"`
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(b, &it); err != nil {
 		return nil, fmt.Errorf("decode pod: %w", err)
 	}
-	readyByName := map[string]bool{}
+	statusByName := map[string]containerStatusJSON{}
 	ready := false
 	for _, cs := range it.Status.ContainerStatuses {
-		readyByName[cs.Name] = cs.Ready
+		statusByName[cs.Name] = cs
 		if cs.Ready {
 			ready = true
 		}
 	}
 	containers := make([]models.ContainerInfo, 0, len(it.Spec.Containers))
 	for _, ctn := range it.Spec.Containers {
-		containers = append(containers, models.ContainerInfo{Name: ctn.Name, Ready: readyByName[ctn.Name]})
+		cs := statusByName[ctn.Name]
+		ci := models.ContainerInfo{Name: ctn.Name, Ready: cs.Ready, RestartCount: cs.RestartCount, ImageID: cs.ImageID}
+		if cs.State.Running != nil && !cs.State.Running.StartedAt.IsZero() {
+			t := cs.State.Running.StartedAt
+			ci.StartedAt = &t
+		}
+		containers = append(containers, ci)
 	}
 	p := &models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels, Containers: containers}
 	if len(it.Metadata.OwnerReferences) > 0 {
 		p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 		p.OwnerName = it.Metadata.OwnerReferences[0].Name
 	}
+	p.Started, p.RestartCount = podStartAndRestarts(it.Status.ContainerStatuses)
 	return p, nil
 }
 

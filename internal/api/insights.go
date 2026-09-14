@@ -411,3 +411,37 @@ func narratePolicyReview(ctx context.Context, resp policyReviewResponse) string 
 	}
 	return strings.TrimSpace(rewritten)
 }
+
+func (s *Server) insightsNewSinceStart(w http.ResponseWriter, r *http.Request) {
+	maxRestarts := 5
+	if raw := r.URL.Query().Get("maxRestarts"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errorJSON(w, 400, "maxRestarts must be a non-negative integer (0 disables the restart-count filter)")
+			return
+		}
+		maxRestarts = n
+	}
+	if s.kube == nil {
+		errorJSON(w, 502, errKubeUnavailable.Error())
+		return
+	}
+	pods, err := s.kube.ListPods(r.Context(), "")
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	agents := s.store.AgentStatuses(time.Now(), s.agentStaleAfter)
+	findings := insights.NewSinceStart(s.store.Baseline(), agents, pods, maxRestarts)
+	writeJSON(w, 200, map[string]any{
+		"findings":    findings,
+		"count":       len(findings),
+		"limitation":  insights.NewSinceStartLimitation,
+		"maxRestarts": maxRestarts,
+		// Unlike internal/alert's poller-driven equivalent, this stateless,
+		// on-demand endpoint carries no memory of the previous poll, so it
+		// cannot detect "this pod just restarted between two polls" — a
+		// finding here may legitimately repeat across a pod's crash loop.
+		"note": "on-demand and stateless: may repeat the same finding across a pod's crash loop, unlike the alert-poller path which suppresses that for one cycle",
+	})
+}

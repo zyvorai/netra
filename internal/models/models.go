@@ -1039,6 +1039,12 @@ type FlowSummary struct {
 type ContainerInfo struct {
 	Name  string `json:"name"`
 	Ready bool   `json:"ready"`
+	// RestartCount, ImageID, and StartedAt come from status.containerStatuses
+	// (RestartCount/ImageID always present once a container has been
+	// created; StartedAt only while the container is in the Running state).
+	RestartCount int        `json:"restartCount,omitempty"`
+	ImageID      string     `json:"imageId,omitempty"`
+	StartedAt    *time.Time `json:"startedAt,omitempty"`
 }
 
 // PodInfo is the operator-facing Kubernetes pod inventory record.
@@ -1053,6 +1059,12 @@ type PodInfo struct {
 	OwnerKind  string            `json:"ownerKind,omitempty"`
 	OwnerName  string            `json:"ownerName,omitempty"`
 	Containers []ContainerInfo   `json:"containers,omitempty"`
+	// Started is the most recent containerStatuses[].state.running.startedAt
+	// across this pod's containers (nil if none are currently running) —
+	// pod-level convenience so callers don't have to scan Containers
+	// themselves. RestartCount is the sum of all containers' restart counts.
+	Started      *time.Time `json:"started,omitempty"`
+	RestartCount int        `json:"restartCount,omitempty"`
 }
 
 type VMInfo struct {

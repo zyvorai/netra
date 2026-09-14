@@ -24,7 +24,7 @@ import (
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.41"
+const version = "0.27.42"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -84,7 +84,7 @@ func main() {
 		pollerWG.Add(1)
 		go func() {
 			defer pollerWG.Done()
-			alert.New(log, st, dispatcher.Publish, alertCfg).Run(pctx)
+			alert.New(log, st, dispatcher.Publish, alertCfg, k.ListPods).Run(pctx)
 		}()
 		defer pollerWG.Wait()
 	}
@@ -240,7 +240,7 @@ func electionLoop(
 			pollerWG.Add(1)
 			go func() {
 				defer pollerWG.Done()
-				alert.New(log, st, dispatcher.Publish, alertCfg).Run(pctx)
+				alert.New(log, st, dispatcher.Publish, alertCfg, k.ListPods).Run(pctx)
 			}()
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)

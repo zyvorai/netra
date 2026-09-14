@@ -292,6 +292,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"recommendationId"},
 		},
 		{
+			name: "netra_insights_new_since_start", method: "GET", path: "/api/v1/insights/new-since-start",
+			description: "Behavior-drift findings (new destinations since the captured baseline) whose owning pod/workload started after that baseline — a plausible \"first egress after start\" correlation, not a precise timing claim (no conversion exists between kernel-boot-monotonic packet timestamps and Kubernetes wall-clock pod start times). Stateless and on-demand: may repeat the same finding across a pod's crash loop, unlike the alert-poller's equivalent which suppresses that for one cycle. Requires a captured behavior baseline (see netra_insights_baseline_capture).",
+			schema:      objSchema(map[string]any{"maxRestarts": intProp("Exclude pods/workloads with more cumulative container restarts than this. 0 disables the filter. Default 5.")}),
+			queryParams: []string{"maxRestarts"},
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),
