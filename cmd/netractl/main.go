@@ -110,6 +110,7 @@ func usage() {
   insights summary | dependencies [limit] | drift | recommendations [namespace] [workload]
   insights baseline show | capture | clear
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
+  insights blast-radius <root> [hops]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
@@ -1254,6 +1255,19 @@ func insightCmd() error {
 			p += "?window=" + url.QueryEscape(os.Args[3])
 		}
 		return request("GET", p, nil)
+	case "blast-radius":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("blast-radius requires a root node ID (see insights dependencies for IDs)")
+		}
+		q := url.Values{}
+		q.Set("root", os.Args[3])
+		if len(os.Args) > 4 {
+			if _, err := strconv.Atoi(os.Args[4]); err != nil {
+				return fmt.Errorf("hops must be numeric")
+			}
+			q.Set("hops", os.Args[4])
+		}
+		return request("GET", "/api/v1/insights/blast-radius?"+q.Encode(), nil)
 	case "rate-baseline":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("rate-baseline show|capture [window]|clear")

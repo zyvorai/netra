@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 48 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 49 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -215,6 +215,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_insights_rate_baseline_get` | `GET /api/v1/insights/rate-baseline` | — | Currently captured rate baseline, if any |
 | `netra_insights_rate_drift` | `GET /api/v1/insights/rate-drift` | `window` | How current rates differ from the rate baseline |
 | `netra_insights_exposure` | `GET /api/v1/insights/exposure` | `window` | Dependency graph combined with behavior + rate drift |
+| `netra_insights_blast_radius` | `GET /api/v1/insights/blast-radius` | `root` (required), `hops` (1-6, default 3) | Multi-hop *observed traffic reachability* from one node — never a policy allow/deny determination |
 | `netra_insights_remediations` | `GET /api/v1/insights/remediations` | `limit` (1-200, default 50), `window` | Proposed remediations; result always carries `reviewRequired: true`, `autoApply: false` |
 
 ### Policies — read & generate (always available)

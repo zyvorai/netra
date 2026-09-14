@@ -257,6 +257,15 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"window"},
 		},
 		{
+			name: "netra_insights_blast_radius", method: "GET", path: "/api/v1/insights/blast-radius",
+			description: "Multi-hop reachability from one dependency-graph node, breadth-first over observed traffic edges. This is OBSERVED TRAFFIC REACHABILITY, not a policy allow/deny determination — a node with no edges here may still be permitted to reach further destinations that simply weren't observed in this window. Edges may be stale relative to the currently applied policy.",
+			schema: objSchema(map[string]any{
+				"root": strProp("Dependency-graph node ID to start from (see netra_insights_dependencies for IDs, e.g. \"workload:prod:deployment:api\")."),
+				"hops": intProp("Max hops to traverse, 1-6. Default 3."),
+			}, "root"),
+			queryParams: []string{"root", "hops"},
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

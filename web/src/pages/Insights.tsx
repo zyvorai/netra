@@ -16,6 +16,8 @@ type RateDrift = { baselineCapturedAt?: string; window: { warming: boolean; requ
 type Exposure = { source: string; score: number; severity: string; externalDependencies: number; behaviorDrift: number; rateDrift: number; reasons: string[] };
 type Recommendation = { id: string; kind: string; namespace: string; workloadKind?: string; workloadName: string; confidence: string; rationale: string[]; manifest?: any };
 type Remediation = { id: string; source: string; severity: string; kind: string; title: string; rationale: string[]; action: Record<string, any>; reviewRequired: boolean };
+type BlastRadiusNode = { id: string; hops: number };
+type BlastRadiusResult = { generatedAt: string; root: string; maxHops: number; nodes: BlastRadiusNode[]; edges: Edge[]; truncated: boolean; caveat: string };
 
 export default function Insights() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -31,6 +33,10 @@ export default function Insights() {
   const [rateBaseline, setRateBaseline] = useState<any>(null);
   const [window, setWindow] = useState('5m');
   const [msg, setMsg] = useState('');
+  const [blastRoot, setBlastRoot] = useState('');
+  const [blastHops, setBlastHops] = useState(3);
+  const [blastResult, setBlastResult] = useState<BlastRadiusResult | null>(null);
+  const [blastMsg, setBlastMsg] = useState('');
 
   async function refresh() {
     try {
@@ -61,6 +67,14 @@ export default function Insights() {
   async function clearBehavior() { if (!confirm('Clear the known-good behavior baseline?')) return; try { await api('/api/v1/insights/baseline', { method: 'DELETE', headers: { 'X-Netra-Confirm-Baseline-Clear': 'clear' } }); await refresh(); } catch (e) { setMsg(String(e)); } }
   async function captureRate() { try { const x = await api<any>(`/api/v1/insights/rate-baseline?window=${encodeURIComponent(window)}`, { method: 'POST' }); setMsg(`Rate baseline captured with ${x.baseline?.entries?.length || 0} entries.`); await refresh(); } catch (e) { setMsg(String(e)); } }
   async function clearRate() { if (!confirm('Clear the traffic-rate baseline?')) return; try { await api('/api/v1/insights/rate-baseline', { method: 'DELETE', headers: { 'X-Netra-Confirm-Rate-Baseline-Clear': 'clear' } }); await refresh(); } catch (e) { setMsg(String(e)); } }
+
+  async function runBlastRadius() {
+    if (!blastRoot) { setBlastMsg('Pick a root node.'); return; }
+    try {
+      const res = await api<BlastRadiusResult>(`/api/v1/insights/blast-radius?root=${encodeURIComponent(blastRoot)}&hops=${blastHops}`);
+      setBlastResult(res); setBlastMsg('');
+    } catch (e) { setBlastResult(null); setBlastMsg(String(e)); }
+  }
 
   return <div className="grid">
     <section className="card span3">
@@ -122,6 +136,34 @@ export default function Insights() {
         <div className="datahead deps"><span>SOURCE</span><span>TARGET</span><span>NETWORK</span><span>PACKETS / BYTES</span></div>
         {(graph?.edges || []).slice(0, 100).map((e, i) => <div className="datarow deps" key={`${e.source}-${e.target}-${e.protocol}-${e.port}-${i}`}><span className="truncate" title={label(e.source)} aria-label={label(e.source)}>{label(e.source)}</span><span className="truncate" title={label(e.target)} aria-label={label(e.target)}>{label(e.target)} {e.external ? '↗' : ''}</span><span>{e.protocol}{e.port ? `/${e.port}` : ''}</span><span>{e.packets.toLocaleString()} / {e.bytes.toLocaleString()}</span></div>)}
       </div>}
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">BLAST RADIUS</p><h3>Multi-hop observed-traffic reachability from one node</h3>
+      <p>Traces packets Netra has actually seen leaving the chosen node, hop by hop — not a policy allow/deny determination. A node showing no further hops here may still be permitted to reach destinations Netra simply hasn't observed traffic for.</p>
+      <div className="toolbar">
+        <label>Root <select value={blastRoot} onChange={e => setBlastRoot(e.target.value)}>
+          <option value="">Select a node…</option>
+          {(graph?.nodes || []).map(n => <option key={n.id} value={n.id}>{label(n.id)}</option>)}
+        </select></label>
+        <label>Hops <select value={blastHops} onChange={e => setBlastHops(Number(e.target.value))}>
+          {[1, 2, 3, 4, 5, 6].map(h => <option key={h} value={h}>{h}</option>)}
+        </select></label>
+        <button className="primary" onClick={runBlastRadius} disabled={!blastRoot}>Trace</button>
+      </div>
+      {blastMsg && <p className="warning">{blastMsg}</p>}
+      {blastResult && <>
+        <p><small>{blastResult.caveat}</small></p>
+        {blastResult.truncated && <p className="warning">Cut off at {blastResult.maxHops} hops — reachable nodes may extend further. Increase hops (up to 6) to see more.</p>}
+        <div className="metrics">
+          <div><b>{blastResult.nodes.length}</b><span>nodes reached</span></div>
+          <div><b>{blastResult.edges.length}</b><span>edges used</span></div>
+        </div>
+        <div className="list">
+          {blastResult.nodes.slice(0, 50).map(n => <div className="insightrow" key={n.id}><b>{n.hops} hop{n.hops === 1 ? '' : 's'}</b><span className="truncate" title={label(n.id)} aria-label={label(n.id)}>{label(n.id)}</span></div>)}
+        </div>
+        {blastResult.nodes.length > 50 && <p><small>Showing first 50 of {blastResult.nodes.length} nodes.</small></p>}
+      </>}
     </section>
 
     <section className="card span3">

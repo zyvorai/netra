@@ -203,6 +203,34 @@ func (s *Server) insightsExposure(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": insights.Exposure(graph, behavior, rates), "rateWarming": rates.Window.Warming})
 }
 
+func (s *Server) insightsBlastRadius(w http.ResponseWriter, r *http.Request) {
+	root := strings.TrimSpace(r.URL.Query().Get("root"))
+	if root == "" {
+		errorJSON(w, 400, "root query parameter is required")
+		return
+	}
+	hops := insights.DefaultBlastRadiusHops
+	if raw := r.URL.Query().Get("hops"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			errorJSON(w, 400, "hops must be a positive integer")
+			return
+		}
+		hops = n
+	}
+	graph, err := s.dependencyGraph(r, 5000)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	resp, err := insights.BlastRadius(graph, root, hops)
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, resp)
+}
+
 func (s *Server) insightsRemediations(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {

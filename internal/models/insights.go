@@ -47,6 +47,21 @@ type DependencyGraph struct {
 	Edges       []DependencyEdge `json:"edges"`
 }
 
+type BlastRadiusNode struct {
+	ID   string `json:"id"`
+	Hops int    `json:"hops"`
+}
+
+type BlastRadiusResponse struct {
+	GeneratedAt time.Time         `json:"generatedAt"`
+	Root        string            `json:"root"`
+	MaxHops     int               `json:"maxHops"`
+	Nodes       []BlastRadiusNode `json:"nodes"`
+	Edges       []DependencyEdge  `json:"edges"`
+	Truncated   bool              `json:"truncated"`
+	Caveat      string            `json:"caveat"`
+}
+
 type BehaviorBaselineEntry struct {
 	Source string `json:"source"`
 	Kind   string `json:"kind"` // destination, dns, sni, http-host, remote-port
