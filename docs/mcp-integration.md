@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 55 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 56 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -222,6 +222,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_insights_health_trend` | `GET /api/v1/insights/health-trend` | `threshold` (0-99, default 50) | Linear time-to-breach projection from recent health-score history; confidence is always low/medium, never high |
 | `netra_insights_policy_review` | `GET /api/v1/insights/policy-review` | `recommendationId` (required) | Governing-policy resolution + semantic diff + traffic-aware blast radius + revision history for one recommendation; read-only |
 | `netra_insights_new_since_start` | `GET /api/v1/insights/new-since-start` | `maxRestarts` (0-disables, default 5) | Drift findings whose owning pod/workload started after the captured baseline; baseline-relative, not a precise timing claim |
+| `netra_insights_protocol_downgrades` | `GET /api/v1/insights/protocol-downgrades` | — | Workload/host pairs with baseline TLS history now showing cleartext HTTP; coexistence-tolerant correlation, never a verdict; check `l7Degraded` before reading empty as "clean" |
 | `netra_incidents` | `GET /api/v1/incidents` | `auditLimit` (1-1000, default 200) | Cross-signal clusters joining health/drift/rate-drift/exposure/detective/audit findings by shared source; only surfaced with ≥2 contributing signal kinds |
 | `netra_incidents_timeline` | `GET /api/v1/incidents/timeline` | `since` (RFC3339, optional) | Chronological, human-readable merge of the audit log and cluster-health-signature transitions |
 | `netra_insights_remediations` | `GET /api/v1/insights/remediations` | `limit` (1-200, default 50), `window` | Proposed remediations; result always carries `reviewRequired: true`, `autoApply: false` |

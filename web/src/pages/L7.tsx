@@ -8,10 +8,13 @@ export default function L7() {
   const [sni, setSNI] = useState('');
   const [err, setErr] = useState('');
 
+  const [downgrades, setDowngrades] = useState<any>();
+
   const load = () => Promise.all([
     api<any>('/api/v1/ebpf/l7?limit=200'),
     api<any>('/api/v1/ebpf/config'),
-  ]).then(([d, c]) => { setData(d); setCfg(c); setErr(''); }).catch(e => setErr(String(e)));
+    api<any>('/api/v1/insights/protocol-downgrades'),
+  ]).then(([d, c, dg]) => { setData(d); setCfg(c); setDowngrades(dg); setErr(''); }).catch(e => setErr(String(e)));
 
   useEffect(() => { void load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
 
@@ -38,6 +41,27 @@ export default function L7() {
         <div><b>{sum.uniqueHttpHosts || 0}</b><span>HTTP hosts</span></div>
         <div><b>{sum.connectAttempts || 0}</b><span>socket attempts</span></div>
         <div><b>{sum.connectBlocked || 0}</b><span>blocked attempts</span></div>
+      </div>
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">PROTOCOL DOWNGRADES</p><h3>TLS→cleartext correlation, baseline-relative</h3>
+      <p>Workload/host pairs with TLS handshake history at baseline capture time that now also show cleartext HTTP to the same host. Coexistence-tolerant correlation, not a verdict — never read a finding here as a confirmed downgrade attack or MITM.</p>
+      {downgrades?.l7Degraded && (
+        <p className="warning">L7 visibility is degraded on {(downgrades.l7DegradedNodes || []).join(', ') || 'one or more nodes'} — the TLS/HTTP BPF programs failed to load there. An empty result below does not mean "no downgrades"; it may only mean Netra can't see that node's TLS/HTTP traffic right now.</p>
+      )}
+      {!downgrades?.baselineCapturedAt && <p className="empty-state">No behavior baseline captured yet — this correlation needs one to compare against (see Insights → Behavior inventory).</p>}
+      {downgrades?.baselineCapturedAt && !(downgrades.findings || []).length && <p className="empty-state">No workload/host pair with prior TLS history currently shows cleartext HTTP to the same host.</p>}
+      <div className="list">
+        {(downgrades?.findings || []).map((f: any, i: number) => (
+          <div className={`insightrow ${f.severity}`} key={i}>
+            <b>{f.severity}</b>
+            <span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span>
+            <code>{f.host}</code>
+            <small>{f.message}</small>
+            <ExplainFinding page="l7" kind="protocol-downgrade" subject={f.source} message={f.message} severity={f.severity} />
+          </div>
+        ))}
       </div>
     </section>
 

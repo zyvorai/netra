@@ -298,6 +298,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"maxRestarts"},
 		},
 		{
+			name: "netra_insights_protocol_downgrades", method: "GET", path: "/api/v1/insights/protocol-downgrades",
+			description: "Workload/host pairs with TLS handshake history at baseline capture time that now also show cleartext HTTP to the same host. Coexistence-tolerant correlation, never a verdict — do not describe a finding as a \"downgrade attack\", \"MITM\", or \"stripped\" TLS. Check l7Degraded/l7DegradedNodes before reading an empty result as \"no downgrades\": when true, the L7 (TLS SNI / HTTP Host) BPF programs failed to load on those nodes, so visibility there is genuinely incomplete, not clean. Requires a captured behavior baseline.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

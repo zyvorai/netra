@@ -445,3 +445,7 @@ func (s *Server) insightsNewSinceStart(w http.ResponseWriter, r *http.Request) {
 		"note": "on-demand and stateless: may repeat the same finding across a pod's crash loop, unlike the alert-poller path which suppresses that for one cycle",
 	})
 }
+
+func (s *Server) insightsProtocolDowngrades(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, insights.ProtocolDowngrades(s.store.Baseline(), s.store.AgentStatuses(time.Now(), s.agentStaleAfter)))
+}
