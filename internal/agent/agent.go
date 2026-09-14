@@ -497,7 +497,21 @@ func (a *Agent) attachEdgeIntel(ifs []string) error {
 			// multiple programs per attach point (unlike classic TC),
 			// confirmed via bpftool net show as part of live verification,
 			// not assumed from documentation alone.
-			lnk, err := link.AttachTCX(link.TCXOptions{Interface: iface.Index, Program: p, Attach: h.attach})
+			//
+			// Anchor: link.Head() is required, not cosmetic. TCX's mprog
+			// chain short-circuits on any verdict other than TCX_NEXT
+			// (which is numerically TC_ACT_UNSPEC, -1) — netra_ingress/
+			// egress return TC_ACT_OK for allowed traffic, a definite
+			// verdict that terminates the chain right there. A program
+			// attached *after* them (the default, tail-appended position)
+			// would then never run for any already-decided packet —
+			// confirmed live: with a tail attach, edge_tcp_counts/_hist
+			// stayed empty under real traffic despite both TCX links
+			// showing attached in bpftool net show. Head() makes this
+			// program run first, before any other program on the hook has
+			// rendered a verdict, so its own always-TC_ACT_UNSPEC return
+			// never blocks the chain and it never misses a packet.
+			lnk, err := link.AttachTCX(link.TCXOptions{Interface: iface.Index, Program: p, Attach: h.attach, Anchor: link.Head()})
 			if err != nil {
 				if mode == "required" {
 					return fmt.Errorf("attach %s to %s (NETRA_EDGE_INTEL=required): %w", h.name, name, err)

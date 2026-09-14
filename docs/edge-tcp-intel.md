@@ -33,8 +33,26 @@ attached as a **second, independent** TCX program on the same interfaces
 `netra_ingress`/`netra_egress` already use — TCX supports chaining
 multiple programs per attach point (unlike classic TC's single-program
 model). It always returns `TC_ACT_UNSPEC` (no verdict opinion), so it can
-never override `netra_ingress`/`netra_egress`'s decision regardless of
-attach order.
+never override `netra_ingress`/`netra_egress`'s decision.
+
+**Attach order matters, and is not cosmetic.** TCX's `bpf_mprog` chain
+short-circuits on any verdict other than `TCX_NEXT` (numerically the same
+value as `TC_ACT_UNSPEC`, `-1`) — a program that returns a definite
+verdict (`TC_ACT_OK`, `TC_ACT_SHOT`, …) ends the chain right there for
+that packet. `netra_ingress`/`netra_egress` return `TC_ACT_OK` for every
+allowed packet, which is nearly all traffic in observe mode. Confirmed
+live: with edge intel tail-attached (the default TCX attach position),
+`bpftool net show` correctly listed both `netra_edge_ingress`/`_egress`
+as attached, but `edge_tcp_counts`/`edge_tcp_hist` stayed empty under real
+generated traffic — the program was attached but never actually ran,
+because `netra_ingress`/`netra_egress` (attached earlier in the chain)
+had already returned a terminal verdict for every packet. Fixed by
+attaching with `Anchor: link.Head()` (`internal/agent/agent.go`'s
+`attachEdgeIntel`) so edge intel always runs *first*, before any other
+program on the hook has rendered a verdict — its own always-`TC_ACT_UNSPEC`
+return then never blocks anything downstream, and it never misses a
+packet regardless of what any other program (Netra's own or Cilium's)
+decides afterward.
 
 ## Enabling it
 
