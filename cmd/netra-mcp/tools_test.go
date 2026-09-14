@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -251,6 +252,33 @@ func TestNetPolDefaultDenyPlanSet_BodyMatchesPlan(t *testing.T) {
 	}
 	if string(planBody) != string(setBody) {
 		t.Fatalf("plan and set bodies must match byte-for-byte (preflight is hash-bound to the body):\nplan: %s\nset:  %s", planBody, setBody)
+	}
+}
+
+func TestPolicySimulate_SendsRawManifestBodyAndAvailableWithoutMutations(t *testing.T) {
+	var gotBody string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/policies/simulate" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Write([]byte(`{"namespace":"prod","name":"eg","governedSources":1,"results":[]}`))
+	}))
+	defer ts.Close()
+
+	c := testClient(t, ts)
+	// allowMutations=false: netra_policy_simulate must still be registered
+	// and callable, since it mutates nothing (unlike netra_policy_plan).
+	result := callTool(t, c, false, "netra_policy_simulate", map[string]any{"manifest": `{"kind":"CiliumNetworkPolicy"}`})
+	if result.IsError {
+		t.Fatalf("expected success, got error result: %+v", result)
+	}
+	if gotBody != `{"kind":"CiliumNetworkPolicy"}` {
+		t.Fatalf("expected the raw manifest as the request body, got %q", gotBody)
+	}
+	if !strings.Contains(result.Content[0].Text, "governedSources") {
+		t.Fatalf("unexpected content: %s", result.Content[0].Text)
 	}
 }
 

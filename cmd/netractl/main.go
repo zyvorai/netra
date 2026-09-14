@@ -69,6 +69,7 @@ func usage() {
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE
+  policy simulate <file> | policy simulate --file FILE
   policy apply <file> [--dry-run] [--confirm-risk high|critical] | policy apply --file FILE [--dry-run] [--confirm-risk high|critical]
   policy history <namespace> <name>
   policy archive export <file>
@@ -187,6 +188,16 @@ func policy() error {
 			return err
 		}
 		return request("POST", "/api/v1/policies/plan", b)
+	case "simulate":
+		file, err := policyFile(os.Args[3:])
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		return request("POST", "/api/v1/policies/simulate", b)
 	case "apply":
 		file, err := policyFile(os.Args[3:])
 		if err != nil {

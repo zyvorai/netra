@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 56 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 57 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -238,6 +238,7 @@ None of these mutate the cluster or Netra's store, and none record an audit even
 | `netra_policies_history_export` | `GET /api/v1/policies/history/export` | — | Full revision archive as JSON, for backup or `netra_policy_history_import` on another controller |
 | `netra_policy_build` | `POST /api/v1/policies/build` | body: `name` **(required)**, `namespace` **(required)**, `selector` (object), `kind`, `to` (array of CIDR/FQDN/entity strings), `port`, `protocol`, `includeDns` (bool) | Generates a manifest only — feed the result to `netra_policy_plan` |
 | `netra_policy_lockdown` | `POST /api/v1/policies/lockdown` | body: `name` **(required)**, `namespace` (default `default`), `kind` (`pod`\|`vm`, default `pod`), `selector` (auto-detected if omitted) | Generates a deny-all manifest only — feed the result to `netra_policy_plan`, or use `netra_policy_unlock` to remove an already-applied one |
+| `netra_policy_simulate` | `POST /api/v1/policies/simulate` | body: `manifest` **(required, raw CNP JSON/YAML)** | Evaluates candidate egress rules against observed traffic; `toFQDNs` destinations are always `"unverified"`, never a false `"denied"` |
 | `netra_ebpf_scope_preview` | `POST /api/v1/ebpf/scope/preview` | body: `scopes` **(required, array of objects)** | Dry match against live pods; does not change the active scope |
 
 ### Policies — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)

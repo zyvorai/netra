@@ -27,6 +27,7 @@ import (
 	"github.com/zyvorai/netra/internal/flowstats"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/hubble"
+	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/ipv6diag"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/l7"
@@ -70,19 +71,20 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.43"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.44"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.43"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.44"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.43"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.44"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
 	mux.Handle("GET /api/v1/policies", s.auth(s.cilium(http.HandlerFunc(s.listPolicies))))
 	mux.Handle("POST /api/v1/policies/build", s.auth(http.HandlerFunc(s.buildPolicy)))
 	mux.Handle("POST /api/v1/policies/plan", s.auth(s.cilium(http.HandlerFunc(s.planPolicy))))
+	mux.Handle("POST /api/v1/policies/simulate", s.auth(http.HandlerFunc(s.simulatePolicy)))
 	mux.Handle("POST /api/v1/policies/apply", s.auth(s.cilium(http.HandlerFunc(s.applyPolicy))))
 	mux.Handle("POST /api/v1/policies/lockdown", s.auth(s.cilium(http.HandlerFunc(s.lockdownPolicy))))
 	mux.Handle("DELETE /api/v1/policies/lockdown/{namespace}/{name}", s.auth(s.cilium(http.HandlerFunc(s.unlockPolicy))))
@@ -275,7 +277,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.43", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.44", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -360,6 +362,31 @@ func (s *Server) planPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.metricsData.policyPlans.Add(1)
 	writeJSON(w, 200, map[string]any{"plan": plan, "dryRun": dryRun, "receipt": receipt})
+}
+
+// simulatePolicy is pure read/analysis — it never calls kube.ApplyPolicy and
+// needs no preflight receipt, since nothing is applied. It evaluates the
+// candidate against internal insights.Dependencies()/agent-reported
+// workload labels only, so — unlike plan/apply — it does not require Cilium
+// integration to be enabled; a candidate manifest can be simulated as
+// evidence for review whether or not Netra can apply it here.
+func (s *Server) simulatePolicy(w http.ResponseWriter, r *http.Request) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	graph, err := s.dependencyGraph(r, 5000)
+	if err != nil {
+		errorJSON(w, 502, err.Error())
+		return
+	}
+	sim, err := insights.Simulate(b, graph, s.store.AgentStatuses(time.Now(), s.agentStaleAfter))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, sim)
 }
 
 func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request) {

@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package main
 
-import "github.com/zyvorai/netra/internal/mcpserver"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/zyvorai/netra/internal/mcpserver"
+)
 
 // registerReadTools registers every read-only GET endpoint plus the
 // three pure-generator POSTs that mutate nothing (policy build, policy
@@ -409,5 +415,35 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			return err
 		}
 	}
-	return nil
+	return registerPolicySimulate(srv, c)
+}
+
+// registerPolicySimulate is bespoke (not table-driven) for the same reason
+// registerPolicyPlan in tools_mutate.go is: /api/v1/policies/simulate takes
+// the raw candidate manifest as its entire POST body, not a JSON object of
+// named arguments. It's registered here, not in tools_mutate.go, because it
+// mutates nothing at all — no store write, no audit event, no kube call —
+// unlike netra_policy_plan, which issues a preflight receipt and so is
+// gated behind NETRA_MCP_ALLOW_MUTATIONS.
+func registerPolicySimulate(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_policy_simulate",
+		Description: "Evaluate a candidate CiliumNetworkPolicy manifest's egress rules against the observed dependency graph and live workload labels — read-only, applies nothing. toCIDR/toCIDRSet/toEntities/toServices/toEndpoints destinations are precisely computed; toFQDNs destinations are always \"unverified\" (never a false \"denied\"), since there is no DNS/SNI→IP correlation to confirm or rule out a match.",
+		InputSchema: objSchema(map[string]any{
+			"manifest": strProp("Full CiliumNetworkPolicy manifest (YAML or JSON) to simulate."),
+		}, "manifest"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				Manifest string `json:"manifest"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			out, status, err := c.do(ctx, "POST", "/api/v1/policies/simulate", []byte(x.Manifest), nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
 }

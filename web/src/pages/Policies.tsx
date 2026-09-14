@@ -35,6 +35,15 @@ type PlanResponse = {
   receipt?: { token: string; expiresAt: string } | null;
 };
 
+type SimulationResponse = {
+  namespace: string;
+  name: string;
+  governedSources: number;
+  results: { source: string; target: string; protocol: string; port?: number; verdict: string; reason: string }[];
+  caveat: string;
+  note?: string;
+};
+
 type Revision = {
   id: number;
   at: string;
@@ -51,6 +60,7 @@ export default function Policies() {
   const [text, setText] = useState(sample);
   const [msg, setMsg] = useState('');
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
   const [history, setHistory] = useState<Revision[]>([]);
   const [historyTarget, setHistoryTarget] = useState<{ namespace: string; name: string } | null>(null);
   const [builder, setBuilder] = useState({ name: 'payments-egress', selectorKey: 'app', selectorValue: 'payments', kind: 'fqdn', to: 'api.example.com', port: '443', protocol: 'TCP', includeDns: true });
@@ -111,6 +121,21 @@ export default function Policies() {
       setMsg(x.dryRun.passed ? 'Preflight passed. The apply receipt is valid for five minutes and only for these exact policy bytes.' : 'Preflight found a Kubernetes dry-run failure.');
     } catch (e) {
       setPlan(null);
+      setMsg(String(e));
+    }
+  }
+
+  async function simulate() {
+    try {
+      const x = await api<SimulationResponse>('/api/v1/policies/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: text,
+      });
+      setSimulation(x);
+      setMsg('Simulated against observed traffic — additive evidence, not a substitute for Preflight.');
+    } catch (e) {
+      setSimulation(null);
       setMsg(String(e));
     }
   }
@@ -231,6 +256,7 @@ export default function Policies() {
           <input value={ns} onChange={(e) => setNs(e.target.value)} />
           <button className="btn-refresh" onClick={refresh}>Refresh</button>
           <button className="btn-secondary" onClick={preflight}>Preflight</button>
+          <button className="btn-secondary" onClick={simulate}>Simulate against observed traffic</button>
           <button className="btn-secondary" onClick={() => apply(true)}>Server dry-run</button>
           <button className="primary" onClick={() => apply(false)}>Apply CRD</button>
         </div>
@@ -278,6 +304,30 @@ export default function Policies() {
             {(plan.plan.removedDestinations || []).length > 0 && <p><b>Removed:</b> {plan.plan.removedDestinations.join(', ')}</p>}
             {plan.receipt && <p><b>Apply receipt:</b> expires {new Date(plan.receipt.expiresAt).toLocaleTimeString()}</p>}
             {plan.dryRun.error && <p className="warning">{plan.dryRun.error}</p>}
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <h3>Simulation against observed traffic</h3>
+        {!simulation && <p>Run "Simulate against observed traffic" to check this candidate's egress rules against the live dependency graph — additive evidence alongside Preflight, not a replacement for it.</p>}
+        {simulation && (
+          <>
+            <p><small>{simulation.caveat}</small></p>
+            {simulation.note && <p className="empty-state">{simulation.note}</p>}
+            {!simulation.note && (
+              <div className="list">
+                {simulation.results.map((r, i) => (
+                  <div className={`insightrow ${r.verdict === 'denied' ? 'warning' : r.verdict === 'unverified' ? 'info' : 'low'}`} key={i}>
+                    <b>{r.verdict}</b>
+                    <span className="truncate" title={r.target} aria-label={r.target}>{r.target}</span>
+                    <code>{r.protocol}{r.port ? `/${r.port}` : ''}</code>
+                    <small>{r.reason}</small>
+                  </div>
+                ))}
+                {!simulation.results.length && <p className="empty-state">No observed edges from a workload this selector governs yet.</p>}
+              </div>
+            )}
           </>
         )}
       </section>
