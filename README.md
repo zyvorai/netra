@@ -119,6 +119,10 @@ These controls are intentionally an emergency/containment layer, not a replaceme
 
 Netra v0.13 added a dedicated **Path Diagnostics** surface independent of Cilium. It measures active TCP connect establishment latency and exports current Linux TCP transport pressure (`snd_cwnd`, `packets_out`, `retrans_out`, `lost_out`, `total_retrans`, delivered-rate samples and state) per cgroup/workload and remote tuple. The feature is observe-only and uses new maps without resizing earlier pinned-map ABIs. See `docs/path-diagnostics.md`.
 
+A standalone TCX observer adds **edge-observed** handshake/RTT histograms and retransmit/RST/FIN counters alongside the socket-observed data above — pre-NAT-visible, seeing forwarded/NAT'd flows the local socket layer never attaches to. See `docs/edge-tcp-intel.md`.
+
+![TCP Path Diagnostics — pressure, connect latency, and edge TCP intel](docs/ux/08-path-edge-intel.png)
+
 ## DNS Response Diagnostics
 
 **Health** and **Explain** now explain native DNS response events, including NXDOMAIN, SERVFAIL, REFUSED, and malformed-request errors, with resolver details and next checks. Use `netractl explain --pod NS/POD --dns NAME`. See [DNS response diagnostics](docs/dns-response-diagnostics.md).
