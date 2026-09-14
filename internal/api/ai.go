@@ -108,6 +108,7 @@ func (s *Server) aiDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	digest := ai.BuildDigest(ai.BuildBrief(snap))
+	digest = ai.NarrateWhyChanged(r.Context(), digest, ai.ProviderFromEnv())
 	s.recordHealthSample(snap, digest.Severity, digest.Fingerprint)
 	writeJSON(w, 200, digest)
 }

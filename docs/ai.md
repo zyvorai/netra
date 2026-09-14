@@ -63,6 +63,21 @@ mode, health-score bucket, stale-agent flag, and finding kinds — not
 raw packet counters — so two operators can tell whether they are looking
 at the same incident cluster after counters have moved.
 
+When the fingerprint changes, the response also carries `whyChanged`: a
+deterministic list of exactly which signal moved (mode, severity, health
+band, stale-agent count, exposure/drift counts, or which finding kinds
+appeared/resolved). The fingerprint is a one-way SHA-256 hash and cannot
+be decomposed after the fact, so this works by keeping the plain
+components alongside it — `whyChanged` covers the *complete* input to the
+hash, so it is never empty when the fingerprint actually changed. An
+optional `whyChangedProse` adds a one-sentence LLM rewrite of the same
+bullets when a provider is configured — same "deterministic step, optional
+prose" split `ai/ask` and the incident timeline use. This is computed only
+on the `GET /api/v1/ai/digest` path (so the web digest chip/card,
+`netractl ai digest`, and `netra_ai_digest` all get it); the webhook alert
+poller calls the deterministic builder directly and gets the bullets
+embedded in the card text, not a per-poll LLM call.
+
 `POST /api/v1/ai/draft` turns "deny dns malware.example" / "rate limit
 1.2.3.4 to 100 pps" / "allow 10.0.0.5" into a preview of the existing eBPF
 API body and the matching `netractl` line. It never applies the rule.

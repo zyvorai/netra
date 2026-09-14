@@ -42,7 +42,7 @@ func registerPrompts(srv *mcpserver.Server) error {
 			Description: "Produce the current on-call digest and say whether the incident fingerprint changed.",
 			Messages: []mcpserver.PromptMessage{{
 				Role: "user",
-				Text: "Call netra_ai_digest. Quote the card. If changed=true, say the fingerprint moved and summarize what that usually means (mode, health bucket, or finding-kind shift — not packet-counter chatter). Stay read-only.",
+				Text: "Call netra_ai_digest. Quote the card. If changed=true, say the fingerprint moved and quote whyChanged (the deterministic list of what changed) — lead with whyChangedProse instead if it is present. Never guess at a cause not present in those fields. Stay read-only.",
 			}},
 		},
 		{

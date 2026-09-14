@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -148,6 +149,43 @@ func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
 	}
 }
 
+func TestEvaluateAIDigestCardExplainsFingerprintChange(t *testing.T) {
+	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
+	quiet := []models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1"}}}
+	degraded := []models.AgentStatus{{
+		AgentReport: models.AgentReport{
+			Node: "n1",
+			Mode: "observe",
+			TCPHealth: []models.TCPHealthStat{{
+				Namespace: "pay",
+				Pod:       "api",
+				SRTTUS:    800_000,
+			}},
+		},
+	}}
+	now := time.Unix(4000, 0)
+	// First call seeds internal/ai's shared "last fingerprint" state to a
+	// known baseline, regardless of whatever this test binary's earlier
+	// tests already left it at — digestEvent() always calls
+	// ai.BuildDigest() (which records the fingerprint) even when it
+	// decides not to return an event for a quiet cluster.
+	p.evaluate(now, quiet)
+
+	evs, _ := p.evaluate(now.Add(time.Second), degraded)
+	var digest *webhook.Event
+	for i := range evs {
+		if evs[i].Source == "ai" && evs[i].Kind == "digest" {
+			digest = &evs[i]
+		}
+	}
+	if digest == nil {
+		t.Fatalf("expected an ai/digest event among %d events", len(evs))
+	}
+	if !strings.Contains(digest.Card, "Why:") {
+		t.Fatalf("card missing a Why: section for a changed fingerprint: %s", digest.Card)
+	}
+}
+
 func TestNewSinceStartEventsNilWithoutFetchPods(t *testing.T) {
 	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
 	if got := p.newSinceStartEvents(time.Now(), nil); got != nil {
@@ -157,10 +195,13 @@ func TestNewSinceStartEventsNilWithoutFetchPods(t *testing.T) {
 
 func TestNewSinceStartEventsNilWithoutCapturedBaseline(t *testing.T) {
 	p := &Poller{
-		cfg:       Config{Cooldown: time.Minute},
-		dedup:     newDedupState(),
-		baseline:  func() models.BehaviorBaseline { return models.BehaviorBaseline{} },
-		fetchPods: func(ctx context.Context, ns string) ([]models.PodInfo, error) { t.Fatal("must not fetch pods without a captured baseline"); return nil, nil },
+		cfg:      Config{Cooldown: time.Minute},
+		dedup:    newDedupState(),
+		baseline: func() models.BehaviorBaseline { return models.BehaviorBaseline{} },
+		fetchPods: func(ctx context.Context, ns string) ([]models.PodInfo, error) {
+			t.Fatal("must not fetch pods without a captured baseline")
+			return nil, nil
+		},
 	}
 	if got := p.newSinceStartEvents(time.Now(), nil); got != nil {
 		t.Fatalf("expected nil, got %#v", got)

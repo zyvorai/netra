@@ -54,7 +54,14 @@ type RuleDraft = {
   note?: string;
   body?: Record<string, unknown>;
 };
-type Digest = { fingerprint: string; changed: boolean; card: string; suggestions?: string[] };
+type Digest = {
+  fingerprint: string;
+  changed: boolean;
+  card: string;
+  suggestions?: string[];
+  whyChanged?: string[];
+  whyChangedProse?: string;
+};
 
 export default function AskNetra() {
   const [status, setStatus] = useState<AIStatus | null>(null);
@@ -274,6 +281,11 @@ export default function AskNetra() {
             </span>
           )}
         </div>
+      )}
+      {digest?.changed && (digest.whyChangedProse || (digest.whyChanged || []).length > 0) && (
+        <p className="ask-netra-meta">
+          Why: {digest.whyChangedProse || (digest.whyChanged || []).join('; ')}
+        </p>
       )}
       {thread.length === 0 && !err && <p className="empty-state">Loading cluster brief…</p>}
     </section>

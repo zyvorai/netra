@@ -82,3 +82,54 @@ func TestAIForgetClearsConversationMemory(t *testing.T) {
 		t.Fatalf("post-forget ask body=%q", got)
 	}
 }
+
+func TestAIDigestExplainsWhyFingerprintChanged(t *testing.T) {
+	s := &Server{store: store.New()}
+
+	digest := func() map[string]any {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/api/v1/ai/digest", nil)
+		rec := httptest.NewRecorder()
+		s.aiDigest(rec, r)
+		if rec.Code != 200 {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	// The first call only establishes a baseline in internal/ai's shared
+	// "last fingerprint" singleton (unexported, so not resettable from
+	// here) — it may or may not itself report a change depending on
+	// whatever state earlier tests in this binary already left behind.
+	// What this test actually verifies is the second call, after a known
+	// mutation, reporting exactly that mutation.
+	digest()
+
+	if _, err := s.store.SetMode("enforce", 0, "test"); err != nil {
+		t.Fatal(err)
+	}
+	second := digest()
+	if second["changed"] != true {
+		t.Fatalf("expected changed=true after a mode switch, got %v", second)
+	}
+	why, _ := second["whyChanged"].([]any)
+	if len(why) == 0 {
+		t.Fatalf("expected whyChanged to be populated, got %v", second)
+	}
+	found := false
+	for _, w := range why {
+		if strings.Contains(w.(string), "fast-path mode changed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("whyChanged=%v missing a mode-change bullet", why)
+	}
+	if !strings.Contains(second["card"].(string), "Why:") {
+		t.Fatalf("card missing Why section: %v", second["card"])
+	}
+}

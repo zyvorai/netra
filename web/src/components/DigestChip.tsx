@@ -6,7 +6,15 @@ type Digest = {
   fingerprint?: string;
   changed?: boolean;
   headline?: string;
+  whyChanged?: string[];
+  whyChangedProse?: string;
 };
+
+export function digestTooltip(d: Digest): string {
+  if (!d.changed) return d.headline || 'On-call digest';
+  const why = d.whyChangedProse || (d.whyChanged || []).join('; ');
+  return why ? `${d.headline || 'On-call digest'} — ${why}` : d.headline || 'On-call digest';
+}
 
 export function digestLabel(d: Digest): string {
   const sev = (d.severity || 'info').toLowerCase();
@@ -42,7 +50,7 @@ export default function DigestChip({ onOpen }: { onOpen?: () => void }) {
       type="button"
       className={`digest-chip ${sev}${digest.changed ? ' changed' : ''}`}
       onClick={onOpen}
-      title={digest.headline || 'On-call digest'}
+      title={digestTooltip(digest)}
       aria-label={`Incident digest ${digestLabel(digest)}`}
     >
       {digestLabel(digest)}
