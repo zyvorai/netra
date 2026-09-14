@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/zyvorai/netra/internal/chatops"
 )
 
 // TestRegisteredAPIRoutes ensures critical mux patterns stay wired.
@@ -112,5 +114,43 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s %s: want 401 without token, got %d body=%s", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// TestChatOpsRouteRegisteredOnlyWhenConfigured confirms /chatops/slack is
+// absent unless chatopsHandler is set (chatops.NewHandler in New() requires
+// a signing secret), and rejects unsigned requests with 401 rather than the
+// bearer-token 401 every other route above uses — chatops.VerifySlackSignature
+// is this route's actual authentication, not s.auth's bearer token.
+func TestChatOpsRouteRegisteredOnlyWhenConfigured(t *testing.T) {
+	bare := &Server{
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		apiKey:      "ci-test-token",
+		metricsData: &telemetry{},
+	}
+	req := httptest.NewRequest("POST", "/chatops/slack", nil)
+	rec := httptest.NewRecorder()
+	bare.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("without a configured chatopsHandler, want 404, got %d", rec.Code)
+	}
+
+	wired := &Server{
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		apiKey:      "ci-test-token",
+		metricsData: &telemetry{},
+		chatopsHandler: chatops.NewHandler(chatops.Config{
+			SigningSecret: "shh",
+			Client:        chatops.NewClient("http://127.0.0.1:0", "k"),
+		}),
+	}
+	req = httptest.NewRequest("POST", "/chatops/slack", nil)
+	rec = httptest.NewRecorder()
+	wired.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("with a configured chatopsHandler, route must be registered")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned request: want 401 from VerifySlackSignature, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }

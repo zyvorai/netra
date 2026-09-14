@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.45"
+  tag: "0.27.46"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.45"
+  tag: "0.27.46"
 replicaCount: 1
 ha:
   enabled: false
@@ -53,6 +53,22 @@ gitops:
   dir: /gitops/policies
   autoApply: false
   interval: 60s
+# Optional Slack ChatOps slash-commands (/netra ...). Off by default. Needs
+# a Slack app's signing secret to verify inbound requests reached the
+# POST /chatops/slack webhook, and a dedicated API key so a compromised
+# Slack app credential can't be replayed as full operator access — this is
+# a separate trust domain from auth.apiKey, matching the existing
+# agent-key convention. allowMutations gates which commands even register
+# (e.g. "/netra mode enforce"); mutating commands always require a second
+# Slack button-click confirmation regardless of this setting.
+chatops:
+  enabled: false
+  allowMutations: false
+  targetURL: "https://127.0.0.1:30870"
+  # Existing secret (keys: signing-secret, api-key) — never commit these into values.
+  existingSecret: ""
+  signingSecret: ""
+  apiKey: ""
 service:
   type: ClusterIP
   port: 30870

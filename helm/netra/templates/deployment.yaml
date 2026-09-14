@@ -148,6 +148,33 @@ spec:
         - name: NETRA_GITOPS_INTERVAL
           value: {{ .Values.gitops.interval | quote }}
         {{- end }}
+        {{- if .Values.chatops.enabled }}
+        - name: NETRA_CHATOPS_ALLOW_MUTATIONS
+          value: {{ .Values.chatops.allowMutations | quote }}
+        - name: NETRA_CHATOPS_TARGET_URL
+          value: {{ .Values.chatops.targetURL | quote }}
+        {{- if .Values.chatops.existingSecret }}
+        - name: NETRA_CHATOPS_SIGNING_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.chatops.existingSecret | quote }}
+              key: signing-secret
+        - name: NETRA_CHATOPS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.chatops.existingSecret | quote }}
+              key: api-key
+        {{- else }}
+        {{- if .Values.chatops.signingSecret }}
+        - name: NETRA_CHATOPS_SIGNING_SECRET
+          value: {{ .Values.chatops.signingSecret | quote }}
+        {{- end }}
+        {{- if .Values.chatops.apiKey }}
+        - name: NETRA_CHATOPS_API_KEY
+          value: {{ .Values.chatops.apiKey | quote }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
         resources: {{- toYaml .Values.resources | nindent 10 }}
         {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
         volumeMounts:
