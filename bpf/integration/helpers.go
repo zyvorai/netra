@@ -18,14 +18,11 @@
 package bpfintegration
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/cilium/ebpf"
@@ -38,13 +35,6 @@ var native = binary.LittleEndian
 const (
 	tcActOK   = 0
 	tcActShot = 2
-)
-
-// cgroup_skb programs (netra_cgroup_egress/ingress) use the plain
-// 1=allow/0=deny convention, not TC_ACT_*.
-const (
-	cgroupAllow = 1
-	cgroupDeny  = 0
 )
 
 // TCP flags (byte 13 of the TCP header — see handle_v4's `flags=*(((unsigned
@@ -74,17 +64,6 @@ func buildTCFrame(srcIP, dstIP net.IP, srcPort, dstPort uint16, flags byte) []by
 	return buf
 }
 
-// buildCgroupFrame packs the same IPv4+TCP payload with NO Ethernet header —
-// cgroup_skb programs (netra_cgroup_egress/netra_cgroup_ingress, reached via
-// handle_l3) see raw L3 data starting at the IP header (bpf/netra_tc.c:
-// handle_l3 reads `*(__u8*)data` directly as the IP version nibble, no eth
-// header involved).
-func buildCgroupFrame(srcIP, dstIP net.IP, srcPort, dstPort uint16, flags byte) []byte {
-	buf := make([]byte, ipHdrLen+tcpHdrLen)
-	writeIPv4TCP(buf, srcIP, dstIP, srcPort, dstPort, flags)
-	return buf
-}
-
 func writeIPv4TCP(buf []byte, srcIP, dstIP net.IP, srcPort, dstPort uint16, flags byte) {
 	src4, dst4 := srcIP.To4(), dstIP.To4()
 	ip := buf[:ipHdrLen]
@@ -103,9 +82,9 @@ func writeIPv4TCP(buf []byte, srcIP, dstIP net.IP, srcPort, dstPort uint16, flag
 	tcp[13] = flags
 }
 
-// portKeyBytes/peerKeyBytes/cgroupKeyBytes are the wire/kernel-matching raw
-// byte encodings for netpol_rules4's struct netpol_peer4_key fields —
-// mirroring exactly how internal/agent's applyNetPolV2 must encode them
+// netpolRuleKey builds the wire/kernel-matching raw byte encoding for
+// netpol_rules4's struct netpol_peer4_key fields — mirroring exactly how
+// internal/agent's applyNetPolV2 must encode them
 // (see its portBE/native.Uint32(ip.To4()) handling) but written directly as
 // raw bytes here to sidestep cilium/ebpf's host-native struct marshaling
 // entirely: a fixed-size byte array key is used verbatim, avoiding any
@@ -203,45 +182,6 @@ func mentionsAny(msg string, names []string) bool {
 		}
 	}
 	return false
-}
-
-// selfCgroupID returns this test process's own current cgroup ID — the
-// exact value bpf_get_current_cgroup_id() (bpf/netra_tc.c:1977) returns
-// when netra_cgroup_egress/ingress run via Program.Run(), since BPF_PROG_
-// TEST_RUN executes in the calling process's own context and that value
-// isn't injectable through RunOptions. cgroup v2's cgroup ID *is* the
-// inode number of its cgroupfs directory, so this reads /proc/self/cgroup
-// (the single "0::<path>" line under the unified cgroup v2 hierarchy) and
-// stats /sys/fs/cgroup/<path> for its inode.
-func selfCgroupID(t *testing.T) uint64 {
-	t.Helper()
-	f, err := os.Open("/proc/self/cgroup")
-	if err != nil {
-		t.Fatalf("read /proc/self/cgroup: %v", err)
-	}
-	defer f.Close()
-	var relPath string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		// cgroup v2 unified hierarchy: "0::<path>". cgroup v1 hybrid
-		// entries (non-zero hierarchy IDs) are irrelevant here — this
-		// project's BPF cgroup hooks attach under the v2 unified
-		// hierarchy (see internal/agent's cgroupPath default).
-		if strings.HasPrefix(line, "0::") {
-			relPath = strings.TrimPrefix(line, "0::")
-			break
-		}
-	}
-	if relPath == "" {
-		t.Fatalf("no cgroup v2 (0::...) entry found in /proc/self/cgroup — is this host running cgroup v2?")
-	}
-	var st syscall.Stat_t
-	full := filepath.Join("/sys/fs/cgroup", relPath)
-	if err := syscall.Stat(full, &st); err != nil {
-		t.Fatalf("stat %s: %v", full, err)
-	}
-	return st.Ino
 }
 
 func mustProgram(t *testing.T, coll *ebpf.Collection, name string) *ebpf.Program {

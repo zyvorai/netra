@@ -87,19 +87,29 @@ the kernel and can be enabled independently.
   available in-pod HTTPS test client (a `kubectl debug` ephemeral
   container) runs in a cgroup outside the target pod's resolved workload
   set, so the rule correctly never applied to it, not a sign anything was
-  broken (see CHANGELOG.md's 0.27.51 entry). **That fallback-ordering
-  logic is now covered deterministically instead**:
-  `bpf/integration/netpol_portonly_test.go` (`TestNetPolPortOnly`) loads
-  the real compiled BPF program and runs it via the kernel's
-  `BPF_PROG_TEST_RUN` against synthetic packets, in CI, on every push —
-  including the priority case that matters most: an exact peer+port match
-  wins over a coexisting port-only rule, which still applies to every
-  *other* peer on that port. Building this test surfaced and fixed a real,
-  separate, pre-existing bug: `internal/agent.applyNetPolV2` stored the
-  port field in host-native byte order instead of the packet's wire order,
+  broken (see CHANGELOG.md's 0.27.51 entry).
+
+  **A real kernel-execution test of this fallback ordering was attempted
+  (0.27.52) and hit a genuine `BPF_PROG_TEST_RUN` constraint, not a bug**:
+  `netpol_v2_lookup4` keys every lookup on `bpf_get_current_cgroup_id()`,
+  which reads the cgroup associated with the packet's owning *socket* —
+  for a `cgroup_skb` program driven by `BPF_PROG_TEST_RUN`'s synthetic
+  packets (no real socket behind them), that helper returns 0 throughout,
+  so no rule can ever match regardless of what's seeded. Confirmed via
+  diagnostics on a real GitHub Actions run before concluding this (the
+  Go-side map-key encoding itself was verified byte-for-byte correct).
+  `cilium/ebpf`'s `RunOptions` has no field to inject cgroup context, so
+  there's no userspace-side fix — see the 0.27.53 CHANGELOG entry.
+  `bpf/integration/netpol_portonly_test.go` (`TestNetPolRuleKeyEncoding`)
+  instead regression-guards the map-key byte encoding directly (no kernel
+  invocation) — a real, still-valuable guard for the exact class of bug
+  building this surfaced: `internal/agent.applyNetPolV2` stored the port
+  field in host-native byte order instead of the packet's wire order,
   silently making every NetPol v2 rule with a *specific* non-palindromic
   port (not just port-only ones) a dead entry that could never match real
-  traffic — see the 0.27.52 CHANGELOG entry for the full explanation.
+  traffic — see the 0.27.52 CHANGELOG entry for the full explanation. Live
+  traffic remains the only way to prove `netpol_v2_lookup4`'s full runtime
+  behavior end-to-end for the cgroup-hook path.
 
   **No UID/process-name allow-exceptions — deliberately deferred, different
   hook family, not just unfinished work.** The flat global engine's
