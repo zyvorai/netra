@@ -49,7 +49,7 @@ Each line you type after startup should produce one corresponding JSON-RPC respo
 | `NETRA_API_KEY` | unset | Bearer token; must match the controller's `NETRA_API_KEY`. If the controller has no API key configured, leave this unset too |
 | `NETRA_TLS_INSECURE` | `false` | Set `true` to skip TLS verification against a local/self-signed controller. Never set this against a controller reachable over an untrusted network |
 | `NETRA_MCP_ACTOR` | `mcp:hermes` | Recorded as `X-Netra-Actor` on every call, so mutations show up distinctly from human `netractl` use in `netra_audit`. Set a more specific value (e.g. `mcp:hermes:oncall-bot`) if you run several agent identities against the same controller |
-| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 51 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
+| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 50 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
 
 Example:
 
@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 58 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 56 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -114,7 +114,7 @@ mcp_servers:
 ## Security considerations
 
 - **One API key, one privilege level.** Netra's controller has a single `NETRA_API_KEY` bearer token with no scoping — `netra-mcp` inherits whatever that token can do. There is no way to hand an MCP client a token that can read but not mutate; the *only* mutation gate is `NETRA_MCP_ALLOW_MUTATIONS` on the `netra-mcp` process itself. Run a dedicated `netra-mcp` process (with mutations enabled) separately from any process serving human dashboards or other integrations, so a compromised or misbehaving agent's blast radius is limited to what this specific process was allowed to do.
-- **Every mutation is attributed and audited.** All 51 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
+- **Every mutation is attributed and audited.** All 50 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
 - **Policy apply is the highest-consequence tool, and it's the most guarded.** `netra_policy_apply` requires a fresh `plan_token` from `netra_policy_plan` (single-use, content-hash-bound, 5-minute expiry) and, for high/critical-risk changes, an explicit `confirm_risk` echo. An agent cannot apply a policy it hasn't just planned, and cannot silently escalate past a risk warning — the confirmation string must appear as a literal argument value, which means the calling model has to have "read" the risk level and intentionally repeated it back, not just retried blindly.
 - **Enforce mode is time-bounded by design.** `netra_ebpf_mode` can flip the whole fast path from observe to enforce, but every enforce period requires a lease (1m-24h, default 15m) and the controller auto-reverts to observe on expiry (`store.SetMode`'s fail-open behavior) — an agent cannot leave the cluster in enforce mode indefinitely by mistake; the lease must be actively renewed.
 - **Baseline/rate-baseline clears require a literal confirmation value**, sent automatically by `netra-mcp` itself (`X-Netra-Confirm-Baseline-Clear: clear`) — this exists to stop an accidental clear via a generic scripted client, not to add friction for `netra-mcp`'s own calls; treat `netra_insights_baseline_clear`/`netra_insights_rate_baseline_clear` as fully live once mutations are enabled.
@@ -140,7 +140,7 @@ Every tool call returns an MCP `tools/call` result of the form:
 | `netra_triage` | — | Start with `netra_ai_brief`, stay read-only |
 | `netra_explain_drops` | `namespace`, `pod` (optional) | Combine `netra_ai_ask` with drop/diagnose tools |
 | `netra_draft_rule` | `request` **(required)** | Turn a deny/rate sentence into a preview rule via `netra_ai_draft`; never applies |
-| `netra_oncall_digest` | — | Produce the on-call card via `netra_ai_digest`; report whether the incident fingerprint changed |
+| `netra_oncall_digest` | — | Produce the on-call card via `netra_ai_digest`; if the fingerprint changed, quote `whyChanged`/`whyChangedProse` rather than guessing at a cause |
 | `netra_incident_timeline` | `since` (optional) | Narrate `netra_incidents_timeline`'s entries in order; forbids inventing entries/causes/timestamps |
 | `netra_policy_review` | `namespace`, `workload` (optional) | Review drafts via `netra_insights_policy_review`; forbids apply / mode changes |
 
@@ -169,9 +169,9 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 |---|---|---|---|
 | `netra_ai_status` | `GET /api/v1/ai/status` | — | Whether the optional LLM rewrite path is configured. Heuristic briefs always work |
 | `netra_ai_brief` | `GET /api/v1/ai/brief` | — | Deterministic cluster brief from live aggregates. Read-only, no payloads |
-| `netra_ai_ask` | `POST /api/v1/ai/ask` | `question` **(required)**, `namespace`, `preferLlm` | Natural-language question over the same snapshot. Optional LLM rewrite lives on the controller (`NETRA_AI_API_KEY`), not in `netra-mcp` |
+| `netra_ai_ask` | `POST /api/v1/ai/ask` | `question` **(required)**, `namespace`, `preferLlm` | Natural-language question over the same snapshot. Optional LLM rewrite lives on the controller (`NETRA_AI_API_KEY`), not in `netra-mcp`. Always stateless here — the endpoint's optional `conversationId` multi-turn memory (see `docs/ai.md#conversation-memory`) is a web/ChatOps feature; an MCP-calling agent already has its own conversation as context |
 | `netra_ai_draft` | `POST /api/v1/ai/draft` | `question` **(required)** | Parses a deny/rate sentence into a preview eBPF rule (body + `netractl` line). Never applies it |
-| `netra_ai_digest` | `GET /api/v1/ai/digest` | — | On-call card: severity, incident fingerprint, copy-paste text. Fingerprint is stable across counter chatter |
+| `netra_ai_digest` | `GET /api/v1/ai/digest` | — | On-call card: severity, incident fingerprint, copy-paste text. Fingerprint is stable across counter chatter; when it changed, `whyChanged` (and optionally `whyChangedProse`) explains exactly what moved |
 | `netra_ai_suggestions` | `GET /api/v1/ai/suggestions` | — | Live follow-up questions derived from the current snapshot |
 | `netra_ai_explain` | `POST /api/v1/ai/explain` | `kind`, `subject`, `message`, `severity`, `page`, `question` (all optional) | Narrates one structured page finding against the live snapshot |
 | `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |

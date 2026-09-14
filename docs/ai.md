@@ -18,8 +18,8 @@ GET/POST read-only.
 ## Why this is separate from `netra-mcp`
 
 `netra-mcp` is a translation layer: one MCP tool per controller HTTP
-endpoint. It still leaves the model to decide *which* of ~34 read tools
-to call and how to narrate the JSON.
+endpoint. It still leaves the model to decide *which* of the 56 read
+tools to call and how to narrate the JSON.
 
 The AI endpoints give the model (or a human) a single, bounded snapshot
 plus a brief, so a first question like "what is on fire?" does not
@@ -160,9 +160,9 @@ Always-on read tools:
 
 - `netra_ai_status`
 - `netra_ai_brief`
-- `netra_ai_ask` (`question` required)
+- `netra_ai_ask` (`question` required) — stateless; `conversationId` is a web/ChatOps-only feature, see "Conversation memory" above
 - `netra_ai_draft` (`question` required) — preview only, never applies
-- `netra_ai_digest` — on-call card + incident fingerprint
+- `netra_ai_digest` — on-call card + incident fingerprint, plus `whyChanged`/`whyChangedProse` when it changed
 - `netra_ai_suggestions` — live follow-up questions
 - `netra_ai_explain` (`kind`, `subject`, `message`, `severity`, `page`, `question`, all optional)
 
@@ -171,12 +171,13 @@ Prompts (MCP `prompts/list` / `prompts/get`):
 - `netra_triage` — start with the brief, stay read-only
 - `netra_explain_drops` — optional `namespace` / `pod`
 - `netra_draft_rule` (`request` required) — draft via `netra_ai_draft`; never applies
-- `netra_oncall_digest` — the on-call card via `netra_ai_digest`; reports whether the fingerprint changed
+- `netra_oncall_digest` — the on-call card via `netra_ai_digest`; if the fingerprint changed, quotes `whyChanged`/`whyChangedProse` rather than guessing at a cause
+- `netra_incident_timeline` — optional `since`; narrates the audit log and cluster-health-signature transitions in order
 - `netra_policy_review` — optional `namespace` / `workload`; forbids apply
 
 Resources (MCP `resources/list` / `resources/read`) — read-only, URI-addressed, no tool call needed:
 
-- `netra://ai/brief`, `netra://ai/digest`, `netra://ai/suggestions`, `netra://status`
+- `netra://ai/brief`, `netra://ai/digest`, `netra://ai/suggestions`, `netra://status`, `netra://incidents/timeline`, `netra://incidents`
 
 See `docs/mcp-integration.md` for the full tool/prompt/resource reference.
 
