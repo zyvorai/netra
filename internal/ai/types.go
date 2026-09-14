@@ -73,6 +73,10 @@ type Brief struct {
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	GeneratedAt time.Time `json:"generatedAt"`
 	Snapshot    Snapshot  `json:"snapshot"`
+	// ConversationID echoes the AskRequest.ConversationID that was used
+	// (empty if none was supplied) so a caller opting into conversation
+	// memory knows what to send on its next turn. See conversation.go.
+	ConversationID string `json:"conversationId,omitempty"`
 }
 
 // AskRequest is the JSON body for POST /api/v1/ai/ask.
@@ -85,6 +89,17 @@ type AskRequest struct {
 	// PreferLLM forces the optional provider path when configured.
 	// Ignored when no provider is configured.
 	PreferLLM bool `json:"preferLlm,omitempty"`
+	// ConversationID opts into short-lived, bounded multi-turn memory
+	// (conversation.go): when set, prior turns under this id are used to
+	// resolve references in this question, and this question/answer is
+	// appended to it. Omit for today's fully stateless behavior — this is
+	// opt-in, not ambient.
+	ConversationID string `json:"conversationId,omitempty"`
+}
+
+// ForgetRequest is the JSON body for POST /api/v1/ai/forget.
+type ForgetRequest struct {
+	ConversationID string `json:"conversationId"`
 }
 
 // Status describes whether the optional LLM rewrite path is live.

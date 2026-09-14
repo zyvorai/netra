@@ -45,7 +45,8 @@ func helpText(allowMutations bool) string {
 	b.WriteString("`/netra status` – controller status\n")
 	b.WriteString("`/netra health` – top network-health anomalies\n")
 	b.WriteString("`/netra audit` – recent audit events\n")
-	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same engine as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set)\n")
+	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same engine as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set). Remembers the last few turns in this channel, per user.\n")
+	b.WriteString("`/netra forget` – clear this channel's Ask Netra conversation memory and start fresh\n")
 	if allowMutations {
 		b.WriteString("`/netra mode observe` / `/netra mode enforce [lease]` – switch fast-path mode (requires confirmation)\n")
 	} else {
@@ -61,7 +62,13 @@ func helpText(allowMutations bool) string {
 // refused, it doesn't exist, mirroring cmd/netra-mcp/main.go's
 // buildServer(c, allowMutations) exactly, not a new per-call-flag
 // convention.
-func Dispatch(ctx context.Context, c *Client, allowMutations bool, text string) (reply string, pending *pendingAction) {
+//
+// conversationKey identifies "this conversation" to Ask Netra's optional
+// multi-turn memory (see askCommand/forgetCommand) — every other command
+// ignores it. Callers with no natural conversation concept (a one-shot
+// CLI invocation) pass "". Slack/Teams compute it from channel+user;
+// nothing about it is exposed to the operator beyond /netra forget.
+func Dispatch(ctx context.Context, c *Client, allowMutations bool, text, conversationKey string) (reply string, pending *pendingAction) {
 	fields := strings.Fields(strings.TrimSpace(text))
 	if len(fields) == 0 {
 		return helpText(allowMutations), nil
@@ -76,7 +83,9 @@ func Dispatch(ctx context.Context, c *Client, allowMutations bool, text string) 
 	case "audit":
 		return summarize(ctx, c, "GET", "/api/v1/audit?limit=5", nil), nil
 	case "ask":
-		return askCommand(ctx, c, strings.Join(fields[1:], " ")), nil
+		return askCommand(ctx, c, strings.Join(fields[1:], " "), conversationKey), nil
+	case "forget":
+		return forgetCommand(ctx, c, conversationKey), nil
 	case "mode":
 		if !allowMutations {
 			return "`/netra mode` is disabled on this integration (NETRA_CHATOPS_ALLOW_MUTATIONS is not set).", nil
@@ -135,10 +144,19 @@ type chatAskResponse struct {
 // confirmation step, no allowMutations gate, empty actor (nothing to
 // audit-attribute for a question), matching status/health/audit's
 // existing unaudited-read shape.
-func askCommand(ctx context.Context, c *Client, question string) string {
+//
+// conversationKey, when non-empty, is sent as the request's conversationId
+// so this channel+user's prior turns (internal/ai's short-lived,
+// bounded memory) can resolve references like "that" or "the second one" —
+// see forgetCommand for clearing it.
+func askCommand(ctx context.Context, c *Client, question, conversationKey string) string {
 	callCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"question": question})
+	reqBody := map[string]string{"question": question}
+	if conversationKey != "" {
+		reqBody["conversationId"] = conversationKey
+	}
+	body, _ := json.Marshal(reqBody)
 	out, status, err := c.Do(callCtx, "POST", "/api/v1/ai/ask", body, "")
 	if err != nil {
 		return fmt.Sprintf("Request to /api/v1/ai/ask failed: %v", err)
@@ -179,6 +197,29 @@ func askCommand(ctx context.Context, c *Client, question string) string {
 		fmt.Fprintf(&b, "_engine: %s_", brief.Engine)
 	}
 	return truncate(b.String(), 2800)
+}
+
+// forgetCommand clears this channel+user's Ask Netra conversation memory
+// via POST /api/v1/ai/forget — the only way internal/chatops ever touches
+// that state, same "netrad is a black-box HTTP API" boundary askCommand
+// follows. A conversationKey of "" means this integration never computed
+// one (Slack/Teams could not identify the channel or user), so there is
+// nothing to clear.
+func forgetCommand(ctx context.Context, c *Client, conversationKey string) string {
+	if conversationKey == "" {
+		return "Nothing to forget — this integration doesn't have a conversation to reset."
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	body, _ := json.Marshal(map[string]string{"conversationId": conversationKey})
+	_, status, err := c.Do(callCtx, "POST", "/api/v1/ai/forget", body, "")
+	if err != nil {
+		return fmt.Sprintf("Request to /api/v1/ai/forget failed: %v", err)
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Sprintf("/api/v1/ai/forget returned HTTP %d", status)
+	}
+	return "Cleared. `/netra ask` starts a fresh conversation from here."
 }
 
 // summarize calls path and renders a short, Slack-message-sized summary of

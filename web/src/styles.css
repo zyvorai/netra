@@ -1653,6 +1653,8 @@ code {
   color: var(--text-tertiary);
 }
 .ask-netra-answer { margin-top: 16px; }
+.ask-netra-answer + .ask-netra-answer { padding-top: 16px; border-top: 1px solid var(--border); }
+.ask-netra-question { font-style: italic; }
 .ask-netra-list {
   margin: 8px 0 0;
   padding-left: 18px;

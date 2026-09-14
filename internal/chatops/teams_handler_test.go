@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,6 +73,49 @@ func TestDispatchTeamsActivityModeReturnsConfirmToken(t *testing.T) {
 	reply := dispatchTeamsActivity(context.Background(), cfg, a)
 	if !strings.Contains(reply, teamsConfirmPrefix) {
 		t.Fatalf("expected reply to include the confirm instruction, got %q", reply)
+	}
+}
+
+func TestDispatchTeamsActivitySendsStableConversationIDPerConversationAndUser(t *testing.T) {
+	var gotConversationIDs []string
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/ask" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		var req struct {
+			ConversationID string `json:"conversationId"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &req)
+		gotConversationIDs = append(gotConversationIDs, req.ConversationID)
+		w.Write([]byte(`{"headline":"ok","severity":"info","summary":"ok","engine":"heuristic"}`))
+	})
+	cfg := TeamsConfig{AppID: "app-1", AllowMutations: true, Client: c}
+
+	a1 := teamsActivity{Type: "message", Text: "/netra ask one"}
+	a1.Conversation.ID = "conv-1"
+	a1.From.ID = "user-1"
+	dispatchTeamsActivity(context.Background(), cfg, a1)
+
+	a2 := teamsActivity{Type: "message", Text: "/netra ask two"}
+	a2.Conversation.ID = "conv-1"
+	a2.From.ID = "user-1"
+	dispatchTeamsActivity(context.Background(), cfg, a2)
+
+	a3 := teamsActivity{Type: "message", Text: "/netra ask three"}
+	a3.Conversation.ID = "conv-1"
+	a3.From.ID = "user-2"
+	dispatchTeamsActivity(context.Background(), cfg, a3)
+
+	if len(gotConversationIDs) != 3 {
+		t.Fatalf("got %d ask calls, want 3", len(gotConversationIDs))
+	}
+	if gotConversationIDs[0] == "" || gotConversationIDs[0] != gotConversationIDs[1] {
+		t.Fatalf("same conversation+user should reuse one conversation id, got %q then %q", gotConversationIDs[0], gotConversationIDs[1])
+	}
+	if gotConversationIDs[2] == "" || gotConversationIDs[2] == gotConversationIDs[0] {
+		t.Fatalf("a different user in the same Teams conversation must get a distinct conversation id, got %q vs %q", gotConversationIDs[2], gotConversationIDs[0])
 	}
 }
 

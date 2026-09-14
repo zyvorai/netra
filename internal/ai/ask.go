@@ -44,23 +44,34 @@ func Classify(question string) Intent {
 // Answer builds a Brief for a question. When p is non-nil and healthy it
 // asks the provider to rewrite the heuristic brief; provider failures
 // fall back to the heuristic brief instead of erroring the request.
-func Answer(ctx context.Context, snap Snapshot, question string, p *Provider) Brief {
+//
+// conversationID opts into short-lived multi-turn memory (conversation.go):
+// when non-empty, prior turns under that id are fetched before answering
+// and this exchange is recorded after, regardless of which engine
+// answered. An empty conversationID behaves exactly as before this
+// parameter existed — nothing is looked up or recorded.
+func Answer(ctx context.Context, snap Snapshot, question string, p *Provider, conversationID string) Brief {
 	base := BuildBrief(snap)
 	base.Question = strings.TrimSpace(question)
+	base.ConversationID = conversationID
 	intent := Classify(question)
 	base = specialize(base, snap, intent)
+	history := conversationHistory(conversationID)
 
 	if p == nil || !p.Enabled() {
+		recordConversationTurn(conversationID, Turn{Question: base.Question, Summary: base.Summary})
 		return base
 	}
-	rewritten, err := p.Rewrite(ctx, snap, base, question)
+	rewritten, err := p.Rewrite(ctx, snap, base, question, history)
 	if err != nil || strings.TrimSpace(rewritten) == "" {
 		base.NextSteps = append([]string{"LLM rewrite unavailable; showing the heuristic brief."}, base.NextSteps...)
+		recordConversationTurn(conversationID, Turn{Question: base.Question, Summary: base.Summary})
 		return base
 	}
 	base.Summary = rewritten
 	base.Engine = "llm"
 	base.Model = p.Model
+	recordConversationTurn(conversationID, Turn{Question: base.Question, Summary: base.Summary})
 	return base
 }
 

@@ -38,11 +38,24 @@ Or directly via environment variables on `netrad`:
 | `/netra status` | Controller status — read-only, calls `GET /api/v1/status`. |
 | `/netra health` | Top 5 network-health anomalies — `GET /api/v1/ebpf/health?limit=5`. |
 | `/netra audit` | 5 most recent audit events — `GET /api/v1/audit?limit=5`. |
-| `/netra ask <question>` | Ask Netra's AI layer about cluster health — same engine (and same `POST /api/v1/ai/ask` endpoint) as the web "Ask Netra" card, heuristic-only unless `NETRA_AI_API_KEY` is set. Read-only, no confirmation. An empty question (`/netra ask` with no text) still replies with a general cluster brief. |
+| `/netra ask <question>` | Ask Netra's AI layer about cluster health — same engine (and same `POST /api/v1/ai/ask` endpoint) as the web "Ask Netra" card, heuristic-only unless `NETRA_AI_API_KEY` is set. Read-only, no confirmation. An empty question (`/netra ask` with no text) still replies with a general cluster brief. Remembers the last few turns per channel per user — see "Conversation memory" below. |
+| `/netra forget` | Clear this channel's Ask Netra conversation memory and start fresh. Read-only, no confirmation. |
 | `/netra mode observe` | Switch the fast-path to observe mode. **Requires confirmation.** |
 | `/netra mode enforce [lease]` | Switch to enforce mode for `lease` (default `15m`, auto-reverts to observe on expiry). **Requires confirmation.** |
 
 Read commands (`status`/`health`/`audit`) reply with a compact, indented-JSON summary of the underlying API response (capped well under Slack's per-block size limit) rather than a hand-parsed field-by-field rendering, so replies stay correct as those endpoints' response shapes evolve — they are not reformatted into custom prose. `/netra ask` is the one exception: it renders the AI brief's headline/severity/summary/findings/next-steps as formatted chat text, matching the web card's presentation rather than a JSON dump.
+
+## Conversation memory
+
+`/netra ask` remembers the last few turns of a conversation — see
+[`docs/ai.md`](ai.md#conversation-memory) for the full scope, bounds, and
+what's stored. For ChatOps specifically: the conversation key is computed
+automatically, never typed by the operator — `slack:<channel_id>:<user_id>`
+for Slack, `teams:<conversation.id>:<from.id>` for Teams — so the same
+person asking follow-up questions in the same channel gets a continuous
+thread with no setup, and a different user in the same channel gets their
+own, separate one. `/netra forget` clears it (via `POST /api/v1/ai/forget`)
+without waiting out the 30-minute idle timeout.
 
 ## The confirmation flow is stateless by design
 
@@ -57,7 +70,7 @@ The `enforce` mode gets Slack's "danger" button style as a visual cue; every oth
 ## Evidence boundaries
 
 - **No CLI or MCP surface for this feature.** ChatOps is an inbound integration (Slack calls Netra), not something `netractl` or an MCP client calls — there is nothing here for either of those to wrap.
-- **`/netra mode` is the only mutating command in v1.** Read commands (`status`/`health`/`audit`/`ask`) never require confirmation and never produce an audit event, matching how the equivalent read-only API endpoints behave everywhere else in Netra.
+- **`/netra mode` is the only mutating command in v1.** Read commands (`status`/`health`/`audit`/`ask`/`forget`) never require confirmation and never produce an audit event, matching how the equivalent read-only API endpoints behave everywhere else in Netra.
 - **The confirming Slack user is trusted as-is.** Netra does not maintain its own Slack-workspace membership or role mapping — anyone who can click a button in the channel the slash command was run in can confirm it. Scope who can *invoke* `/netra mode` via Slack's own app/channel permissions, not Netra.
 - **A malformed or expired confirmation value fails closed**, replying "this confirmation has expired or is malformed; re-run the slash command" rather than guessing at intent.
 

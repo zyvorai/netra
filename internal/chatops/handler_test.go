@@ -131,6 +131,38 @@ func TestHandlerInteractionRejectsWrongActionID(t *testing.T) {
 	}
 }
 
+func TestHandlerAskSendsStableConversationIDPerChannelAndUser(t *testing.T) {
+	var gotConversationIDs []string
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/ask" {
+			w.Write([]byte(`{}`))
+			return
+		}
+		var req struct {
+			ConversationID string `json:"conversationId"`
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &req)
+		gotConversationIDs = append(gotConversationIDs, req.ConversationID)
+		w.Write([]byte(`{"headline":"ok","severity":"info","summary":"ok","engine":"heuristic"}`))
+	})
+	h := NewHandler(Config{SigningSecret: "shh", AllowMutations: true, Client: c})
+
+	postSigned(t, h, "shh", url.Values{"command": {"/netra"}, "text": {"ask one"}, "channel_id": {"C1"}, "user_id": {"U1"}})
+	postSigned(t, h, "shh", url.Values{"command": {"/netra"}, "text": {"ask two"}, "channel_id": {"C1"}, "user_id": {"U1"}})
+	postSigned(t, h, "shh", url.Values{"command": {"/netra"}, "text": {"ask three"}, "channel_id": {"C1"}, "user_id": {"U2"}})
+
+	if len(gotConversationIDs) != 3 {
+		t.Fatalf("got %d ask calls, want 3", len(gotConversationIDs))
+	}
+	if gotConversationIDs[0] == "" || gotConversationIDs[0] != gotConversationIDs[1] {
+		t.Fatalf("same channel+user should reuse one conversation id, got %q then %q", gotConversationIDs[0], gotConversationIDs[1])
+	}
+	if gotConversationIDs[2] == "" || gotConversationIDs[2] == gotConversationIDs[0] {
+		t.Fatalf("a different user in the same channel must get a distinct conversation id, got %q vs %q", gotConversationIDs[2], gotConversationIDs[0])
+	}
+}
+
 func TestNewHandlerPanicsWithoutSigningSecret(t *testing.T) {
 	defer func() {
 		if recover() == nil {

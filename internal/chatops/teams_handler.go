@@ -24,6 +24,9 @@ type teamsActivity struct {
 	Recipient struct {
 		ID string `json:"id"`
 	} `json:"recipient"`
+	Conversation struct {
+		ID string `json:"id"`
+	} `json:"conversation"`
 	Entities []struct {
 		Type      string `json:"type"`
 		Text      string `json:"text"`
@@ -113,11 +116,22 @@ func dispatchTeamsActivity(ctx context.Context, cfg TeamsConfig, activity teamsA
 		return confirmTeamsPending(ctx, cfg.Client, strings.TrimSpace(strings.TrimPrefix(text, teamsConfirmPrefix)), activity.From.ID)
 	}
 	cmdText := strings.TrimSpace(strings.TrimPrefix(text, "/netra"))
-	reply, pending := Dispatch(ctx, cfg.Client, cfg.AllowMutations, cmdText)
+	reply, pending := Dispatch(ctx, cfg.Client, cfg.AllowMutations, cmdText, teamsConversationKey(activity))
 	if pending == nil {
 		return reply
 	}
 	return reply + "\nReply `" + teamsConfirmPrefix + encodePending(*pending) + "` to proceed."
+}
+
+// teamsConversationKey mirrors slackConversationKey's (channel, user) pair
+// with Teams' own identifiers: a Bot Framework conversation id (channel-
+// equivalent) plus the sender's id. Missing either degrades to "" — same
+// as any caller that never opts into Ask Netra's multi-turn memory.
+func teamsConversationKey(activity teamsActivity) string {
+	if activity.Conversation.ID == "" || activity.From.ID == "" {
+		return ""
+	}
+	return "teams:" + activity.Conversation.ID + ":" + activity.From.ID
 }
 
 // confirmTeamsPending decodes and executes a pending action, tagging the

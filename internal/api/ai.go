@@ -57,7 +57,28 @@ func (s *Server) aiAsk(w http.ResponseWriter, r *http.Request) {
 	// operators leave the key unset. preferLlm is accepted for forward
 	// compatibility and is not a hard switch.
 	_ = req.PreferLLM
-	writeJSON(w, 200, ai.Answer(r.Context(), snap, req.Question, ai.ProviderFromEnv()))
+	writeJSON(w, 200, ai.Answer(r.Context(), snap, req.Question, ai.ProviderFromEnv(), req.ConversationID))
+}
+
+// aiForget clears any stored conversation memory (conversation.go) for
+// the given id — used by the web "New conversation" reset and ChatOps's
+// /netra forget, both of which only ever reach conversation state through
+// this HTTP seam, never internal/ai directly.
+func (s *Server) aiForget(w http.ResponseWriter, r *http.Request) {
+	var req ai.ForgetRequest
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, "unable to read request body")
+		return
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			errorJSON(w, 400, "invalid JSON body")
+			return
+		}
+	}
+	ai.ClearConversation(req.ConversationID)
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func (s *Server) aiDraft(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +154,9 @@ func (s *Server) aiExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := ai.ExplainQuestion(req)
-	writeJSON(w, 200, ai.Answer(r.Context(), snap, q, ai.ProviderFromEnv()))
+	// Explain popovers narrate one independent finding, not a thread —
+	// they never opt into conversation memory.
+	writeJSON(w, 200, ai.Answer(r.Context(), snap, q, ai.ProviderFromEnv(), ""))
 }
 
 func (s *Server) aiSnapshot(r *http.Request) (ai.Snapshot, error) {

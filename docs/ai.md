@@ -39,6 +39,7 @@ GET  /api/v1/ai/brief
 GET  /api/v1/ai/digest
 GET  /api/v1/ai/suggestions
 POST /api/v1/ai/ask
+POST /api/v1/ai/forget
 POST /api/v1/ai/draft
 POST /api/v1/ai/explain
 Content-Type: application/json
@@ -68,6 +69,44 @@ API body and the matching `netractl` line. It never applies the rule.
 
 `POST /api/v1/ai/explain` narrates one structured finding (kind /
 subject / message / page) against the live snapshot.
+
+`POST /api/v1/ai/forget` clears one conversation's stored memory
+(`{"conversationId": "..."}` → `{"ok": true}`) — see "Conversation memory"
+below.
+
+## Conversation memory
+
+`ai/ask` is opt-in short-lived, bounded multi-turn memory: send a
+client-chosen `conversationId` on the request and a follow-up like "what
+about the second one?" can resolve against the last few turns of that same
+conversation. Omit it (or send `""`) and behavior is exactly the fully
+stateless single-shot answer this endpoint has always given.
+
+- **In scope today: the web Ask Netra card and ChatOps only** — the two
+  places a "conversation" already exists. The web card mints a random id
+  per browser tab; ChatOps derives one automatically from
+  (channel, user) for Slack and (conversation, user) for Teams, so
+  `/netra ask` remembers the last few turns per channel per user with no
+  new command to learn.
+- **Out of scope, intentionally**: `netractl ai ask` and the `netra_ai_ask`
+  MCP tool stay stateless. A one-shot CLI invocation has no session to hang
+  memory on, and an MCP tool call already has the *calling agent's own*
+  conversation as its memory — server-side history there would be
+  redundant, not additive.
+- **What's stored**: only the question text and the answer's summary
+  already shown to the operator for up to the last 6 turns — never the raw
+  snapshot, never anything the operator hasn't already seen.
+- **Bounds**: 6 turns per conversation (oldest dropped first), a 30-minute
+  idle TTL, and a soft global cap on how many conversations this process
+  tracks at once — past the cap, new conversations are simply not
+  remembered rather than erroring the request. All in-process; restarting
+  `netrad` clears it, same as the digest's incident fingerprint.
+- History only ever influences the *optional LLM rewrite* path, and only
+  to resolve a reference — the system prompt makes explicit that prior
+  turns are not new cluster data, and every existing boundary (no invented
+  counters, no unbounded-enforce suggestions) still applies unchanged.
+- `/netra forget` (ChatOps) or the web card's "New conversation" button
+  clear it deterministically instead of waiting out the TTL.
 
 ## Dashboard
 

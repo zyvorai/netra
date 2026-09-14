@@ -99,7 +99,12 @@ type chatResponse struct {
 // Rewrite asks the provider to turn the snapshot + heuristic brief into
 // a short operator paragraph. The system prompt forbids mutations,
 // secrets, and invented counters.
-func (p *Provider) Rewrite(ctx context.Context, snap Snapshot, brief Brief, question string) (string, error) {
+//
+// history is the conversation's prior turns, oldest first (nil for a
+// stateless call or a fresh conversation) — see conversation.go. It is
+// included only to help resolve references like "that" or "the second
+// one"; the system prompt makes explicit that it is not new cluster data.
+func (p *Provider) Rewrite(ctx context.Context, snap Snapshot, brief Brief, question string, history []Turn) (string, error) {
 	snapJSON, err := json.Marshal(snap)
 	if err != nil {
 		return "", err
@@ -111,10 +116,23 @@ func (p *Provider) Rewrite(ctx context.Context, snap Snapshot, brief Brief, ques
 		"Never request or echo secrets, API keys, packet payloads, argv, or Kubernetes Secret contents.",
 		"Netra does not collect application payloads; do not pretend it does.",
 		"Prefer concrete next steps that map to existing Netra pages or netractl/MCP tools.",
+		"Prior conversation turns, if present, are given only to resolve references such as \"that\" or \"the second one\" — they are not new information about the cluster; the snapshot JSON is always the sole source of truth for current counters.",
 		"Keep the answer under 180 words.",
 	}, " ")
-	user := "Question: " + strings.TrimSpace(question) + "\n\nHeuristic brief:\n" + brief.Headline + "\n" + brief.Summary + "\n\nSnapshot JSON:\n" + string(snapJSON)
+	user := "Question: " + strings.TrimSpace(question) + "\n\nHeuristic brief:\n" + brief.Headline + "\n" + brief.Summary + historyBlock(history) + "\n\nSnapshot JSON:\n" + string(snapJSON)
 	return p.RewriteText(ctx, sys, user)
+}
+
+func historyBlock(history []Turn) string {
+	if len(history) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nPrior turns in this conversation (oldest first, reference-resolution only):\n")
+	for _, t := range history {
+		b.WriteString("- Q: " + t.Question + "\n  A: " + t.Summary + "\n")
+	}
+	return b.String()
 }
 
 // RewriteText is the Snapshot-agnostic primitive Rewrite builds on: given a

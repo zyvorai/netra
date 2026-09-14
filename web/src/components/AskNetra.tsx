@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 
 type Finding = { severity?: string; kind?: string; subject?: string; message: string };
@@ -13,7 +13,13 @@ type Brief = {
   question?: string;
   fingerprint?: string;
   generatedAt: string;
+  conversationId?: string;
 };
+type Exchange = { question: string; brief: Brief };
+// Rendered scrollback is capped so a long-running tab doesn't grow an
+// unbounded DOM list — the server-side memory itself independently caps at
+// a few turns (internal/ai/conversation.go), this is purely a display cap.
+const MAX_SHOWN_EXCHANGES = 8;
 type AIStatus = {
   enabled: boolean;
   provider?: string;
@@ -53,13 +59,19 @@ type Digest = { fingerprint: string; changed: boolean; card: string; suggestions
 export default function AskNetra() {
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [question, setQuestion] = useState('');
-  const [brief, setBrief] = useState<Brief | null>(null);
+  const [thread, setThread] = useState<Exchange[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [chips, setChips] = useState<string[]>(ASK_SUGGESTIONS);
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [digest, setDigest] = useState<Digest | null>(null);
   const [copied, setCopied] = useState(false);
+  // Held in a ref, not state: identifies "this conversation" to the
+  // controller's short-lived multi-turn memory (internal/ai/conversation.go)
+  // so a follow-up question ("what about that?") can be resolved. Minted
+  // once, on the first ask() in this tab; "New conversation" drops it so
+  // the next ask() starts a fresh, unrelated one.
+  const conversationId = useRef<string | null>(null);
 
   useEffect(() => {
     api<AIStatus>('/api/v1/ai/status')
@@ -70,7 +82,7 @@ export default function AskNetra() {
       .catch((e) => setErr(String(e)));
     api<Brief>('/api/v1/ai/brief')
       .then((b) => {
-        setBrief(b);
+        setThread([{ question: '', brief: b }]);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -90,13 +102,14 @@ export default function AskNetra() {
     setBusy(true);
     setErr('');
     try {
+      if (!conversationId.current) conversationId.current = crypto.randomUUID();
       const b = await api<Brief>('/api/v1/ai/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, conversationId: conversationId.current }),
       });
-      setBrief(b);
-      setQuestion(text);
+      setThread((prev) => [...prev, { question: text, brief: b }]);
+      setQuestion('');
       if (looksLikeDraft(text)) {
         try {
           setDraft(await api<RuleDraft>('/api/v1/ai/draft', {
@@ -117,14 +130,18 @@ export default function AskNetra() {
     }
   }
 
+  function newConversation() {
+    conversationId.current = null;
+    setThread([]);
+    setDraft(null);
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     void ask(question);
   }
 
-  const engineLabel = brief?.engine === 'llm'
-    ? `LLM${brief.model ? ` · ${brief.model}` : ''}`
-    : 'Heuristic brief';
+  const shown = thread.slice(-MAX_SHOWN_EXCHANGES);
 
   return (
     <section className="card span3 ask-netra">
@@ -157,6 +174,14 @@ export default function AskNetra() {
         >
           Refresh brief
         </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={busy || thread.length === 0}
+          onClick={newConversation}
+        >
+          New conversation
+        </button>
       </form>
       <div className="ask-netra-chips">
         {chips.map((s) => (
@@ -179,38 +204,43 @@ export default function AskNetra() {
         </p>
       )}
       {err && <p className="warning">{err}</p>}
-      {brief && (
-        <div className="ask-netra-answer">
-          <p>
-            <span className={`severity-badge ${brief.severity || 'info'}`}>{brief.severity || 'info'}</span>
-            {' '}
-            <b>{brief.headline}</b>
-            <span className="ask-netra-engine">{engineLabel}{brief.fingerprint ? ` · ${brief.fingerprint}` : ''}</span>
-          </p>
-          <p>{brief.summary}</p>
-          {(brief.findings || []).length > 0 && (
-            <ul className="ask-netra-list">
-              {brief.findings.slice(0, 6).map((f, i) => (
-                <li key={(f.kind || '') + (f.subject || '') + i}>
-                  {f.severity && <span className={`severity-badge ${f.severity}`}>{f.severity}</span>}
-                  {' '}
-                  {f.message}
-                </li>
-              ))}
-            </ul>
-          )}
-          {(brief.nextSteps || []).length > 0 && (
-            <>
-              <p className="eyebrow">NEXT</p>
+      {shown.map((ex, i) => {
+        const b = ex.brief;
+        const engine = b.engine === 'llm' ? `LLM${b.model ? ` · ${b.model}` : ''}` : 'Heuristic brief';
+        return (
+          <div className="ask-netra-answer" key={(b.conversationId || '') + i + b.generatedAt}>
+            {ex.question && <p className="ask-netra-meta ask-netra-question">You asked: {ex.question}</p>}
+            <p>
+              <span className={`severity-badge ${b.severity || 'info'}`}>{b.severity || 'info'}</span>
+              {' '}
+              <b>{b.headline}</b>
+              <span className="ask-netra-engine">{engine}{b.fingerprint ? ` · ${b.fingerprint}` : ''}</span>
+            </p>
+            <p>{b.summary}</p>
+            {(b.findings || []).length > 0 && (
               <ul className="ask-netra-list">
-                {brief.nextSteps.slice(0, 5).map((step) => (
-                  <li key={step}>{step}</li>
+                {b.findings.slice(0, 6).map((f, j) => (
+                  <li key={(f.kind || '') + (f.subject || '') + j}>
+                    {f.severity && <span className={`severity-badge ${f.severity}`}>{f.severity}</span>}
+                    {' '}
+                    {f.message}
+                  </li>
                 ))}
               </ul>
-            </>
-          )}
-        </div>
-      )}
+            )}
+            {(b.nextSteps || []).length > 0 && (
+              <>
+                <p className="eyebrow">NEXT</p>
+                <ul className="ask-netra-list">
+                  {b.nextSteps.slice(0, 5).map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        );
+      })}
       {draft && (
         <div className="ask-netra-draft">
           <p className="eyebrow">RULE PREVIEW</p>
@@ -245,7 +275,7 @@ export default function AskNetra() {
           )}
         </div>
       )}
-      {!brief && !err && <p className="empty-state">Loading cluster brief…</p>}
+      {thread.length === 0 && !err && <p className="empty-state">Loading cluster brief…</p>}
     </section>
   );
 }

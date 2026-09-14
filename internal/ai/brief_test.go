@@ -61,7 +61,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestAnswerFallsBackWithoutProvider(t *testing.T) {
-	b := Answer(context.Background(), Snapshot{AgentsTotal: 1, HealthScore: 80}, "what is dropping?", nil)
+	b := Answer(context.Background(), Snapshot{AgentsTotal: 1, HealthScore: 80}, "what is dropping?", nil, "")
 	if b.Engine != "heuristic" {
 		t.Fatalf("engine=%s", b.Engine)
 	}

@@ -64,12 +64,27 @@ func NewHandler(cfg Config) http.Handler {
 }
 
 func handleSlashCommand(w http.ResponseWriter, ctx context.Context, cfg Config, form url.Values) {
-	reply, pending := Dispatch(ctx, cfg.Client, cfg.AllowMutations, form.Get("text"))
+	reply, pending := Dispatch(ctx, cfg.Client, cfg.AllowMutations, form.Get("text"), slackConversationKey(form))
 	if pending == nil {
 		writeMessage(w, reply, nil)
 		return
 	}
 	writeMessage(w, reply, confirmBlocks(*pending))
+}
+
+// slackConversationKey identifies "this conversation" for Ask Netra's
+// multi-turn memory as the (channel, user) pair Slack's slash-command POST
+// already carries — no new state to track, and no more than any other
+// Slack app already learns about who ran the command and where. Missing
+// either field (shouldn't happen for a real slash command) degrades to ""
+// — the same as any caller that never opts in.
+func slackConversationKey(form url.Values) string {
+	channel := form.Get("channel_id")
+	user := form.Get("user_id")
+	if channel == "" || user == "" {
+		return ""
+	}
+	return "slack:" + channel + ":" + user
 }
 
 func handleInteraction(w http.ResponseWriter, ctx context.Context, cfg Config, payloadJSON string) {
