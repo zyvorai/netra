@@ -49,7 +49,13 @@ func (a *Agent) enrichSocketOwnership(tcp []models.TCPHealthStat, meta []models.
 // against the previous sync cycle. Emits observe-only events when
 // network-relevant capabilities change on a live process identity
 // (pid+startTime). No new BPF; gated by procmeta.
-func (a *Agent) watchCapChanges(meta []models.ProcessMetaStat) []models.CapChangeEvent {
+//
+// pidCgroup is built by the caller from the same tcpHealth slice meta's
+// PIDs were sourced from (pidsFromTCPHealth) — every PID watchCapChanges
+// considers owns a Netra-tracked TCP socket by construction, so its
+// CgroupID is already known from that same sync cycle without a second
+// lookup mechanism.
+func (a *Agent) watchCapChanges(meta []models.ProcessMetaStat, pidCgroup map[uint32]uint64) []models.CapChangeEvent {
 	if !a.procMetaEnabled || len(meta) == 0 {
 		return nil
 	}
@@ -69,15 +75,21 @@ func (a *Agent) watchCapChanges(meta []models.ProcessMetaStat) []models.CapChang
 		if !ok || prev == m.CapEff {
 			continue
 		}
-		out = append(out, models.CapChangeEvent{
+		ev := models.CapChangeEvent{
 			PID:              m.PID,
 			StartTimeJiffies: m.StartTimeJiffies,
 			Comm:             m.Comm,
 			Exe:              m.Exe,
 			PreviousCapEff:   prev,
 			CurrentCapEff:    m.CapEff,
-			Namespace:        "", // filled only when we have pod attribution elsewhere
-		})
+			CgroupID:         pidCgroup[m.PID],
+		}
+		if ev.CgroupID != 0 {
+			if w, ok := a.workloadIdentity(ev.CgroupID); ok {
+				ev.Namespace, ev.Pod, ev.WorkloadKind, ev.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+			}
+		}
+		out = append(out, ev)
 	}
 	// Drop identities no longer in the report so the map cannot grow unboundedly.
 	for k := range a.prevCaps {

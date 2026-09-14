@@ -335,8 +335,21 @@ type CapChangeEvent struct {
 	Exe              string `json:"exe,omitempty"`
 	PreviousCapEff   uint64 `json:"previousCapEff"`
 	CurrentCapEff    uint64 `json:"currentCapEff"`
+	CgroupID         uint64 `json:"cgroupId,omitempty"`
 	Namespace        string `json:"namespace,omitempty"`
 	Pod              string `json:"pod,omitempty"`
+	WorkloadKind     string `json:"workloadKind,omitempty"`
+	WorkloadName     string `json:"workloadName,omitempty"`
+}
+
+// CapDriftResponse is internal/capdrift.Build's output: the raw
+// capability-change events NetPol-adjacent capability-gated deny's
+// detector already computes, plus anomaly-shaped findings derived from
+// them for internal/alert.Poller and the Health page to consume the same
+// way every other health signal in this project is consumed.
+type CapDriftResponse struct {
+	Anomalies []NetworkHealthAnomaly `json:"anomalies"`
+	Events    []CapChangeEvent       `json:"events"`
 }
 
 // CapabilityBit maps the capability names capability-gated socket deny
@@ -850,16 +863,22 @@ type AgentReport struct {
 	// this report (see TCPHealth[].PID), populated only when the agent
 	// opts into it (NETRA_PROCMETA_ENABLED) since it requires the agent to
 	// see the host's /proc, a real expansion of what it can observe.
-	ProcessMeta     []ProcessMetaStat       `json:"processMeta,omitempty"`
-	Programs        []BPFProgramStat        `json:"programs,omitempty"`
-	Histograms      *NetworkHistogramReport `json:"histograms,omitempty"`
-	CapChanges      []CapChangeEvent        `json:"capChanges,omitempty"`
-	Stack           NodeStackStat           `json:"stack,omitempty"`
-	Events          []FastPathEvent         `json:"events"`
-	ObservedAt      time.Time               `json:"observedAt"`
-	Workloads       []WorkloadIdentity      `json:"workloads,omitempty"`
-	ScopeMode       string                  `json:"scopeMode,omitempty"`
-	SelectedCgroups int                     `json:"selectedCgroups,omitempty"`
+	ProcessMeta []ProcessMetaStat       `json:"processMeta,omitempty"`
+	Programs    []BPFProgramStat        `json:"programs,omitempty"`
+	Histograms  *NetworkHistogramReport `json:"histograms,omitempty"`
+	CapChanges  []CapChangeEvent        `json:"capChanges,omitempty"`
+	// AgentStartedAt is set once at agent process boot (New()), not per
+	// report. Used to detect a recent restart, which resets in-memory
+	// diffing state like watchCapChanges' prevCaps — a real blind-spot
+	// window for capability-drift detection that must be surfaced, not
+	// silently under-reported. See internal/capdrift.
+	AgentStartedAt  time.Time          `json:"agentStartedAt,omitempty"`
+	Stack           NodeStackStat      `json:"stack,omitempty"`
+	Events          []FastPathEvent    `json:"events"`
+	ObservedAt      time.Time          `json:"observedAt"`
+	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
+	ScopeMode       string             `json:"scopeMode,omitempty"`
+	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
 }
 
 // ProcessMetaStat is /proc-derived metadata for one process observed on the

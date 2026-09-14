@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/ai"
+	"github.com/zyvorai/netra/internal/capdrift"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/models"
@@ -126,6 +127,7 @@ func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) []webhook.
 	collect("health", health.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("pathdiag", pathdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
 	collect("dropdiag", dropdiag.Build(agents, p.cfg.TopN).Summary.Anomalies)
+	collect("capdrift", capdrift.Build(agents, p.cfg.TopN).Anomalies)
 	if ev, ok := digestEvent(now, agents); ok && p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
 		out = append(out, ev)
 	}

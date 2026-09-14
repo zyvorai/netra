@@ -129,6 +129,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_capdrift", method: "GET", path: "/api/v1/ebpf/capdrift",
+			description: "Capability-change anomalies (effective-capability gain/loss) on processes the eBPF datapath already tracks — agent-sourced from a periodic /proc scan (requires NETRA_PROCMETA_ENABLED on the agent), not a live kernel credential read. Includes a capdrift-coverage-gap finding when an agent restarted recently, since its in-memory diff state resets on restart.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-200. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_ebpf_path", method: "GET", path: "/api/v1/ebpf/path",
 			description: "Path diagnostics: per-hop/per-hook health signals for traffic across the cluster.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),

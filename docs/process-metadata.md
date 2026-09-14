@@ -37,6 +37,16 @@ Once enabled, the agent collects the unique nonzero PIDs seen in the current `TC
 
 When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events.
 
+## Capability-drift alerting (`internal/capdrift`)
+
+`capChanges` events existed for a while with no consumer — `internal/capdrift.Build` is what turns them into the same anomaly shape (`severity`/`kind`/`subject`/`message`) every other health signal in this project uses, so they plug into `internal/alert.Poller` (a fourth `capdrift` source alongside `health`/`pathdiag`/`dropdiag`) and the Health page the same way.
+
+- Each `CapChangeEvent` is attributed to a workload via the same `CgroupID` its source PID's `TCPHealth` row already carries this cycle — `watchCapChanges` needs no second lookup mechanism for this, since by construction every PID it considers owns a Netra-tracked TCP socket.
+- Gaining `CAP_NET_ADMIN` or `CAP_NET_RAW` (the same narrow, fixed vocabulary `docs/capability-gated-deny.md`'s enforcement feature uses, not the full 64-bit capability space) is `warning`; losing either is `info`; any other capability-bit change still produces a finding (`capdrift-other`), just without naming the specific bit.
+- **A real blind spot, surfaced rather than hidden**: the diff state (`prevCaps`) `watchCapChanges` compares against is in-memory and resets on every agent restart, so a capability change that happened before the restart, or while the agent was down, produces no event. `capdrift.Build` emits a distinct `capdrift-coverage-gap` finding whenever an agent's own `AgentStartedAt` is recent (within 2 minutes of the current report), naming the affected node, so a quiet capability-drift feed after a rollout reads as "coverage gap, check separately" rather than "confirmed no drift."
+
+`GET /api/v1/ebpf/capdrift`, `netractl ebpf capdrift`, and the `netra_ebpf_capdrift` MCP tool all return the same `{anomalies, events}` shape; the Health page's CAPABILITY DRIFT card renders the anomalies. Like everything else in this file, it does nothing without `NETRA_PROCMETA_ENABLED=true`.
+
 ## Limits
 
 - Linux only. On any other OS the agent's `readProcessMeta` is a no-op regardless of the flag.

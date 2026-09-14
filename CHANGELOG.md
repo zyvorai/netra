@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.35 — 2026-09-14
+
+- **Tier 1 item 1 of "innovative feats various angles": finish wiring capability-drift alerts.** First item of a new, deliberately non-kernel plan (AI/UX/security angles) — every item in this plan lives in `internal/*`/`cmd/*`/`web/*`, zero `bpf/netra_tc.c` changes.
+  - `models.CapChangeEvent` and `internal/agent/ownership_linux.go`'s `watchCapChanges` already computed capability drift correctly, but nothing downstream ever consumed it. Verified a real, independent bug while wiring the fix: `CapChangeEvent` had no `CgroupID` field, and `Namespace`/`Pod` were always empty — the code's own comment claimed they were "filled elsewhere," but there was no elsewhere. Fixed by threading `CgroupID` through from the same `tcpHealth` snapshot `watchCapChanges`' PIDs are already sourced from (every PID it considers owns a Netra-tracked TCP socket by construction, so no second lookup mechanism was needed), then enriching `Namespace`/`Pod`/`WorkloadKind`/`WorkloadName` via the existing `a.workloadIdentity`.
+  - New `internal/capdrift` package (`Build(agents, topN) models.CapDriftResponse`, mirroring `internal/health/summary.go`'s `Build` shape exactly): classifies severity via the existing `models.CapabilityBit` vocabulary (gaining `CAP_NET_ADMIN`/`CAP_NET_RAW` → warning, losing → info, any other bit change → an unnamed but still-surfaced `capdrift-other` finding), and — the one genuinely new signal, not just wiring — emits a `capdrift-coverage-gap` finding when an agent restarted recently. `watchCapChanges`' diff state (`prevCaps`) is in-memory and resets on every agent restart, so a capability change before the restart, or while the agent was down, produces no event; a new `AgentReport.AgentStartedAt` field (set once at agent boot) makes that blind spot detectable and this makes it explicit rather than silently under-reported.
+  - Wired into `internal/alert/poller.go` as a fourth `collect(...)` source alongside `health`/`pathdiag`/`dropdiag`. New `GET /api/v1/ebpf/capdrift`, `netractl ebpf capdrift`, `netra_ebpf_capdrift` MCP read tool, and a new CAPABILITY DRIFT card on the Health page — no dedicated Process/Security page exists in this project, matching the established pattern of embedding diagnostics as cards on general pages rather than inventing a new page per signal.
+  - Extended `docs/process-metadata.md` (this is a completion of that existing feature, not a new surface) rather than writing a separate doc.
+  - Tests: `internal/capdrift/summary_test.go` — gained-capability is warning, lost is info, an unrelated bit change still fires (unnamed), coverage-gap fires only within the restart window, stale agents are skipped, topN truncates.
+  - Verified: `go build/vet/test ./...`, `helm lint`, web typecheck/test (78/78)/build. Pure userland change — no kernel/BPF verification gate applies to this plan at all, unlike the just-completed eBPF plan.
+- Version bumped to 0.27.35 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.34 — 2026-09-14
 
 - **Tier 3 item 11: capability-gated socket deny (CAP_NET_RAW/CAP_NET_ADMIN) — the final item of the entire "tons of eBPF feats" plan.**

@@ -83,6 +83,11 @@ type Agent struct {
 	progStats io.Closer
 	// prevCaps remembers CapEff by pid^startTime for observe-only cap-change watch.
 	prevCaps map[uint64]uint64
+	// startedAt is set once here at process boot, reported on every cycle as
+	// AgentReport.AgentStartedAt — lets consumers (internal/capdrift) detect
+	// a recent restart, which resets prevCaps and opens a real blind-spot
+	// window for capability-drift detection.
+	startedAt time.Time
 }
 
 func New(log *slog.Logger) *Agent {
@@ -92,7 +97,7 @@ func New(log *slog.Logger) *Agent {
 		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit opt-in for chart-generated self-signed cert
 	}
 	return &Agent{
-		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()),
+		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
 		cgroupPath: env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
@@ -459,7 +464,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	processMeta := a.readProcessMeta(pidsFromTCPHealth(tcpHealth))
 	a.enrichSocketOwnership(tcpHealth, processMeta)
-	capChanges := a.watchCapChanges(processMeta)
+	capChanges := a.watchCapChanges(processMeta, cgroupsByPID(tcpHealth))
 	tcpPressure, err := a.readTCPPressure()
 	if err != nil {
 		return err
@@ -582,7 +587,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, CapChanges: capChanges,
+		Programs: programs, Histograms: &histJSON, CapChanges: capChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 	})
@@ -603,6 +608,20 @@ func pidsFromTCPHealth(stats []models.TCPHealthStat) []uint32 {
 		}
 		seen[t.PID] = struct{}{}
 		out = append(out, t.PID)
+	}
+	return out
+}
+
+// cgroupsByPID maps PID -> CgroupID from the current TCP health snapshot,
+// for watchCapChanges to attribute a capability-change event to a workload
+// without a second lookup mechanism (see its doc comment).
+func cgroupsByPID(stats []models.TCPHealthStat) map[uint32]uint64 {
+	out := make(map[uint32]uint64, len(stats))
+	for _, t := range stats {
+		if t.PID == 0 || t.CgroupID == 0 {
+			continue
+		}
+		out[t.PID] = t.CgroupID
 	}
 	return out
 }

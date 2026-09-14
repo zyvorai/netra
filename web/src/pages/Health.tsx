@@ -11,12 +11,14 @@ export default function Health() {
   const [data, setData] = useState<any>();
   const [summary, setSummary] = useState<any>();
   const [agents, setAgents] = useState<any[]>([]);
+  const [capDrift, setCapDrift] = useState<any>();
   const [err, setErr] = useState('');
   const load = () => Promise.all([
     api<any>('/api/v1/ebpf/health?limit=50'),
     api<any>('/api/v1/ebpf/summary'),
     api<any>('/api/v1/agents'),
-  ]).then(([x, s, a]) => { setData(x); setSummary(s); setAgents(a.items || []); setErr(''); }).catch(e => setErr(String(e)));
+    api<any>('/api/v1/ebpf/capdrift'),
+  ]).then(([x, s, a, cd]) => { setData(x); setSummary(s); setAgents(a.items || []); setCapDrift(cd); setErr(''); }).catch(e => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
   const s = data?.summary || {};
   const anomalies = data?.summary?.anomalies || [];
@@ -115,6 +117,19 @@ export default function Health() {
         {agents.flatMap((a: any) => (a.connRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
           <div className="agent wide" key={i}>
             <b>{c.name}</b><span>{c.node}</span><small>{c.count} dropped</small>
+          </div>
+        ))}
+      </div>
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">CAPABILITY DRIFT</p>
+      <h3>Effective-capability changes on tracked processes</h3>
+      <p>Agent-sourced from a periodic /proc scan (requires NETRA_PROCMETA_ENABLED) — not a live kernel credential read. A capability change during an agent restart window is a known blind spot, surfaced below as its own finding rather than silently missed.</p>
+      <div className="list">
+        {(capDrift?.anomalies || []).length === 0 && <p className="empty-state">No capability drift observed yet.</p>}
+        {(capDrift?.anomalies || []).slice(0, 25).map((a: any, i: number) => (
+          <div className="agent wide" key={i}>
+            <b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small>
           </div>
         ))}
       </div>
