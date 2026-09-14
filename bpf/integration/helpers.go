@@ -161,6 +161,19 @@ func testObjectPath() string {
 // unconditionally at entry (bpf/netra_tc.c:1908-1909) and every map
 // reference across programs in the same object only resolves correctly
 // when the whole spec is loaded together.
+// l7Programs are the two cgroup_skb SNI/HTTP-Host scan programs with a
+// documented, standing kernel-verifier rejection on some kernels ("bad
+// address, hit verifier bug") — see docs/l7-metadata.md. Confirmed live on
+// the GitHub Actions ubuntu-latest runner too: the first CI run of this
+// package failed outright on this exact rejection because loadCollection
+// didn't yet replicate the fallback internal/agent.loadAndAttach already
+// uses on a real node (strip the L7 programs from the spec and retry, so
+// a verifier rejection degrades to "no L7 observability" instead of
+// failing the whole collection load). None of the tests in this package
+// exercise L7/DNS behavior, so dropping these two programs never affects
+// what's under test here.
+var l7Programs = []string{"netra_l7_cgroup_egress", "netra_l7_cgroup_ingress"}
+
 func loadCollection(t *testing.T) *ebpf.Collection {
 	t.Helper()
 	path := testObjectPath()
@@ -169,11 +182,27 @@ func loadCollection(t *testing.T) *ebpf.Collection {
 		t.Fatalf("load BPF ELF %s (set NETRA_BPF_TEST_OBJECT if it's not built yet — see .github/workflows/ci.yml's ebpf job for the exact clang compile line): %v", path, err)
 	}
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
+	if err != nil && mentionsAny(err.Error(), l7Programs) {
+		t.Logf("L7/DNS cgroup programs failed verifier load on this kernel (documented, standing issue — see docs/l7-metadata.md); retrying without them: %v", err)
+		for _, p := range l7Programs {
+			delete(spec.Programs, p)
+		}
+		coll, err = ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
+	}
 	if err != nil {
 		t.Fatalf("load BPF collection from %s: %v", path, err)
 	}
 	t.Cleanup(coll.Close)
 	return coll
+}
+
+func mentionsAny(msg string, names []string) bool {
+	for _, n := range names {
+		if strings.Contains(msg, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // selfCgroupID returns this test process's own current cgroup ID — the
