@@ -4,6 +4,7 @@ package chatops
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,7 +57,9 @@ func TestDispatchUnknownCommand(t *testing.T) {
 }
 
 func TestDispatchModeDisabledWithoutMutations(t *testing.T) {
-	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("must not call the controller when mutations are disabled") })
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not call the controller when mutations are disabled")
+	})
 	reply, pending := Dispatch(context.Background(), c, false, "mode enforce")
 	if pending != nil || !strings.Contains(reply, "disabled") {
 		t.Fatalf("reply=%q pending=%v", reply, pending)
@@ -64,7 +67,9 @@ func TestDispatchModeDisabledWithoutMutations(t *testing.T) {
 }
 
 func TestDispatchModeRequiresConfirmationNotImmediateExecution(t *testing.T) {
-	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("mode must never call the controller before confirmation") })
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("mode must never call the controller before confirmation")
+	})
 	reply, pending := Dispatch(context.Background(), c, true, "mode enforce 30m")
 	if pending == nil {
 		t.Fatal("expected a pending confirmation, not immediate execution")
@@ -81,7 +86,9 @@ func TestDispatchModeRequiresConfirmationNotImmediateExecution(t *testing.T) {
 }
 
 func TestDispatchModeRejectsInvalidMode(t *testing.T) {
-	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("must not call the controller for an invalid mode") })
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not call the controller for an invalid mode")
+	})
 	reply, pending := Dispatch(context.Background(), c, true, "mode sideways")
 	if pending != nil || !strings.Contains(reply, "observe") {
 		t.Fatalf("reply=%q pending=%v", reply, pending)
@@ -105,5 +112,70 @@ func TestDecodePendingRejectsMalformed(t *testing.T) {
 	}
 	if _, err := decodePending("PUT|/x|not-base64!!|summary"); err == nil {
 		t.Fatal("expected an error for a non-base64 body segment")
+	}
+}
+
+func TestDispatchAskCallsThroughAndNeverConfirms(t *testing.T) {
+	var gotPath, gotMethod, gotAuth, gotBody string
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Write([]byte(`{"headline":"All clear","severity":"info","summary":"No anomalies in the last 5m.","findings":[{"kind":"drops","subject":"checkout-service","message":"3 policy drops, reason=cidr"}],"nextSteps":["Review the CIDR rule if this is unexpected."],"engine":"heuristic"}`))
+	})
+	// ask must never require confirmation, unlike mode — it's read-only,
+	// so this is checked even with allowMutations=false.
+	reply, pending := Dispatch(context.Background(), c, false, "ask why is checkout-service flaky")
+	if pending != nil {
+		t.Fatalf("ask must not require confirmation, got pending=%v", pending)
+	}
+	if gotMethod != "POST" || gotPath != "/api/v1/ai/ask" {
+		t.Fatalf("method=%q path=%q", gotMethod, gotPath)
+	}
+	if gotAuth != "Bearer test-key" {
+		t.Fatalf("auth=%q", gotAuth)
+	}
+	if !strings.Contains(gotBody, "why is checkout-service flaky") {
+		t.Fatalf("request body=%q missing the question", gotBody)
+	}
+	for _, want := range []string{"All clear", "info", "No anomalies in the last 5m.", "checkout-service", "3 policy drops", "Review the CIDR rule", "heuristic"} {
+		if !strings.Contains(reply, want) {
+			t.Fatalf("reply=%q missing %q", reply, want)
+		}
+	}
+}
+
+func TestDispatchAskWithNoQuestionStillCallsThrough(t *testing.T) {
+	var gotBody string
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Write([]byte(`{"headline":"Cluster brief","severity":"warning","summary":"1 warning finding.","engine":"heuristic"}`))
+	})
+	reply, pending := Dispatch(context.Background(), c, true, "ask")
+	if pending != nil {
+		t.Fatalf("ask must not require confirmation, got pending=%v", pending)
+	}
+	if !strings.Contains(gotBody, `"question":""`) {
+		t.Fatalf("expected an empty-question request body, got %q", gotBody)
+	}
+	if !strings.Contains(reply, "Cluster brief") {
+		t.Fatalf("reply=%q", reply)
+	}
+}
+
+func TestDispatchAskRendersErrorOnNon2xx(t *testing.T) {
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"controller store is not initialised"}`))
+	})
+	reply, pending := Dispatch(context.Background(), c, true, "ask anything")
+	if pending != nil {
+		t.Fatalf("ask must not require confirmation, got pending=%v", pending)
+	}
+	if !strings.Contains(reply, "HTTP 503") || !strings.Contains(reply, "controller store is not initialised") {
+		t.Fatalf("reply=%q", reply)
 	}
 }

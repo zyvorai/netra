@@ -29,7 +29,9 @@ func postSigned(t *testing.T, h http.Handler, secret string, form url.Values) *h
 }
 
 func TestHandlerRejectsBadSignature(t *testing.T) {
-	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("must not reach the controller with a bad signature") })
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not reach the controller with a bad signature")
+	})
 	h := NewHandler(Config{SigningSecret: "shh", AllowMutations: true, Client: c})
 	form := url.Values{"command": {"/netra"}, "text": {"status"}}
 	body := form.Encode()
@@ -113,7 +115,9 @@ func TestHandlerInteractionExecutesAndTagsActor(t *testing.T) {
 }
 
 func TestHandlerInteractionRejectsWrongActionID(t *testing.T) {
-	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) { t.Fatal("must not call the controller for an unrecognized action") })
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not call the controller for an unrecognized action")
+	})
 	h := NewHandler(Config{SigningSecret: "shh", AllowMutations: true, Client: c})
 	payload := `{"type":"block_actions","user":{"id":"U123"},"actions":[{"action_id":"something_else","value":"x"}]}`
 	rec := postSigned(t, h, "shh", url.Values{"payload": {payload}})

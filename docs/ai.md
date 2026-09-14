@@ -87,6 +87,8 @@ The nav bar (`web/src/components/DigestChip.tsx`) shows a small severity/fingerp
 
 Every **Explain** popover (`web/src/components/ExplainFinding.tsx`, on Health/Drops/Path/Insights/L7/Explain findings) can additionally try to draft a rule from that finding: it regex-extracts an IP, CIDR, or DNS/SNI name from the finding's kind/subject/message and, if found, offers a "Draft rule from this" button that calls `POST /api/v1/ai/draft` — same preview-only endpoint the Ask Netra card and `netractl ai draft` use, never applies anything.
 
+`/netra ask <question>` in Slack or Microsoft Teams (`internal/chatops`, see [`docs/chatops.md`](chatops.md)) is a further surface for the same `POST /api/v1/ai/ask` endpoint the Ask Netra card uses — no new boundary, same heuristic/LLM fallback, read-only.
+
 ## CLI
 
 ```bash

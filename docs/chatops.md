@@ -1,6 +1,6 @@
 # ChatOps (`internal/chatops`)
 
-Optional, off-by-default ChatOps integration for `netrad`, supporting both Slack (slash commands + interactive buttons) and Microsoft Teams (bot messages). Read commands (`status`, `health`, `audit`) reply immediately; the one mutating command (`mode`) always requires a second confirmation step before it executes anything, mirroring the web UI's own `confirm()` dialogs. See below for Slack; Teams is documented in [`docs/chatops-teams.md`](chatops-teams.md).
+Optional, off-by-default ChatOps integration for `netrad`, supporting both Slack (slash commands + interactive buttons) and Microsoft Teams (bot messages). Read commands (`status`, `health`, `audit`, `ask`) reply immediately; the one mutating command (`mode`) always requires a second confirmation step before it executes anything, mirroring the web UI's own `confirm()` dialogs. See below for Slack; Teams is documented in [`docs/chatops-teams.md`](chatops-teams.md).
 
 ## Why two separate providers, one shared core
 
@@ -38,10 +38,11 @@ Or directly via environment variables on `netrad`:
 | `/netra status` | Controller status — read-only, calls `GET /api/v1/status`. |
 | `/netra health` | Top 5 network-health anomalies — `GET /api/v1/ebpf/health?limit=5`. |
 | `/netra audit` | 5 most recent audit events — `GET /api/v1/audit?limit=5`. |
+| `/netra ask <question>` | Ask Netra's AI layer about cluster health — same engine (and same `POST /api/v1/ai/ask` endpoint) as the web "Ask Netra" card, heuristic-only unless `NETRA_AI_API_KEY` is set. Read-only, no confirmation. An empty question (`/netra ask` with no text) still replies with a general cluster brief. |
 | `/netra mode observe` | Switch the fast-path to observe mode. **Requires confirmation.** |
 | `/netra mode enforce [lease]` | Switch to enforce mode for `lease` (default `15m`, auto-reverts to observe on expiry). **Requires confirmation.** |
 
-Read commands reply with a compact, indented-JSON summary of the underlying API response (capped well under Slack's per-block size limit) rather than a hand-parsed field-by-field rendering, so replies stay correct as those endpoints' response shapes evolve — they are not reformatted into custom prose.
+Read commands (`status`/`health`/`audit`) reply with a compact, indented-JSON summary of the underlying API response (capped well under Slack's per-block size limit) rather than a hand-parsed field-by-field rendering, so replies stay correct as those endpoints' response shapes evolve — they are not reformatted into custom prose. `/netra ask` is the one exception: it renders the AI brief's headline/severity/summary/findings/next-steps as formatted chat text, matching the web card's presentation rather than a JSON dump.
 
 ## The confirmation flow is stateless by design
 
@@ -56,7 +57,7 @@ The `enforce` mode gets Slack's "danger" button style as a visual cue; every oth
 ## Evidence boundaries
 
 - **No CLI or MCP surface for this feature.** ChatOps is an inbound integration (Slack calls Netra), not something `netractl` or an MCP client calls — there is nothing here for either of those to wrap.
-- **`/netra mode` is the only mutating command in v1.** Read commands (`status`/`health`/`audit`) never require confirmation and never produce an audit event, matching how the equivalent read-only API endpoints behave everywhere else in Netra.
+- **`/netra mode` is the only mutating command in v1.** Read commands (`status`/`health`/`audit`/`ask`) never require confirmation and never produce an audit event, matching how the equivalent read-only API endpoints behave everywhere else in Netra.
 - **The confirming Slack user is trusted as-is.** Netra does not maintain its own Slack-workspace membership or role mapping — anyone who can click a button in the channel the slash command was run in can confirm it. Scope who can *invoke* `/netra mode` via Slack's own app/channel permissions, not Netra.
 - **A malformed or expired confirmation value fails closed**, replying "this confirmation has expired or is malformed; re-run the slash command" rather than guessing at intent.
 

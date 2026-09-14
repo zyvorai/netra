@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.54 — 2026-09-14
+
+- **ChatOps gets a brain: `/netra ask <question>`, on both Slack and Microsoft Teams.** Netra has had two AI-adjacent systems since earlier releases that had never been wired together: `internal/ai` (heuristic-first, optional-LLM question answering behind `POST /api/v1/ai/ask` — the web "Ask Netra" card, `netractl ai ask`, the `netra_ai_ask` MCP tool) and ChatOps (`internal/chatops`, previously limited to `status`/`health`/`audit`/`mode`). This closes the gap with one new command calling the exact same endpoint the web card already uses — no new AI engine, no new datapath, no new mutation surface, purely wiring.
+  - New `askCommand` in `internal/chatops/commands.go`, dispatched as `case "ask"` alongside the other read-only commands — no `allowMutations` gate, matching `/api/v1/ai/ask`'s existing read-only, unaudited-anywhere behavior. An empty question (`/netra ask` with no text) still calls through and returns a general cluster brief, the same default `ai.Answer` already gives the web card.
+  - Response is decoded into a small local struct (`chatAskResponse`) mirroring only the `ai.Brief` fields needed for rendering — deliberately not importing `internal/ai`, preserving this package's existing "netrad is a black-box HTTP API" boundary. Rendered as formatted chat text (bolded headline + severity, summary, up to 3 findings, next steps, engine tag) rather than the raw indented-JSON dump `status`/`health`/`audit` use, matching the web card's presentation instead.
+  - Lands on **both** Slack and Teams from this one change, since `handler.go` and `teams_handler.go` already route all command text through the shared `Dispatch`.
+  - `docs/chatops.md`'s command table and summary line updated; `docs/ai.md` now lists ChatOps alongside web/CLI/MCP as a surface for the same endpoint.
+  - Tests: `TestDispatchAskCallsThroughAndNeverConfirms` (method/path/auth/body, no confirmation even with `allowMutations=false`, reply renders every response field), `TestDispatchAskWithNoQuestionStillCallsThrough` (empty question still calls through with `"question":""`), `TestDispatchAskRendersErrorOnNon2xx` (mirrors `summarize()`'s existing `HTTP <code>` error shape).
+  - Verified: `go build/vet/test ./...` clean, only `internal/chatops` touched.
+- Version bumped to 0.27.54 across all six tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.53 — 2026-09-14
 
 - **The new `bpf/integration` CI job (0.27.52) failed on its actual first real GitHub Actions run — fixed, and the fix itself surfaced a second, more fundamental finding.** Cross-compiling and `go vet`-ing the package from this project's non-Linux dev environment could only prove it type-checked, never that it would actually pass on a real runner; it didn't, twice, for two different real reasons.

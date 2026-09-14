@@ -45,6 +45,7 @@ func helpText(allowMutations bool) string {
 	b.WriteString("`/netra status` – controller status\n")
 	b.WriteString("`/netra health` – top network-health anomalies\n")
 	b.WriteString("`/netra audit` – recent audit events\n")
+	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same engine as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set)\n")
 	if allowMutations {
 		b.WriteString("`/netra mode observe` / `/netra mode enforce [lease]` – switch fast-path mode (requires confirmation)\n")
 	} else {
@@ -74,6 +75,8 @@ func Dispatch(ctx context.Context, c *Client, allowMutations bool, text string) 
 		return summarize(ctx, c, "GET", "/api/v1/ebpf/health?limit=5", nil), nil
 	case "audit":
 		return summarize(ctx, c, "GET", "/api/v1/audit?limit=5", nil), nil
+	case "ask":
+		return askCommand(ctx, c, strings.Join(fields[1:], " ")), nil
 	case "mode":
 		if !allowMutations {
 			return "`/netra mode` is disabled on this integration (NETRA_CHATOPS_ALLOW_MUTATIONS is not set).", nil
@@ -105,6 +108,77 @@ func modeCommand(args []string) (reply string, pending *pendingAction) {
 	body, _ := json.Marshal(map[string]string{"mode": mode})
 	p := pendingAction{Method: "PUT", Path: path, Body: string(body), Summary: summary}
 	return "Confirm: " + summary + "?", &p
+}
+
+// chatAskResponse mirrors only the internal/ai.Brief fields askCommand
+// renders — deliberately a local type, not an import of internal/ai,
+// preserving this package's existing boundary (see client.go's package
+// doc comment): netrad is a black-box HTTP API to chatops, never a Go
+// dependency.
+type chatAskResponse struct {
+	Headline string `json:"headline"`
+	Severity string `json:"severity"`
+	Summary  string `json:"summary"`
+	Findings []struct {
+		Kind    string `json:"kind,omitempty"`
+		Subject string `json:"subject,omitempty"`
+		Message string `json:"message"`
+	} `json:"findings"`
+	NextSteps []string `json:"nextSteps"`
+	Engine    string   `json:"engine"`
+}
+
+// askCommand answers a free-text question via the same POST /api/v1/ai/ask
+// endpoint the web "Ask Netra" card and netractl ai ask already use —
+// heuristic-only unless NETRA_AI_API_KEY is configured on the controller,
+// same fallback as every other internal/ai consumer. Read-only: no
+// confirmation step, no allowMutations gate, empty actor (nothing to
+// audit-attribute for a question), matching status/health/audit's
+// existing unaudited-read shape.
+func askCommand(ctx context.Context, c *Client, question string) string {
+	callCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	body, _ := json.Marshal(map[string]string{"question": question})
+	out, status, err := c.Do(callCtx, "POST", "/api/v1/ai/ask", body, "")
+	if err != nil {
+		return fmt.Sprintf("Request to /api/v1/ai/ask failed: %v", err)
+	}
+	if status < 200 || status >= 300 {
+		return fmt.Sprintf("/api/v1/ai/ask returned HTTP %d:\n```%s```", status, truncate(string(out), 800))
+	}
+	var brief chatAskResponse
+	if err := json.Unmarshal(out, &brief); err != nil {
+		return fmt.Sprintf("Could not parse the AI response: %v", err)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "*%s* _(%s)_\n", brief.Headline, brief.Severity)
+	if brief.Summary != "" {
+		fmt.Fprintf(&b, "%s\n", brief.Summary)
+	}
+	for i, f := range brief.Findings {
+		if i >= 3 {
+			break
+		}
+		subject := f.Subject
+		if f.Kind != "" && subject != "" {
+			subject = f.Kind + " · " + subject
+		} else if f.Kind != "" {
+			subject = f.Kind
+		}
+		if subject != "" {
+			fmt.Fprintf(&b, "• *%s*: %s\n", subject, f.Message)
+		} else {
+			fmt.Fprintf(&b, "• %s\n", f.Message)
+		}
+	}
+	for _, step := range brief.NextSteps {
+		fmt.Fprintf(&b, "→ %s\n", step)
+	}
+	if brief.Engine != "" {
+		fmt.Fprintf(&b, "_engine: %s_", brief.Engine)
+	}
+	return truncate(b.String(), 2800)
 }
 
 // summarize calls path and renders a short, Slack-message-sized summary of
