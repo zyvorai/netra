@@ -52,20 +52,29 @@ type Agent struct {
 	http                               *http.Client
 	collection                         *ebpf.Collection
 	links                              []link.Link
-	events                             chan models.FastPathEvent
-	hooks                              []string
-	lastRevision                       uint64
-	lastSync                           time.Time
-	failsafeAfter                      time.Duration
-	enforceUntil                       time.Time
-	cgroupEnabled                      bool
-	workloadMu                         sync.RWMutex
-	workloadByCgroup                   map[uint64]models.WorkloadIdentity
-	cgroupCache                        map[uint64]cgroupmeta.Identity
-	lastCgroupScan                     time.Time
-	cgroupScanEvery                    time.Duration
-	scopeMode                          string
-	selectedCgroups                    int
+	// edgeObject/edgeCollection are the standalone edge-TCP-intel BPF
+	// object (bpf/netra_edge_intel.c) and its loaded collection — a
+	// separate object/collection from the main one, per
+	// docs/fluxvm-borrow-backlog.md's "new sensors stay optional separate
+	// programs" rule. Its TCX links are appended to the shared a.links
+	// slice (Close() already closes those); only the collection itself
+	// needs its own Close() call.
+	edgeObject       string
+	edgeCollection   *ebpf.Collection
+	events           chan models.FastPathEvent
+	hooks            []string
+	lastRevision     uint64
+	lastSync         time.Time
+	failsafeAfter    time.Duration
+	enforceUntil     time.Time
+	cgroupEnabled    bool
+	workloadMu       sync.RWMutex
+	workloadByCgroup map[uint64]models.WorkloadIdentity
+	cgroupCache      map[uint64]cgroupmeta.Identity
+	lastCgroupScan   time.Time
+	cgroupScanEvery  time.Duration
+	scopeMode        string
+	selectedCgroups  int
 
 	// procMetaEnabled gates /proc-derived process metadata enrichment
 	// (internal/procmeta). Off by default: resolving a host PID's /proc
@@ -99,6 +108,7 @@ func New(log *slog.Logger) *Agent {
 	return &Agent{
 		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
+		edgeObject: env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
 		cgroupPath: env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096),
@@ -159,7 +169,7 @@ var mapNames = []string{
 	"shield_class_stats", "shield_source_hits", "iface_flow_stats", "icmp_errors", "udp_flow_health", "quic_observed",
 	"conn_rate_limits", "conn_rate_state",
 	"rate_bps_v4", "rate_byte_state_v4", "rate_bps_v6", "rate_byte_state_v6",
-	"syndrop_v4", "syndrop_v6",
+	"syndrop_v4", "syndrop_v6", "syndrop_cidr_v4", "syndrop_cidr_v6",
 	"capgate_pids",
 }
 
@@ -343,6 +353,9 @@ func (a *Agent) loadAndAttach() error {
 			a.log.Warn("TCX unavailable on interface", "iface", name)
 		}
 	}
+	if err := a.attachEdgeIntel(ifs); err != nil {
+		return err
+	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
 	if err != nil {
 		return err
@@ -398,6 +411,170 @@ func kfreeDropReasonAvailable() bool {
 	return false
 }
 
+// edgeIntelMapNames are edge_tcp_intel's own pinned maps — a separate
+// pin namespace from mapNames (the main object's maps), same pinPath
+// directory. Pinning follows the same upgrade-in-place convention as
+// every other map in this agent: counters/histograms survive an agent
+// restart instead of resetting to zero.
+var edgeIntelMapNames = []string{"edge_tcp_flows", "edge_tcp_hist", "edge_tcp_counts"}
+
+// attachEdgeIntel loads and attaches the standalone edge-TCP-intel BPF
+// object (bpf/netra_edge_intel.c) as a second TCX program pair on every
+// interface already resolved for the main netra_ingress/egress attach —
+// see that function's doc comment for why this is a separate object
+// rather than a branch inside bpf/netra_tc.c. Mirrors NETRA_TCX/NETRA_L7's
+// auto|off|required attach-with-fallback convention exactly (env var
+// NETRA_EDGE_INTEL) so a rejection on some kernel degrades to "no edge
+// intel" rather than failing agent startup, unless the operator has
+// explicitly opted into NETRA_EDGE_INTEL=required. Unlike the main
+// object, a missing/unreadable object FILE (not yet built into this
+// image, or deliberately absent) is also tolerated in auto mode — this is
+// a newer, optional feature, not a load-bearing one.
+func (a *Agent) attachEdgeIntel(ifs []string) error {
+	mode := strings.ToLower(env("NETRA_EDGE_INTEL", "auto")) // auto|off|required
+	if mode == "off" {
+		a.log.Info("edge TCP intel skipped by NETRA_EDGE_INTEL=off")
+		return nil
+	}
+	spec, err := ebpf.LoadCollectionSpec(a.edgeObject)
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load BPF ELF %s (NETRA_EDGE_INTEL=required): %w", a.edgeObject, err)
+		}
+		a.log.Warn("edge TCP intel object unavailable; continuing without it", "object", a.edgeObject, "error", err)
+		return nil
+	}
+	repl := map[string]*ebpf.Map{}
+	for _, name := range edgeIntelMapNames {
+		if m, err := ebpf.LoadPinnedMap(filepath.Join(a.pinPath, name), nil); err == nil {
+			repl[name] = m
+			defer m.Close()
+		}
+	}
+	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load edge TCP intel BPF collection (NETRA_EDGE_INTEL=required): %w", err)
+		}
+		a.log.Warn("edge TCP intel BPF collection failed to load; continuing without it", "error", err)
+		return nil
+	}
+	a.edgeCollection = coll
+	for _, name := range edgeIntelMapNames {
+		if m := coll.Maps[name]; m != nil {
+			p := filepath.Join(a.pinPath, name)
+			if _, err := os.Stat(p); os.IsNotExist(err) {
+				if err := m.Pin(p); err != nil {
+					a.log.Warn("pin map", "map", name, "error", err)
+				}
+			}
+		}
+	}
+	for _, name := range ifs {
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			if mode == "required" {
+				return fmt.Errorf("interface %s (NETRA_EDGE_INTEL=required): %w", name, err)
+			}
+			a.log.Warn("edge TCP intel interface lookup failed; skipping", "iface", name, "error", err)
+			continue
+		}
+		for _, h := range []struct {
+			name   string
+			attach ebpf.AttachType
+			prog   string
+		}{{"edge-tcx-ingress", ebpf.AttachTCXIngress, "netra_edge_ingress"}, {"edge-tcx-egress", ebpf.AttachTCXEgress, "netra_edge_egress"}} {
+			p := coll.Programs[h.prog]
+			if p == nil {
+				if mode == "required" {
+					return fmt.Errorf("BPF program %s missing (NETRA_EDGE_INTEL=required)", h.prog)
+				}
+				a.log.Warn("edge TCP intel program missing; skipping", "program", h.prog)
+				continue
+			}
+			// A second, independent TCX program on the same interface+
+			// direction as netra_ingress/egress — TCX supports chaining
+			// multiple programs per attach point (unlike classic TC),
+			// confirmed via bpftool net show as part of live verification,
+			// not assumed from documentation alone.
+			lnk, err := link.AttachTCX(link.TCXOptions{Interface: iface.Index, Program: p, Attach: h.attach})
+			if err != nil {
+				if mode == "required" {
+					return fmt.Errorf("attach %s to %s (NETRA_EDGE_INTEL=required): %w", h.name, name, err)
+				}
+				a.log.Warn("edge TCP intel TCX attach failed; continuing without this hook", "hook", h.name, "iface", name, "error", err)
+				continue
+			}
+			a.links = append(a.links, lnk)
+			a.hooks = append(a.hooks, h.name+":"+name)
+		}
+	}
+	return nil
+}
+
+// edgeHistKey/edgeHistValue/edgeCountKey mirror bpf/netra_edge_intel.c's
+// struct edge_hist_key/edge_hist_value/edge_count_key byte-for-byte —
+// cilium/ebpf decodes map entries directly into these via reflection, the
+// same convention every other typed map read in this file already uses.
+type edgeHistKey struct{ Kind, Bucket uint32 }
+type edgeHistValue struct{ Count, TotalNS, MaxNS uint64 }
+type edgeCountKey struct{ Kind uint32 }
+
+// edgeCountNames maps bpf/netra_edge_intel.c's EDGE_COUNT_* constants to
+// the JSON keys models.EdgeIntelSummary.Counts uses.
+var edgeCountNames = map[uint32]string{
+	1: "syn", 2: "established", 3: "retransmit", 4: "rst", 5: "fin", 6: "flowMiss",
+}
+
+// readEdgeIntel returns nil when edge TCP intel never attached
+// (a.edgeCollection is nil — NETRA_EDGE_INTEL=off, or auto-mode attach
+// failure) — see models.EdgeIntelSummary's doc comment on why that's
+// distinct from an attached-but-quiet node.
+func (a *Agent) readEdgeIntel() (*models.EdgeIntelSummary, error) {
+	if a.edgeCollection == nil {
+		return nil, nil
+	}
+	out := &models.EdgeIntelSummary{Counts: map[string]uint64{}}
+	if m := a.edgeCollection.Maps["edge_tcp_hist"]; m != nil {
+		var k edgeHistKey
+		var v edgeHistValue
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			bucket := models.EdgeIntelBucket{Count: v.Count, TotalNS: v.TotalNS, MaxNS: v.MaxNS}
+			var target *[]models.EdgeIntelBucket
+			switch k.Kind {
+			case 1: // EDGE_HIST_HANDSHAKE
+				target = &out.Handshake
+			case 2: // EDGE_HIST_RTT
+				target = &out.RTT
+			default:
+				continue
+			}
+			for len(*target) <= int(k.Bucket) {
+				*target = append(*target, models.EdgeIntelBucket{})
+			}
+			(*target)[k.Bucket] = bucket
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
+	}
+	if m := a.edgeCollection.Maps["edge_tcp_counts"]; m != nil {
+		var k edgeCountKey
+		var v uint64
+		it := m.Iterate()
+		for it.Next(&k, &v) {
+			if name, ok := edgeCountNames[k.Kind]; ok {
+				out.Counts[name] = v
+			}
+		}
+		if err := mapIterErr(it.Err()); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (a *Agent) resolveInterfaces(in []string) ([]string, error) {
 	if len(in) == 0 {
 		return nil, nil
@@ -430,6 +607,9 @@ func (a *Agent) Close() {
 	}
 	if a.collection != nil {
 		a.collection.Close()
+	}
+	if a.edgeCollection != nil {
+		a.edgeCollection.Close()
 	}
 }
 
@@ -580,6 +760,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	programs := a.readProgramHealth()
 	events := a.drainEvents(500)
+	edgeIntel, err := a.readEdgeIntel()
+	if err != nil {
+		return err
+	}
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -587,7 +771,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, CapChanges: capChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 	})
@@ -688,6 +872,9 @@ func (a *Agent) applyConfig(cfg models.EBPFFastPathConfig) error {
 		return err
 	}
 	if err := a.applySynDrop(cfg.SynDrop); err != nil {
+		return err
+	}
+	if err := a.applySynDropCIDR(cfg.SynDropCIDR); err != nil {
 		return err
 	}
 	if err := a.applyCapabilityGate(cfg); err != nil {
@@ -869,6 +1056,21 @@ func (a *Agent) applySynDrop(entries []models.EBPFSynDropEntry) error {
 
 func (a *Agent) replaceCIDRs(rules []models.EBPFCIDRRule) error {
 	return a.replaceCIDRMaps(a.collection.Maps["blocked_cidr_v4"], a.collection.Maps["blocked_cidr_v6"], rules)
+}
+
+// applySynDropCIDR clears and rewrites syndrop_cidr_v4/v6 from
+// cfg.SynDropCIDR, reusing replaceCIDRMaps unchanged — the key layout is
+// identical to blocked_cidr_v4/v6 (see struct lpm4_key/lpm6_key in
+// bpf/netra_tc.c), so the same LPM-trie writer applies. EBPFSynDropCIDR is
+// converted to EBPFCIDRRule's shape only because replaceCIDRMaps is typed
+// against it; Direction is still only ever "egress"/"ingress" here
+// (validated server-side), never "both".
+func (a *Agent) applySynDropCIDR(entries []models.EBPFSynDropCIDR) error {
+	rules := make([]models.EBPFCIDRRule, len(entries))
+	for i, e := range entries {
+		rules[i] = models.EBPFCIDRRule{CIDR: e.CIDR, Direction: e.Direction}
+	}
+	return a.replaceCIDRMaps(a.collection.Maps["syndrop_cidr_v4"], a.collection.Maps["syndrop_cidr_v6"], rules)
 }
 
 func (a *Agent) replaceCIDRMaps(m4, m6 *ebpf.Map, rules []models.EBPFCIDRRule) error {
@@ -2587,9 +2789,18 @@ func (a *Agent) applyNetPolV2(cfg models.EBPFFastPathConfig) error {
 	}
 	desired := map[ruleKey]uint8{}
 	for _, r := range cfg.NetPolRules {
-		ip := net.ParseIP(r.PeerIPv4)
-		if ip == nil || ip.To4() == nil {
-			continue
+		// Empty PeerIPv4 is a port-only rule (peer=0 wildcard, matching
+		// netpol_v2_lookup4's any-peer fallback step in bpf/netra_tc.c) —
+		// the API layer (ebpfNetPolRuleAdd) already guarantees Port != 0
+		// whenever PeerIPv4 is empty, so this never silently produces a
+		// no-op rule with neither field set.
+		var peer uint32
+		if r.PeerIPv4 != "" {
+			ip := net.ParseIP(r.PeerIPv4)
+			if ip == nil || ip.To4() == nil {
+				continue
+			}
+			peer = native.Uint32(ip.To4())
 		}
 		proto := uint8(0)
 		switch strings.ToUpper(r.Protocol) {
@@ -2614,7 +2825,7 @@ func (a *Agent) applyNetPolV2(cfg models.EBPFFastPathConfig) error {
 				continue
 			}
 			for _, dir := range dirs {
-				desired[ruleKey{CgroupID: cg, Peer: native.Uint32(ip.To4()), Port: r.Port, Protocol: proto, Direction: dir}] = action
+				desired[ruleKey{CgroupID: cg, Peer: peer, Port: r.Port, Protocol: proto, Direction: dir}] = action
 			}
 		}
 	}

@@ -66,8 +66,19 @@ the kernel and can be enabled independently.
   (namespace/pod/workloadKind/workloadName/labels), resolved to cgroup IDs
   agent-side each sync via `workload.Resolve` — the same mechanism
   workload-scoped enforcement already uses. `action` is `allow` or `deny`.
-  Exact peer IPv4 only in this release; CIDR-shaped peers and IPv6 are
-  explicit follow-ups.
+  Exact peer IPv4, or port-only (empty `peerIpv4` + exact `port`, meaning
+  "any peer") — a rule needs at least one exact discriminator, enforced at
+  `ebpfNetPolRuleAdd`; a request with neither is rejected with 400.
+  CIDR-shaped peers and IPv6 are still explicit follow-ups.
+
+  **Port-only allow-exceptions mirror the v1 flat engine's `allowed_ports`,
+  not a new mechanism.** `netpol_v2_lookup4` does a three-step fallback on
+  a miss: exact peer + exact port, then exact peer + any-port (`port=0`,
+  pre-existing), then — new — any-peer (`peer=0`) + exact port. `peer=0` is
+  a safe wildcard sentinel since it's never a real address on this path.
+  There is deliberately no fourth "any-peer + any-port" step: such a rule
+  has no real discriminator and can't exist (rejected at the API layer, so
+  no such row is ever written to `netpol_rules4`).
 
   **No UID/process-name allow-exceptions — deliberately deferred, different
   hook family, not just unfinished work.** The flat global engine's

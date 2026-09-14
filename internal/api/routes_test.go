@@ -154,3 +154,42 @@ func TestChatOpsRouteRegisteredOnlyWhenConfigured(t *testing.T) {
 		t.Fatalf("unsigned request: want 401 from VerifySlackSignature, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestChatOpsTeamsRouteRegisteredOnlyWhenConfigured mirrors
+// TestChatOpsRouteRegisteredOnlyWhenConfigured above for the Teams route:
+// absent (404) unless chatopsTeamsHandler is set (chatops.NewTeamsHandler
+// in New() requires a Microsoft App ID), and 401 for a request with no
+// bearer token at all — that check happens before any JWT verification, so
+// this needs no real Bot Framework JWKS endpoint reachable in tests.
+func TestChatOpsTeamsRouteRegisteredOnlyWhenConfigured(t *testing.T) {
+	bare := &Server{
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		apiKey:      "ci-test-token",
+		metricsData: &telemetry{},
+	}
+	req := httptest.NewRequest("POST", "/chatops/teams", nil)
+	rec := httptest.NewRecorder()
+	bare.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("without a configured chatopsTeamsHandler, want 404, got %d", rec.Code)
+	}
+
+	wired := &Server{
+		log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		apiKey:      "ci-test-token",
+		metricsData: &telemetry{},
+		chatopsTeamsHandler: chatops.NewTeamsHandler(chatops.TeamsConfig{
+			AppID:  "app-1",
+			Client: chatops.NewClient("http://127.0.0.1:0", "k"),
+		}),
+	}
+	req = httptest.NewRequest("POST", "/chatops/teams", nil)
+	rec = httptest.NewRecorder()
+	wired.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("with a configured chatopsTeamsHandler, route must be registered")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("request with no bearer token: want 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}

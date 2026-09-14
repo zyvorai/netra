@@ -53,3 +53,47 @@ func TestSynDropDeletePostsToDeletePath(t *testing.T) {
 		t.Fatalf("unexpected path: %s", gotPath)
 	}
 }
+
+func TestSynDropCIDRAddPostsCIDRAndDirection(t *testing.T) {
+	var gotPath string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	oldBase, oldArgs := base, os.Args
+	base = srv.URL
+	os.Args = []string{"netractl", "ebpf", "syn-drop-cidr", "add", "203.0.113.0/24", "egress"}
+	defer func() { base, os.Args = oldBase, oldArgs }()
+
+	if err := ebpf(); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/api/v1/ebpf/syn-drop-cidr" || body["cidr"] != "203.0.113.0/24" || body["direction"] != "egress" {
+		t.Fatalf("unexpected request: path=%s body=%#v", gotPath, body)
+	}
+}
+
+func TestSynDropCIDRDeletePostsToDeletePath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	oldBase, oldArgs := base, os.Args
+	base = srv.URL
+	os.Args = []string{"netractl", "ebpf", "syn-drop-cidr", "del", "203.0.113.0/24", "ingress"}
+	defer func() { base, os.Args = oldBase, oldArgs }()
+
+	if err := ebpf(); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/api/v1/ebpf/syn-drop-cidr/delete" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+}

@@ -813,6 +813,45 @@ func TestSynDropCRUD(t *testing.T) {
 	}
 }
 
+func TestSynDropCIDRCRUD(t *testing.T) {
+	s := New()
+	entry := models.EBPFSynDropCIDR{CIDR: "203.0.113.0/24", Direction: "egress"}
+	cfg, err := s.AddSynDropCIDR(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDropCIDR) != 1 || cfg.SynDropCIDR[0] != entry {
+		t.Fatalf("unexpected syndrop-cidr entries: %#v", cfg.SynDropCIDR)
+	}
+
+	// Adding the identical entry again must be a no-op, not a duplicate.
+	cfg, err = s.AddSynDropCIDR(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDropCIDR) != 1 {
+		t.Fatalf("expected no duplicate entry: %#v", cfg.SynDropCIDR)
+	}
+
+	// Same CIDR, different direction is a distinct entry.
+	other := models.EBPFSynDropCIDR{CIDR: "203.0.113.0/24", Direction: "ingress"}
+	cfg, err = s.AddSynDropCIDR(other, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDropCIDR) != 2 {
+		t.Fatalf("expected the ingress entry to be distinct: %#v", cfg.SynDropCIDR)
+	}
+
+	cfg, err = s.DelSynDropCIDR(entry, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SynDropCIDR) != 1 || cfg.SynDropCIDR[0] != other {
+		t.Fatalf("delete did not remove the right entry: %#v", cfg.SynDropCIDR)
+	}
+}
+
 func TestConnRateLimitCRUD(t *testing.T) {
 	s := New()
 	rule := models.EBPFConnRateLimit{

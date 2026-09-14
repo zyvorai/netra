@@ -837,6 +837,30 @@ struct {
     __type(value, __u8);
 } syndrop_v6 SEC(".maps");
 
+// SYN-drop mode, CIDR extension: syndrop_v4/v6 above only cover exact-IP
+// deny entries (REASON_EXACT) because their hash key is a precise
+// {addr,direction} pair. blocked_cidr_v4/v6 (the LPM tries a CIDR deny
+// rule lives in) return only a boolean match with no rule identity, so a
+// per-CIDR SYN-drop flag can't be looked up the same way — it needs its
+// own LPM trie, keyed identically to blocked_cidr_v4/v6 (direction packed
+// into data[0], address in the remaining bytes), checked only when the
+// blocking reason is REASON_CIDR. Side-maps, same discipline as the
+// exact-IP pair above: blocked_cidr_v4/v6's pinned value type is untouched.
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 8192);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm4_key);
+    __type(value, __u8);
+} syndrop_cidr_v4 SEC(".maps");
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 8192);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm6_key);
+    __type(value, __u8);
+} syndrop_cidr_v6 SEC(".maps");
+
 struct policy_drop_key {
     __u8 family;
     __u8 protocol;
@@ -1111,6 +1135,16 @@ static __always_inline int netpol_denies4(__u64 cgroup_id, __u8 direction, __u32
 // deny-list — see docs/native-netpol.md for the safety tradeoff this
 // represents; it is not a bug that a v2 allow can un-block an address an
 // operator staged in the flat deny-list.
+//
+// Three-step fallback, cheapest/most-specific first: (1) exact peer + exact
+// port, (2) exact peer + any-port, (3) any-peer (peer=0) + exact port — a
+// port-only rule, mirroring the v1 flat engine's allowed_ports two-step
+// fallback (allowed_port()) into this hash-keyed v2 engine. peer=0 is safe
+// as a wildcard sentinel: 0.0.0.0 is never a real peer address on this
+// path. There is no "any-peer + any-port" fourth step — a rule with
+// neither an exact peer nor an exact port has no real discriminator and is
+// rejected at the API layer (see ebpfNetPolRuleAdd), so no such row can
+// exist in netpol_rules4 to look up.
 static __always_inline int netpol_v2_lookup4(__u64 cgroup_id, __u8 direction, __u32 peer, __u8 proto, __u16 dport, __u8 *verdict)
 {
     __u32 z = 0; __u32 *en = bpf_map_lookup_elem(&netpol_v2_enabled, &z);
@@ -1119,6 +1153,10 @@ static __always_inline int netpol_v2_lookup4(__u64 cgroup_id, __u8 direction, __
     __u8 *v = bpf_map_lookup_elem(&netpol_rules4, &k);
     if (!v) {
         k.port = 0; /* any-port rule */
+        v = bpf_map_lookup_elem(&netpol_rules4, &k);
+    }
+    if (!v) {
+        k.peer = 0; k.port = dport; /* port-only rule: any peer, exact port */
         v = bpf_map_lookup_elem(&netpol_rules4, &k);
         if (!v) return 0;
     }
@@ -1653,6 +1691,28 @@ static __always_inline int syndrop_allows6(const __u8 addr[16], __u8 direction)
     return bpf_map_lookup_elem(&syndrop_v6, &k) != 0;
 }
 
+// CIDR counterparts of syndrop_allows4/6 above — same call-site discipline
+// (only ever reached from inside the existing rare blocked==1 branch, one
+// extra LPM lookup gated behind cheap comparisons the caller already
+// made). Key packing matches blocked_cidr4/6 exactly (direction in
+// data[0], address afterward, full-width prefixlen for an exact-address
+// query against whatever narrower CIDR prefixes are actually stored) so a
+// syndrop_cidr_v4/v6 entry is looked up the same way it was inserted.
+static __always_inline int syndrop_cidr_allows4(__u8 direction, __u32 addr)
+{
+    struct lpm4_key k = {.prefixlen = 40};
+    k.data[0] = direction;
+    __builtin_memcpy(&k.data[1], &addr, 4);
+    return bpf_map_lookup_elem(&syndrop_cidr_v4, &k) != 0;
+}
+static __always_inline int syndrop_cidr_allows6(__u8 direction, const __u8 addr[16])
+{
+    struct lpm6_key k = {.prefixlen = 136};
+    k.data[0] = direction;
+    __builtin_memcpy(&k.data[1], addr, 16);
+    return bpf_map_lookup_elem(&syndrop_cidr_v6, &k) != 0;
+}
+
 static __always_inline int decide4(__u8 direction, __u32 addr, __u8 proto, __u16 dport, __u8 *reason, int apply_rate, __u64 cgroup_id, __u32 len)
 {
     if (!enforcing() || !scope_allows(cgroup_id)) return 0;
@@ -1895,7 +1955,9 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
         if (!established) {
             blocked=decide4(direction,peer,proto,policy_port,&reason,1,cgroup_id,len);
         }
-        if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && !syn_new && syndrop_allows4(peer,direction)) blocked=0;
+        if (blocked && proto==IPPROTO_TCP && !syn_new &&
+            ((reason==REASON_EXACT && syndrop_allows4(peer,direction)) ||
+             (reason==REASON_CIDR  && syndrop_cidr_allows4(direction,peer)))) blocked=0;
         update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
         update_iface_flow(ifindex,FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
@@ -1931,7 +1993,9 @@ static __always_inline int handle_v4(struct __sk_buff *skb, __u8 direction, __u8
             if (!blocked && netpol_v2_default_deny4(cgroup_id)) { blocked=1; reason=REASON_NETPOL_DEFAULT_DENY; }
         }
     }
-    if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && !syn_new && syndrop_allows4(peer,direction)) blocked=0;
+    if (blocked && proto==IPPROTO_TCP && !syn_new &&
+        ((reason==REASON_EXACT && syndrop_allows4(peer,direction)) ||
+         (reason==REASON_CIDR  && syndrop_cidr_allows4(direction,peer)))) blocked=0;
     update_flow(FAMILY_V4,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V4,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);
@@ -2008,7 +2072,9 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
         int established = (l4_ok && !syn_new && ct_hit(&sc->ct));
         __u8 reason=0; int blocked=0;
         if (!established) blocked=decide6(direction,peer,proto,dport,&reason,1,cgroup_id,len);
-        if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && l4_ok && !syn_new && syndrop_allows6(peer,direction)) blocked=0;
+        if (blocked && proto==IPPROTO_TCP && l4_ok && !syn_new &&
+            ((reason==REASON_EXACT && syndrop_allows6(peer,direction)) ||
+             (reason==REASON_CIDR  && syndrop_cidr_allows6(direction,peer)))) blocked=0;
         update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
         update_iface_flow(ifindex,FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked);
         if (blocked) {
@@ -2034,7 +2100,9 @@ static __always_inline int handle_v6(struct __sk_buff *skb, __u8 direction, __u8
     __u8 reason=0;
     int blocked=0;
     if (!established) blocked=decide6(direction,peer,proto,policy_port,&reason,1,cgroup_id,len);
-    if (blocked && reason==REASON_EXACT && proto==IPPROTO_TCP && l4_ok && !syn_new && syndrop_allows6(peer,direction)) blocked=0;
+    if (blocked && proto==IPPROTO_TCP && l4_ok && !syn_new &&
+        ((reason==REASON_EXACT && syndrop_allows6(peer,direction)) ||
+         (reason==REASON_CIDR  && syndrop_cidr_allows6(direction,peer)))) blocked=0;
     update_flow(FAMILY_V6,direction,hook,proto,sport,dport,sc->src,sc->dst,len,blocked,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_udp_flow_health(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,len,cgroup_id);
     if (proto==IPPROTO_UDP && !blocked) update_quic_observed(FAMILY_V6,direction,sport,dport,sc->src,sc->dst,payload,data_end,cgroup_id);

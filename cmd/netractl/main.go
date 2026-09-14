@@ -86,6 +86,7 @@ func usage() {
   ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
   ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
   ebpf syn-drop add IP egress|ingress | syn-drop del IP egress|ingress
+  ebpf syn-drop-cidr add CIDR egress|ingress | syn-drop-cidr del CIDR egress|ingress
   ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
   ebpf allow-port add TCP|UDP|ANY PORT [direction] | allow-port del ...
   ebpf uid add UID | uid del UID
@@ -99,7 +100,7 @@ func usage() {
   ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
   ebpf netpol enable | disable
   ebpf netpol v2 enable | disable
-  ebpf netpol rule add --peer IP --action allow|deny [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--port N] [--protocol P] [--direction D]
+  ebpf netpol rule add (--peer IP | --port N) --action allow|deny [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--port N] [--protocol P] [--direction D]
   ebpf netpol rule del ID
   ebpf netpol default-deny plan [--namespace NS] ... [--disable] [--allow-no-rules]
   ebpf netpol default-deny set --token TOKEN [--confirm-risk RISK] [--namespace NS] ... [--disable] [--lease DURATION]
@@ -717,7 +718,7 @@ func ebpf() error {
 			}
 		case "rule":
 			if len(os.Args) < 5 {
-				return fmt.Errorf("netpol rule add --peer IP --action allow|deny [selector flags] [--port N] [--protocol P] [--direction D] | netpol rule del ID")
+				return fmt.Errorf("netpol rule add (--peer IP | --port N) --action allow|deny [selector flags] [--port N] [--protocol P] [--direction D] | netpol rule del ID")
 			}
 			switch os.Args[4] {
 			case "del":
@@ -992,6 +993,17 @@ func ebpf() error {
 		}
 		if os.Args[3] == "del" {
 			return request("POST", "/api/v1/ebpf/syn-drop/delete", b)
+		}
+	case "syn-drop-cidr":
+		if len(os.Args) < 6 {
+			return fmt.Errorf("syn-drop-cidr add|del CIDR egress|ingress")
+		}
+		b, _ := json.Marshal(map[string]any{"cidr": os.Args[4], "direction": os.Args[5]})
+		if os.Args[3] == "add" {
+			return request("POST", "/api/v1/ebpf/syn-drop-cidr", b)
+		}
+		if os.Args[3] == "del" {
+			return request("POST", "/api/v1/ebpf/syn-drop-cidr/delete", b)
 		}
 	case "port":
 		if len(os.Args) < 6 {

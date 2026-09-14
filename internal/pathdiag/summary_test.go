@@ -26,3 +26,27 @@ func TestStaleIgnored(t *testing.T) {
 		t.Fatal("stale agent should be ignored")
 	}
 }
+
+func TestBuildMergesEdgeIntelAcrossNodes(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{EdgeIntel: &models.EdgeIntelSummary{
+		Handshake: []models.EdgeIntelBucket{{Count: 2, TotalNS: 200, MaxNS: 150}},
+		Counts:    map[string]uint64{"syn": 5, "rst": 1},
+	}}}
+	b := models.AgentStatus{AgentReport: models.AgentReport{EdgeIntel: &models.EdgeIntelSummary{
+		Handshake: []models.EdgeIntelBucket{{Count: 3, TotalNS: 300, MaxNS: 200}},
+		Counts:    map[string]uint64{"syn": 4, "fin": 2},
+	}}}
+	// A node without edge intel attached (nil) must contribute nothing,
+	// not panic or zero out the totals.
+	c := models.AgentStatus{AgentReport: models.AgentReport{}}
+	// A stale node's edge intel must not be counted either.
+	stale := models.AgentStatus{Stale: true, AgentReport: models.AgentReport{EdgeIntel: &models.EdgeIntelSummary{Counts: map[string]uint64{"syn": 1000}}}}
+
+	got := Build([]models.AgentStatus{a, b, c, stale}, 10)
+	if len(got.EdgeIntel.Handshake) != 1 || got.EdgeIntel.Handshake[0].Count != 5 || got.EdgeIntel.Handshake[0].TotalNS != 500 || got.EdgeIntel.Handshake[0].MaxNS != 200 {
+		t.Fatalf("handshake histogram not merged correctly: %#v", got.EdgeIntel.Handshake)
+	}
+	if got.EdgeIntel.Counts["syn"] != 9 || got.EdgeIntel.Counts["rst"] != 1 || got.EdgeIntel.Counts["fin"] != 2 {
+		t.Fatalf("counts not merged correctly: %#v", got.EdgeIntel.Counts)
+	}
+}

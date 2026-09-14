@@ -4,6 +4,20 @@ import ExplainFinding from '../components/ExplainFinding';
 
 const ms = (us:number|undefined) => ((us||0)/1000).toFixed((us||0)>=100000?0:1);
 const pct = (n:number,d:number) => d ? `${(n*100/d).toFixed(0)}%` : '0%';
+const nsToMs = (ns:number|undefined) => ((ns||0)/1e6).toFixed((ns||0)>=1e8?0:1);
+
+// Summarizes edge-intel bucket arrays ({count,totalNs,maxNs}[]) into a
+// single count/avg/max view — the buckets themselves are a log2-us
+// histogram, not something worth rendering bucket-by-bucket here.
+function edgeBucketSummary(buckets: any[] | undefined) {
+  let count = 0, totalNs = 0, maxNs = 0;
+  for (const b of buckets || []) {
+    count += b.count || 0;
+    totalNs += b.totalNs || 0;
+    if ((b.maxNs || 0) > maxNs) maxNs = b.maxNs || 0;
+  }
+  return { count, avgNs: count ? totalNs / count : 0, maxNs };
+}
 
 export default function Path(){
   const [data,setData]=useState<any>(); const [err,setErr]=useState('');
@@ -11,6 +25,9 @@ export default function Path(){
   useEffect(()=>{load();const t=setInterval(load,5000);return()=>clearInterval(t)},[]);
   const s=data?.summary||{}; const anomalies=s.anomalies||[];
   const pressure=useMemo(()=>data?.pressure||[],[data]); const connect=useMemo(()=>data?.connect||[],[data]);
+  const edge=data?.edgeIntel||{}; const edgeCounts=edge.counts||{};
+  const edgeHandshake=useMemo(()=>edgeBucketSummary(edge.handshake),[edge]);
+  const edgeRTT=useMemo(()=>edgeBucketSummary(edge.rtt),[edge]);
   return <div className="grid">
     {err&&<section className="card span3"><p className="warning">{err}</p></section>}
     <section className="card span3"><p className="eyebrow">PATH PULSE</p><div className="metrics">
@@ -44,6 +61,23 @@ export default function Path(){
           const who = c.namespace?`${c.namespace}/${c.pod}`:`cgroup ${c.cgroupId||0}`;
           return <div className="datarow obs" key={i}><span className="truncate" title={who} aria-label={who}>{who}</span><span>{c.remoteIp}:{c.remotePort}</span><span>{c.established}</span><span>{ms(c.established?c.totalLatencyUs/c.established:0)} ms</span><span>{ms(c.maxLatencyUs)} ms</span></div>;
         })}
+      </div>}
+    </section>
+    <section className="card span3">
+      <p className="eyebrow">EDGE TCP INTEL</p><h3>Edge-observed handshake &amp; RTT (TCX, pre-NAT-visible)</h3>
+      <p>Distinct from the socket-observed TCP pressure/connect data above (sockops, post-NAT): this comes from a passive TCX observer that also sees forwarded/NAT'd flows the local socket layer never attaches to. Off unless the agent's edge-intel BPF object attached (<code>NETRA_EDGE_INTEL</code>).</p>
+      {!data?.edgeIntel && <p className="empty-state">No edge-intel data reported — likely off or unattached on every node.</p>}
+      {data?.edgeIntel && <div className="metrics">
+        <div><b>{edgeHandshake.count}</b><span>handshakes timed</span></div>
+        <div><b>{nsToMs(edgeHandshake.avgNs)} ms</b><span>avg handshake</span></div>
+        <div><b>{nsToMs(edgeHandshake.maxNs)} ms</b><span>max handshake</span></div>
+        <div><b>{edgeRTT.count}</b><span>RTT samples</span></div>
+        <div><b>{nsToMs(edgeRTT.avgNs)} ms</b><span>avg RTT</span></div>
+        <div><b>{nsToMs(edgeRTT.maxNs)} ms</b><span>max RTT</span></div>
+        <div><b>{edgeCounts.retransmit||0}</b><span>retransmits</span></div>
+        <div><b>{edgeCounts.rst||0}</b><span>RSTs</span></div>
+        <div><b>{edgeCounts.fin||0}</b><span>FINs</span></div>
+        <div><b>{edgeCounts.flowMiss||0}</b><span>flow-table misses</span></div>
       </div>}
     </section>
   </div>

@@ -112,3 +112,4 @@ jobs:
     - name: Guard BPF map struct ABI layouts Go decodes by raw byte offset
       run: cc -std=c11 -O2 -Wall -Wextra -Werror bpf/tests/abi_layout_test.c -o /tmp/netra-abi-layout-test && /tmp/netra-abi-layout-test
     - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tc.c -o /tmp/netra_tc.o
+    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_edge_intel.c -o /tmp/netra_edge_intel.o

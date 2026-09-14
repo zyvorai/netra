@@ -1,13 +1,15 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
 // SPDX-License-Identifier: Apache-2.0
 
-// Package chatops is Slack-only in this first version (Slack's HMAC-over-body
-// signing and Microsoft Teams' bot-framework JWT auth are different enough
-// that forcing a shared Verify interface across both from day one risks a
-// poor abstraction; Teams is a clean, separable follow-up once this shape is
-// proven). Every command is a thin HTTP client of netrad's own /api/v1/*
-// endpoints — the same pattern cmd/netractl and cmd/netra-mcp already use —
-// never importing internal/api handler internals directly.
+// Package chatops supports Slack and Microsoft Teams as inbound ChatOps
+// providers. Slack's HMAC-over-body signing (signature.go) and Teams'
+// bot-framework JWT auth (teams_signature.go) are different enough shapes
+// that each gets its own inbound verification and HTTP handler; both funnel
+// into the same provider-agnostic Dispatch/Client below rather than forking
+// command logic per provider. Every command is a thin HTTP client of
+// netrad's own /api/v1/* endpoints — the same pattern cmd/netractl and
+// cmd/netra-mcp already use — never importing internal/api handler
+// internals directly.
 package chatops
 
 import (
@@ -48,9 +50,9 @@ func NewClient(targetURL, apiKey string) *Client {
 }
 
 // Do performs one call against netrad's own API, setting X-Netra-Actor to
-// actor (always "chatops:<slack-user-id>") so it lands in the exact same
-// audit trail every other mutation already does, with no new audit
-// mechanism needed here at all.
+// actor (e.g. "chatops:<slack-user-id>" or "chatops-teams:<teams-user-id>")
+// so it lands in the exact same audit trail every other mutation already
+// does, with no new audit mechanism needed here at all.
 func (c *Client) Do(ctx context.Context, method, path string, body []byte, actor string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
 	if err != nil {

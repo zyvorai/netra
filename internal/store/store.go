@@ -403,6 +403,59 @@ func (s *Store) DelSynDrop(entry models.EBPFSynDropEntry, actor string) (models.
 	return cloneConfig(s.config), nil
 }
 
+// AddSynDropCIDR/DelSynDropCIDR are the CIDR counterpart of
+// AddSynDrop/DelSynDrop above — same equality-comparison, no-generated-ID,
+// outside-the-generic-ruleIndex shape, for EBPFSynDropCIDR entries.
+func (s *Store) AddSynDropCIDR(entry models.EBPFSynDropCIDR, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.config.SynDropCIDR {
+		if x == entry {
+			return cloneConfig(s.config), nil
+		}
+	}
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	s.config.SynDropCIDR = append(s.config.SynDropCIDR, entry)
+	sort.Slice(s.config.SynDropCIDR, func(i, j int) bool {
+		if s.config.SynDropCIDR[i].Direction == s.config.SynDropCIDR[j].Direction {
+			return s.config.SynDropCIDR[i].CIDR < s.config.SynDropCIDR[j].CIDR
+		}
+		return s.config.SynDropCIDR[i].Direction < s.config.SynDropCIDR[j].Direction
+	})
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.syndropcidr.add", Target: entry.CIDR, Details: map[string]any{"direction": entry.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
+func (s *Store) DelSynDropCIDR(entry models.EBPFSynDropCIDR, actor string) (models.EBPFFastPathConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	before, auditLen := cloneConfig(s.config), len(s.audit)
+	out := make([]models.EBPFSynDropCIDR, 0, len(s.config.SynDropCIDR))
+	for _, x := range s.config.SynDropCIDR {
+		if x != entry {
+			out = append(out, x)
+		}
+	}
+	if len(out) == len(s.config.SynDropCIDR) {
+		return cloneConfig(s.config), nil
+	}
+	s.config.SynDropCIDR = out
+	s.config.Revision++
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "ebpf.syndropcidr.delete", Target: entry.CIDR, Details: map[string]any{"direction": entry.Direction}})
+	if err := s.persistLocked(); err != nil {
+		s.config = before
+		s.audit = s.audit[:auditLen]
+		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
+	}
+	return cloneConfig(s.config), nil
+}
+
 func (s *Store) AddCIDR(rule models.EBPFCIDRRule, actor string) (models.EBPFFastPathConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

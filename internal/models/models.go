@@ -40,6 +40,17 @@ type EBPFSynDropEntry struct {
 	Direction string `json:"direction"` // egress or ingress
 }
 
+// EBPFSynDropCIDR is the CIDR counterpart of EBPFSynDropEntry, flagging an
+// existing CIDR deny entry (BlockedCIDRs) so only a genuinely new TCP
+// connection attempt is dropped for addresses in that range+direction —
+// see docs/syn-drop.md. Same per-direction restriction as EBPFSynDropEntry
+// (never "both"): the underlying kernel maps (syndrop_cidr_v4/v6) are
+// inherently per-direction LPM tries.
+type EBPFSynDropCIDR struct {
+	CIDR      string `json:"cidr"`
+	Direction string `json:"direction"` // egress or ingress
+}
+
 type EBPFPortRule struct {
 	Protocol  string `json:"protocol"` // TCP, UDP, ANY
 	Port      uint16 `json:"port"`
@@ -117,6 +128,9 @@ type EBPFFastPathConfig struct {
 	// SynDrop lists exact-IP deny entries flagged for SYN-drop mode — see
 	// EBPFSynDropEntry.
 	SynDrop []EBPFSynDropEntry `json:"synDrop,omitempty"`
+	// SynDropCIDR lists CIDR deny entries flagged for SYN-drop mode — see
+	// EBPFSynDropCIDR.
+	SynDropCIDR []EBPFSynDropCIDR `json:"synDropCidr,omitempty"`
 	// DeniedCapabilities names Linux capabilities (see CapabilityBit for
 	// the accepted set) that, if effective for the process making a new
 	// socket() call, cause that connection attempt to be denied — an
@@ -381,6 +395,30 @@ type HistogramSnapshot struct {
 	Count            uint64    `json:"count"`
 }
 
+// EdgeIntelBucket is one log2-of-microseconds histogram bucket from
+// edge_tcp_hist (bpf/netra_edge_intel.c) — raw, non-cumulative, unlike
+// HistogramSnapshot's cumulative-count shape, since it mirrors exactly
+// what the kernel map stores per bucket.
+type EdgeIntelBucket struct {
+	Count   uint64 `json:"count"`
+	TotalNS uint64 `json:"totalNs"`
+	MaxNS   uint64 `json:"maxNs"`
+}
+
+// EdgeIntelSummary is one node's edge-TCP-intel snapshot — see
+// docs/edge-tcp-intel.md. Deliberately "edge-observed" (TCX,
+// pre-NAT-resolution-visible), distinct from the socket-observed RTT/
+// handshake data TCPHealth/TCPSignals already carry from sockops.
+type EdgeIntelSummary struct {
+	// Handshake/RTT are indexed by bucket (0-24, edge_bucket_for's range);
+	// a missing index means zero samples in that bucket, not necessarily
+	// present as an explicit zero-valued entry.
+	Handshake []EdgeIntelBucket `json:"handshake,omitempty"`
+	RTT       []EdgeIntelBucket `json:"rtt,omitempty"`
+	// Counts keys: syn, established, retransmit, rst, fin, flowMiss.
+	Counts map[string]uint64 `json:"counts,omitempty"`
+}
+
 type NetworkHostCounters struct {
 	ListenOverflows uint64 `json:"listenOverflows"`
 	ListenDrops     uint64 `json:"listenDrops"`
@@ -521,9 +559,10 @@ type PathDiagnosticsSummary struct {
 }
 
 type PathDiagnosticsResponse struct {
-	Summary  PathDiagnosticsSummary `json:"summary"`
-	Pressure []TCPPressureStat      `json:"pressure"`
-	Connect  []ConnectLatencyStat   `json:"connect"`
+	Summary   PathDiagnosticsSummary `json:"summary"`
+	Pressure  []TCPPressureStat      `json:"pressure"`
+	Connect   []ConnectLatencyStat   `json:"connect"`
+	EdgeIntel EdgeIntelSummary       `json:"edgeIntel"`
 }
 
 type KernelDropStat struct {
@@ -767,12 +806,15 @@ type NetPolPeerDeny struct {
 // NetPolRule is a v2 allow/deny entry, workload-targeted via Selector
 // (resolved to cgroup IDs agent-side, per node — see workload.Resolve)
 // rather than a raw CgroupID like the legacy NetPolPeerDeny above. Exact
-// peer IPv4 only in this phase; CIDR-shaped peers and IPv6 are explicit
-// follow-ups (see docs/native-netpol.md).
+// peer IPv4 or port-only (empty PeerIPv4 + exact Port) in this phase;
+// CIDR-shaped peers and IPv6 are explicit follow-ups (see
+// docs/native-netpol.md). A rule needs at least one exact discriminator —
+// PeerIPv4 and Port can't both be unset — enforced by ebpfNetPolRuleAdd,
+// not here.
 type NetPolRule struct {
 	ID        string            `json:"id"`
 	Selector  EBPFWorkloadScope `json:"selector"`
-	PeerIPv4  string            `json:"peerIpv4"`
+	PeerIPv4  string            `json:"peerIpv4,omitempty"`
 	Port      uint16            `json:"port,omitempty"`
 	Protocol  string            `json:"protocol,omitempty"`  // TCP|UDP|ANY
 	Direction string            `json:"direction,omitempty"` // ingress|egress|both
@@ -873,7 +915,12 @@ type AgentReport struct {
 	ProcessMeta []ProcessMetaStat       `json:"processMeta,omitempty"`
 	Programs    []BPFProgramStat        `json:"programs,omitempty"`
 	Histograms  *NetworkHistogramReport `json:"histograms,omitempty"`
-	CapChanges  []CapChangeEvent        `json:"capChanges,omitempty"`
+	// EdgeIntel is nil when the edge-TCP-intel BPF object never attached
+	// (NETRA_EDGE_INTEL=off, or attach failed in auto mode) — distinct
+	// from an attached-but-quiet node, which reports a non-nil summary
+	// with empty/zero fields.
+	EdgeIntel  *EdgeIntelSummary `json:"edgeIntel,omitempty"`
+	CapChanges []CapChangeEvent  `json:"capChanges,omitempty"`
 	// AgentStartedAt is set once at agent process boot (New()), not per
 	// report. Used to detect a recent restart, which resets in-memory
 	// diffing state like watchCapChanges' prevCaps — a real blind-spot

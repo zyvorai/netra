@@ -15,12 +15,13 @@ func Build(agents []models.AgentStatus, topN int) models.PathDiagnosticsResponse
 	if topN <= 0 {
 		topN = 50
 	}
-	out := models.PathDiagnosticsResponse{}
+	out := models.PathDiagnosticsResponse{EdgeIntel: models.EdgeIntelSummary{Counts: map[string]uint64{}}}
 	var connectLatencyTotal uint64
 	for _, a := range agents {
 		if a.Stale {
 			continue
 		}
+		mergeEdgeIntel(&out.EdgeIntel, a.EdgeIntel)
 		for _, p := range a.TCPPressure {
 			out.Pressure = append(out.Pressure, p)
 			out.Summary.PacketsOut += p.PacketsOut
@@ -59,6 +60,34 @@ func Build(agents []models.AgentStatus, topN int) models.PathDiagnosticsResponse
 		out.Connect = out.Connect[:topN]
 	}
 	return out
+}
+
+// mergeEdgeIntel sums one node's edge-TCP-intel report into the running
+// cluster-wide total. src is nil for a node edge intel never attached on
+// (NETRA_EDGE_INTEL=off, or auto-mode attach failure) — that node simply
+// contributes nothing, same as a stale node being skipped by the caller.
+func mergeEdgeIntel(dst *models.EdgeIntelSummary, src *models.EdgeIntelSummary) {
+	if src == nil {
+		return
+	}
+	mergeEdgeIntelBuckets(&dst.Handshake, src.Handshake)
+	mergeEdgeIntelBuckets(&dst.RTT, src.RTT)
+	for k, v := range src.Counts {
+		dst.Counts[k] += v
+	}
+}
+
+func mergeEdgeIntelBuckets(dst *[]models.EdgeIntelBucket, src []models.EdgeIntelBucket) {
+	for i, b := range src {
+		for len(*dst) <= i {
+			*dst = append(*dst, models.EdgeIntelBucket{})
+		}
+		(*dst)[i].Count += b.Count
+		(*dst)[i].TotalNS += b.TotalNS
+		if b.MaxNS > (*dst)[i].MaxNS {
+			(*dst)[i].MaxNS = b.MaxNS
+		}
+	}
 }
 
 func avgConnect(c models.ConnectLatencyStat) uint64 {

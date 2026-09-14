@@ -15,15 +15,18 @@ it.
 
 ## Scope
 
-- **Exact-IP deny only.** CIDR-matched deny is not covered. The original
-  plan for this feature described a single field on "exact-IP/CIDR deny
-  rules," but CIDR matching is a longest-prefix-match lookup that doesn't
-  naturally expose which specific entry matched (LPM tries return a
-  boolean-shaped value, not "which rule"), so extending it would need
-  either a second LPM trie mirroring the deny one, or a different design
-  entirely — deferred out of this pass to keep the change to the hot
-  `handle_v4`/`handle_v6` path as small as possible. Exact-IP is the
-  clearly-specified, unambiguous case and the one implemented here.
+- **Exact-IP and CIDR deny are both covered.** CIDR-matched deny
+  (`REASON_CIDR`) is flagged via a second LPM trie, `syndrop_cidr_v4`/
+  `syndrop_cidr_v6`, keyed identically to `blocked_cidr_v4`/`blocked_cidr_v6`
+  (direction packed into the same byte, prefixlen covering direction +
+  address) — since the deny LPM trie's own lookup returns only a boolean
+  match with no rule identity, the SYN-drop flag can't share that map and
+  needs its own trie mirroring the same key shape. Use
+  `netractl ebpf syn-drop-cidr add/del <cidr> <direction>`, the
+  `POST /api/v1/ebpf/syn-drop-cidr` / `POST /api/v1/ebpf/syn-drop-cidr/delete`
+  endpoints (matching the exact-IP pair's add/`…/delete` shape, not a
+  `DELETE`-method route), or the Firewall page's SYN-DROP MODE card's
+  second row.
 - **TCP only.** UDP and other protocols have no "new connection" concept;
   a SYN-drop flag has no effect on non-TCP traffic — the deny rule behaves
   exactly as before for it.
@@ -32,8 +35,9 @@ it.
   (egress) or `blockedIngressIPv4`/`blockedIngressIPv6` (ingress) is
   inert — it doesn't create a deny rule on its own. Add the deny entry
   first (`netractl ebpf deny add`), then flag it.
-- Direction is exactly `egress` or `ingress` — never `both`, unlike CIDR
-  rules. The underlying kernel maps (`syndrop_v4`/`syndrop_v6`) are
+- Direction is exactly `egress` or `ingress` — never `both`, unlike the
+  deny CIDR rules themselves. The underlying kernel maps
+  (`syndrop_v4`/`syndrop_v6`/`syndrop_cidr_v4`/`syndrop_cidr_v6`) are all
   inherently per-direction; add two entries if you need both.
 
 ## Usage
@@ -77,10 +81,21 @@ Mitigations, matching the plan's own requirement:
   approach outlined above, since a side-map avoids resizing a pinned
   value type that upgrade-in-place agents already depend on.
 
-**This has not been verified against a real kernel verifier.** No
-Linux/glibc toolchain is available in this development environment to
-compile the full BPF object, and the primary agent-enabled host
-(`212.8.248.187`) remains blocked by an unrelated deploy-path collision
-from earlier work on this project. CI compiles the object on every push;
-a genuine load-and-traffic test on a real kernel is still outstanding —
-see the Validation section of `CHANGELOG.md`'s entry for this feature.
+**Exact-IP SYN-drop is live-verified.** It was deployed and confirmed
+end-to-end against a real Kubernetes API server and kernel (see project
+history around 0.27.34): the map loads under `/sys/fs/bpf/netra/`, a
+flagged exact-IP deny rule drops new connection attempts while an
+already-open connection through the same address keeps flowing, and
+reverting the flag restores full-drop behavior.
+
+**The CIDR extension (`syndrop_cidr_v4`/`syndrop_cidr_v6`) reuses an
+already-proven LPM_TRIE map type** (`blocked_cidr_v4`/`blocked_cidr_v6`
+already load and enforce correctly on real kernels) and adds one more
+`||` disjunct to the existing bounded `blocked==1` conditional — no new
+branch shape, no ABI change. It has not yet been separately load-tested
+on real hardware; that check is the same shape as the exact-IP
+verification above (CIDR deny rule as a control, then the SYN-drop-CIDR
+flag, confirming new connections are refused while a pre-existing
+connection through the same CIDR keeps flowing), run on two different
+live kernels to catch any instruction-count/complexity-budget surprise
+specific to one kernel version.

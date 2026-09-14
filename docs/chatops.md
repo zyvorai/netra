@@ -1,10 +1,10 @@
-# Slack ChatOps (`internal/chatops`)
+# ChatOps (`internal/chatops`)
 
-Optional, off-by-default Slack slash-command and interactive-button integration for `netrad`. Slack-only in v1 — see "Why Slack only" below. Read commands (`status`, `health`, `audit`) reply immediately; the one mutating command (`mode`) always requires a second Slack button-click confirmation before it executes anything, mirroring the web UI's own `confirm()` dialogs.
+Optional, off-by-default ChatOps integration for `netrad`, supporting both Slack (slash commands + interactive buttons) and Microsoft Teams (bot messages). Read commands (`status`, `health`, `audit`) reply immediately; the one mutating command (`mode`) always requires a second confirmation step before it executes anything, mirroring the web UI's own `confirm()` dialogs. See below for Slack; Teams is documented in [`docs/chatops-teams.md`](chatops-teams.md).
 
-## Why Slack only
+## Why two separate providers, one shared core
 
-Slack signs inbound requests with an HMAC over the raw request body; Microsoft Teams authenticates with bot-framework JWTs — different enough shapes that forcing both behind one `Verify` interface from day one risked a poor abstraction. Teams support is a clean, separable follow-up once this shape is proven; it is not implemented here.
+Slack signs inbound requests with an HMAC over the raw request body; Microsoft Teams authenticates with bot-framework JWTs — different enough shapes that forcing both behind one `Verify` interface from day one risked a poor abstraction. Each provider gets its own inbound verification and HTTP handler (`signature.go`/`handler.go` for Slack, `teams_signature.go`/`teams_handler.go` for Teams), but both call the exact same `Dispatch`/`Client`/`pendingAction` command logic in `commands.go` and `client.go` — nothing about the actual commands is duplicated between providers.
 
 ## Enabling it
 
@@ -65,3 +65,5 @@ The `enforce` mode gets Slack's "danger" button style as a visual cue; every oth
 `internal/chatops`'s unit tests (20 total) cover: HMAC signature verification (valid, wrong secret, tampered body, expired/future timestamp outside the replay window, missing secret, malformed timestamp), command dispatch (help, status call-through with the right auth header, unknown command, `mode` disabled without `allowMutations`, `mode` never calling the controller before confirmation, invalid mode rejection), the pending-action encode/decode round trip and its rejection of malformed input, and the HTTP handler end to end (bad signature → 401, slash command replies, confirmation blocks returned instead of immediate execution, a confirmed interaction executing and correctly tagging the actor, an unrecognized interaction, and `NewHandler` panicking without a signing secret). `internal/api`'s route test confirms `/chatops/slack` is entirely absent (404) unless a signing secret configures the handler, and returns 401 from `VerifySlackSignature` — not from the bearer-token check every other route uses — when configured but unsigned.
 
 **Not yet done**: a live Slack workspace end-to-end check (registering a real Slack app against a running `netrad` and clicking through an actual slash command and confirmation). Unit tests cover the handler's logic against the documented Slack request/payload shapes, but nothing in this repository exercises a real Slack app's exact request framing.
+
+For the Teams provider's validation status, see [`docs/chatops-teams.md`](chatops-teams.md#validation).

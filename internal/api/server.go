@@ -43,21 +43,22 @@ import (
 )
 
 type Server struct {
-	log              *slog.Logger
-	kube             *kube.Client
-	hubble           *hubble.Client
-	store            *store.Store
-	gitops           *gitops.Reconciler
-	chatopsHandler   http.Handler
-	apiKey           string
-	agentKey         string
-	chatopsAPIKey    string
-	webDir           string
-	agentStaleAfter  time.Duration
-	requirePreflight bool
-	ciliumEnabled    bool
-	consoleEnabled   bool
-	metricsData      *telemetry
+	log                 *slog.Logger
+	kube                *kube.Client
+	hubble              *hubble.Client
+	store               *store.Store
+	gitops              *gitops.Reconciler
+	chatopsHandler      http.Handler
+	chatopsTeamsHandler http.Handler
+	apiKey              string
+	agentKey            string
+	chatopsAPIKey       string
+	webDir              string
+	agentStaleAfter     time.Duration
+	requirePreflight    bool
+	ciliumEnabled       bool
+	consoleEnabled      bool
+	metricsData         *telemetry
 }
 
 func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *Server {
@@ -72,21 +73,37 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
 	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}}
 
-	// ChatOps is off unless NETRA_CHATOPS_SIGNING_SECRET is set — every
-	// command is a thin HTTP client of this same process's own /api/v1/*
-	// endpoints (a real loopback call, never importing handler internals
-	// directly), authenticated with its own dedicated key so a compromised
-	// Slack app credential can't be replayed as full operator access.
+	// ChatOps outbound trust is shared across every provider: every command
+	// is a thin HTTP client of this same process's own /api/v1/* endpoints
+	// (a real loopback call, never importing handler internals directly),
+	// authenticated with its own dedicated key so a compromised Slack/Teams
+	// app credential can't be replayed as full operator access.
+	s.chatopsAPIKey = os.Getenv("NETRA_CHATOPS_API_KEY")
+	chatopsTarget := strings.TrimSpace(os.Getenv("NETRA_CHATOPS_TARGET_URL"))
+	if chatopsTarget == "" {
+		chatopsTarget = "https://127.0.0.1:30870"
+	}
+	allowChatopsMutations := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CHATOPS_ALLOW_MUTATIONS")), "true")
+
+	// ChatOps (Slack) is off unless NETRA_CHATOPS_SIGNING_SECRET is set —
+	// inbound requests are verified with that secret, never Netra's own
+	// bearer token (Slack can't send it).
 	if secret := strings.TrimSpace(os.Getenv("NETRA_CHATOPS_SIGNING_SECRET")); secret != "" {
-		s.chatopsAPIKey = os.Getenv("NETRA_CHATOPS_API_KEY")
-		target := strings.TrimSpace(os.Getenv("NETRA_CHATOPS_TARGET_URL"))
-		if target == "" {
-			target = "https://127.0.0.1:30870"
-		}
 		s.chatopsHandler = chatops.NewHandler(chatops.Config{
 			SigningSecret:  secret,
-			AllowMutations: strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CHATOPS_ALLOW_MUTATIONS")), "true"),
-			Client:         chatops.NewClient(target, s.chatopsAPIKey),
+			AllowMutations: allowChatopsMutations,
+			Client:         chatops.NewClient(chatopsTarget, s.chatopsAPIKey),
+		})
+	}
+
+	// ChatOps (Microsoft Teams) is off unless NETRA_CHATOPS_TEAMS_APP_ID is
+	// set — inbound requests are verified as a Bot Framework JWT against
+	// that app ID instead of an HMAC secret (see teams_signature.go).
+	if appID := strings.TrimSpace(os.Getenv("NETRA_CHATOPS_TEAMS_APP_ID")); appID != "" {
+		s.chatopsTeamsHandler = chatops.NewTeamsHandler(chatops.TeamsConfig{
+			AppID:          appID,
+			AllowMutations: allowChatopsMutations,
+			Client:         chatops.NewClient(chatopsTarget, s.chatopsAPIKey),
 		})
 	}
 	return s
@@ -103,13 +120,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.47"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.51"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.47"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.51"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.47"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.51"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -118,6 +135,12 @@ func (s *Server) Handler() http.Handler {
 		// chatops.NewHandler). Still registered on this same mux, so
 		// ha.Gate's existing standby-503 behavior covers it for free.
 		mux.Handle("POST /chatops/slack", s.chatopsHandler)
+	}
+	if s.chatopsTeamsHandler != nil {
+		// Same reasoning as the Slack route above: outside s.auth(...)
+		// since Teams can't send our bearer token either, but on this same
+		// mux so ha.Gate's standby-503 behavior covers it too.
+		mux.Handle("POST /chatops/teams", s.chatopsTeamsHandler)
 	}
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
 	mux.Handle("GET /api/v1/policies", s.auth(s.cilium(http.HandlerFunc(s.listPolicies))))
@@ -160,6 +183,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/ebpf/cidr/delete", s.auth(http.HandlerFunc(s.ebpfCIDRDelete)))
 	mux.Handle("POST /api/v1/ebpf/syn-drop", s.auth(http.HandlerFunc(s.ebpfSynDropAdd)))
 	mux.Handle("POST /api/v1/ebpf/syn-drop/delete", s.auth(http.HandlerFunc(s.ebpfSynDropDelete)))
+	mux.Handle("POST /api/v1/ebpf/syn-drop-cidr", s.auth(http.HandlerFunc(s.ebpfSynDropCIDRAdd)))
+	mux.Handle("POST /api/v1/ebpf/syn-drop-cidr/delete", s.auth(http.HandlerFunc(s.ebpfSynDropCIDRDelete)))
 	mux.Handle("POST /api/v1/ebpf/allow-cidr", s.auth(http.HandlerFunc(s.ebpfAllowCIDRAdd)))
 	mux.Handle("POST /api/v1/ebpf/allow-cidr/delete", s.auth(http.HandlerFunc(s.ebpfAllowCIDRDelete)))
 	mux.Handle("POST /api/v1/ebpf/port", s.auth(http.HandlerFunc(s.ebpfPortAdd)))
@@ -332,7 +357,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.47", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.51", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -1223,6 +1248,42 @@ func (s *Server) ebpfSynDropMutate(w http.ResponseWriter, r *http.Request, del b
 	}
 	writeJSON(w, 200, cfg)
 }
+func (s *Server) ebpfSynDropCIDRAdd(w http.ResponseWriter, r *http.Request) {
+	s.ebpfSynDropCIDRMutate(w, r, false)
+}
+func (s *Server) ebpfSynDropCIDRDelete(w http.ResponseWriter, r *http.Request) {
+	s.ebpfSynDropCIDRMutate(w, r, true)
+}
+func (s *Server) ebpfSynDropCIDRMutate(w http.ResponseWriter, r *http.Request, del bool) {
+	var x models.EBPFSynDropCIDR
+	if err := decodeJSON(r, &x, 1<<12); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	p, err := netip.ParsePrefix(strings.TrimSpace(x.CIDR))
+	if err != nil {
+		errorJSON(w, 400, "syn-drop-cidr requires a valid IPv4 or IPv6 CIDR")
+		return
+	}
+	x.CIDR = p.Masked().String()
+	x.Direction = strings.ToLower(strings.TrimSpace(x.Direction))
+	if x.Direction != "egress" && x.Direction != "ingress" {
+		errorJSON(w, 400, "direction must be egress or ingress (not both — the kernel maps are inherently per-direction)")
+		return
+	}
+	var cfg models.EBPFFastPathConfig
+	if del {
+		cfg, err = s.store.DelSynDropCIDR(x, actor(r))
+	} else {
+		cfg, err = s.store.AddSynDropCIDR(x, actor(r))
+	}
+	if err != nil {
+		s.metricsData.statePersistErrors.Add(1)
+		errorJSON(w, http.StatusInsufficientStorage, "could not persist syn-drop-cidr entry: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, cfg)
+}
 func (s *Server) ebpfAllowCIDRAdd(w http.ResponseWriter, r *http.Request) {
 	s.ebpfAllowCIDRMutate(w, r, false)
 }
@@ -1767,12 +1828,24 @@ func (s *Server) ebpfNetPolRuleAdd(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, err.Error())
 		return
 	}
-	a, err := netip.ParseAddr(strings.TrimSpace(x.PeerIPv4))
-	if err != nil || !a.Is4() {
-		errorJSON(w, 400, "peerIpv4 must be an exact IPv4 address")
-		return
+	x.PeerIPv4 = strings.TrimSpace(x.PeerIPv4)
+	if x.PeerIPv4 == "" {
+		// Port-only allow-exception: any peer, exact port required — a
+		// rule with neither an exact peer nor an exact port has no real
+		// discriminator and is rejected here, not left to the BPF lookup
+		// (netpol_v2_lookup4 has no "any-peer + any-port" fallback step).
+		if x.Port == 0 {
+			errorJSON(w, 400, "peerIpv4 or port is required (port-only rules need an exact port)")
+			return
+		}
+	} else {
+		a, err := netip.ParseAddr(x.PeerIPv4)
+		if err != nil || !a.Is4() {
+			errorJSON(w, 400, "peerIpv4 must be an exact IPv4 address, or empty for a port-only rule")
+			return
+		}
+		x.PeerIPv4 = a.String()
 	}
-	x.PeerIPv4 = a.String()
 	var ok bool
 	x.Protocol, ok = normalizeProtocol(x.Protocol)
 	if !ok {

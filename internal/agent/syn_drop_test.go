@@ -15,3 +15,10 @@ func TestApplySynDropUnavailableWhenMapMissing(t *testing.T) {
 		t.Fatal("expected an error for missing syndrop_v4/v6 maps")
 	}
 }
+
+func TestApplySynDropCIDRUnavailableWhenMapMissing(t *testing.T) {
+	a := &Agent{collection: &ebpf.Collection{Maps: map[string]*ebpf.Map{}}}
+	if err := a.applySynDropCIDR([]models.EBPFSynDropCIDR{{CIDR: "10.0.0.0/24", Direction: "egress"}}); err == nil {
+		t.Fatal("expected an error for missing syndrop_cidr_v4/v6 maps")
+	}
+}

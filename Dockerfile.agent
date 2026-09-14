@@ -15,8 +15,14 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -mllvm -bpf-stack-size=1024 \
     -c netra_tc.c -o /out.o
+# Standalone edge TCP intel object — own compilation unit, own verifier
+# budget, per docs/fluxvm-borrow-backlog.md and docs/edge-tcp-intel.md.
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_edge_intel.c -o /out-edge.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent
 COPY --from=bpf /out.o /opt/netra/bpf/netra_tc.o
+COPY --from=bpf /out-edge.o /opt/netra/bpf/netra_edge_intel.o
 ENTRYPOINT ["/netra-agent"]
