@@ -15,6 +15,17 @@ import (
 	"time"
 )
 
+// rfc3339Micro matches metav1.MicroTime's own wire format (exactly six
+// fractional-second digits). time.RFC3339Nano is the wrong layout to write
+// with: its ".999999999" trims trailing zeros, so it frequently emits eight
+// or nine fractional digits instead of six — a real Kubernetes API server
+// rejects that with "cannot be handled as a Lease: parsing time ... as
+// ...Z07:00", since it decodes acquireTime/renewTime as MicroTime, not
+// arbitrary-precision RFC3339. This only ever showed up against a live
+// server; the fake HTTP backend the unit tests use doesn't validate the
+// JSON payload's time format, so it was invisible until now.
+const rfc3339Micro = "2006-01-02T15:04:05.000000Z07:00"
+
 type leaseDocument struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
@@ -56,8 +67,8 @@ func (c *Client) TryAcquireOrRenewLease(ctx context.Context, namespace, name, id
 		doc.Metadata.Namespace = namespace
 		doc.Spec.HolderIdentity = identity
 		doc.Spec.LeaseDurationSeconds = seconds
-		doc.Spec.AcquireTime = now.Format(time.RFC3339Nano)
-		doc.Spec.RenewTime = now.Format(time.RFC3339Nano)
+		doc.Spec.AcquireTime = now.Format(rfc3339Micro)
+		doc.Spec.RenewTime = now.Format(rfc3339Micro)
 		status, err := c.writeLease(ctx, http.MethodPost, "/apis/coordination.k8s.io/v1/namespaces/"+url.PathEscape(namespace)+"/leases", doc)
 		if err != nil {
 			return false, err
@@ -75,13 +86,13 @@ func (c *Client) TryAcquireOrRenewLease(ctx context.Context, namespace, name, id
 	}
 	if holder != identity {
 		lease.Spec.LeaseTransitions++
-		lease.Spec.AcquireTime = now.Format(time.RFC3339Nano)
+		lease.Spec.AcquireTime = now.Format(rfc3339Micro)
 	}
 	lease.APIVersion = "coordination.k8s.io/v1"
 	lease.Kind = "Lease"
 	lease.Spec.HolderIdentity = identity
 	lease.Spec.LeaseDurationSeconds = seconds
-	lease.Spec.RenewTime = now.Format(time.RFC3339Nano)
+	lease.Spec.RenewTime = now.Format(rfc3339Micro)
 	status, err := c.writeLease(ctx, http.MethodPut, "/apis/coordination.k8s.io/v1/namespaces/"+url.PathEscape(namespace)+"/leases/"+url.PathEscape(name), lease)
 	if err != nil {
 		return false, err
@@ -101,7 +112,7 @@ func (c *Client) ReleaseLease(ctx context.Context, namespace, name, identity str
 		return nil
 	}
 	lease.Spec.HolderIdentity = ""
-	lease.Spec.RenewTime = time.Now().UTC().Format(time.RFC3339Nano)
+	lease.Spec.RenewTime = time.Now().UTC().Format(rfc3339Micro)
 	status, err := c.writeLease(ctx, http.MethodPut, "/apis/coordination.k8s.io/v1/namespaces/"+url.PathEscape(namespace)+"/leases/"+url.PathEscape(name), lease)
 	if err != nil {
 		return err
