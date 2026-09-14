@@ -71,6 +71,7 @@ func usage() {
   policy plan <file> | policy plan --file FILE
   policy simulate <file> | policy simulate --file FILE
   policy apply <file> [--dry-run] [--confirm-risk high|critical] | policy apply --file FILE [--dry-run] [--confirm-risk high|critical]
+  policy gitops status | policy gitops resync <file> [--confirm-risk high|critical]
   policy history <namespace> <name>
   policy archive export <file>
   policy archive import <file> [--mode merge|replace]
@@ -211,6 +212,30 @@ func policy() error {
 			return request("POST", "/api/v1/policies/apply?dryRun=true", b)
 		}
 		return planAndApply(b, flagValue(os.Args[3:], "--confirm-risk"))
+	case "gitops":
+		if len(os.Args) < 4 {
+			return fmt.Errorf("use policy gitops status|resync <file> [--confirm-risk high|critical]")
+		}
+		switch os.Args[3] {
+		case "status":
+			return request("GET", "/api/v1/policies/gitops/status", nil)
+		case "resync":
+			file, err := policyFile(os.Args[4:])
+			if err != nil {
+				return err
+			}
+			b, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			headers := map[string]string{}
+			if risk := flagValue(os.Args[4:], "--confirm-risk"); risk != "" {
+				headers["X-Netra-Confirm-Risk"] = risk
+			}
+			return requestHeaders("POST", "/api/v1/policies/gitops/resync", b, headers)
+		default:
+			return fmt.Errorf("use policy gitops status|resync <file> [--confirm-risk high|critical]")
+		}
 	case "history":
 		if len(os.Args) < 5 {
 			return fmt.Errorf("namespace and name required")

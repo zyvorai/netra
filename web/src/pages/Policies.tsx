@@ -44,6 +44,14 @@ type SimulationResponse = {
   note?: string;
 };
 
+type GitOpsStatus = {
+  lastRun: string;
+  dir: string;
+  autoApply: boolean;
+  manifests: { path: string; namespace: string; name: string; manifest?: any; drifted: boolean; applied: boolean; error?: string; note?: string; plan?: { risk: string } }[];
+  loadErrors?: string[];
+};
+
 type Revision = {
   id: number;
   at: string;
@@ -61,6 +69,8 @@ export default function Policies() {
   const [msg, setMsg] = useState('');
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
+  const [gitopsStatus, setGitopsStatus] = useState<GitOpsStatus | null>(null);
+  const [gitopsMsg, setGitopsMsg] = useState('');
   const [history, setHistory] = useState<Revision[]>([]);
   const [historyTarget, setHistoryTarget] = useState<{ namespace: string; name: string } | null>(null);
   const [builder, setBuilder] = useState({ name: 'payments-egress', selectorKey: 'app', selectorValue: 'payments', kind: 'fqdn', to: 'api.example.com', port: '443', protocol: 'TCP', includeDns: true });
@@ -73,6 +83,30 @@ export default function Policies() {
   useEffect(() => {
     void refresh();
   }, [ns]);
+
+  const refreshGitOps = () =>
+    api<GitOpsStatus>('/api/v1/policies/gitops/status')
+      .then((x) => { setGitopsStatus(x); setGitopsMsg(''); })
+      .catch((e) => { setGitopsStatus(null); setGitopsMsg(String(e)); });
+
+  useEffect(() => {
+    void refreshGitOps();
+    const t = setInterval(refreshGitOps, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function gitopsResync(manifest: string, confirmRisk?: string) {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (confirmRisk) headers['X-Netra-Confirm-Risk'] = confirmRisk;
+      await api('/api/v1/policies/gitops/resync', { method: 'POST', headers, body: manifest });
+      setMsg('GitOps resync applied.');
+      await refreshGitOps();
+      await refresh();
+    } catch (e) {
+      setMsg(String(e));
+    }
+  }
 
   async function loadHistory(namespace: string, name: string) {
     try {
@@ -304,6 +338,33 @@ export default function Policies() {
             {(plan.plan.removedDestinations || []).length > 0 && <p><b>Removed:</b> {plan.plan.removedDestinations.join(', ')}</p>}
             {plan.receipt && <p><b>Apply receipt:</b> expires {new Date(plan.receipt.expiresAt).toLocaleTimeString()}</p>}
             {plan.dryRun.error && <p className="warning">{plan.dryRun.error}</p>}
+          </>
+        )}
+      </section>
+
+      <section className="card span2">
+        <p className="eyebrow">GITOPS</p>
+        <h3>Reconciler status</h3>
+        {gitopsMsg && !gitopsStatus && <p className="empty-state">GitOps is not enabled (set NETRA_GITOPS_DIR) — {gitopsMsg}</p>}
+        {gitopsStatus && (
+          <>
+            <p><small>dir {gitopsStatus.dir} · auto-apply {gitopsStatus.autoApply ? 'on' : 'off'} · last run {gitopsStatus.lastRun ? new Date(gitopsStatus.lastRun).toLocaleString() : 'never'}</small></p>
+            {(gitopsStatus.loadErrors || []).map((e, i) => <p className="warning" key={i}>{e}</p>)}
+            <div className="list">
+              {gitopsStatus.manifests.map((m, i) => (
+                <div className={`insightrow ${m.error ? 'warning' : m.drifted ? 'warning' : m.applied ? 'low' : 'info'}`} key={i}>
+                  <b>{m.namespace}/{m.name}</b>
+                  <span>{m.applied ? 'applied' : m.drifted ? 'drifted' : m.plan?.risk ? `${m.plan.risk} risk` : '—'}</span>
+                  <small>{m.error || m.note}</small>
+                  {(m.drifted || (m.plan && (m.plan.risk === 'high' || m.plan.risk === 'critical'))) && m.manifest && (
+                    <button className="btn-secondary" onClick={() => gitopsResync(JSON.stringify(m.manifest), m.plan?.risk)}>
+                      Resync{m.plan?.risk ? ` (confirm ${m.plan.risk})` : ''}
+                    </button>
+                  )}
+                </div>
+              ))}
+              {!gitopsStatus.manifests.length && <p className="empty-state">No manifests found under {gitopsStatus.dir}.</p>}
+            </div>
           </>
         )}
       </section>

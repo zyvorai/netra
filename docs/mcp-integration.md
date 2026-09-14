@@ -49,7 +49,7 @@ Each line you type after startup should produce one corresponding JSON-RPC respo
 | `NETRA_API_KEY` | unset | Bearer token; must match the controller's `NETRA_API_KEY`. If the controller has no API key configured, leave this unset too |
 | `NETRA_TLS_INSECURE` | `false` | Set `true` to skip TLS verification against a local/self-signed controller. Never set this against a controller reachable over an untrusted network |
 | `NETRA_MCP_ACTOR` | `mcp:hermes` | Recorded as `X-Netra-Actor` on every call, so mutations show up distinctly from human `netractl` use in `netra_audit`. Set a more specific value (e.g. `mcp:hermes:oncall-bot`) if you run several agent identities against the same controller |
-| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 50 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
+| `NETRA_MCP_ALLOW_MUTATIONS` | `false` | When unset/false, only read tools and pure-generator tools are registered — the 51 mutating tool *names* do not exist in the running process at all. Set `true` (case-insensitive) to also register them |
 
 Example:
 
@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 57 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 58 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -114,7 +114,7 @@ mcp_servers:
 ## Security considerations
 
 - **One API key, one privilege level.** Netra's controller has a single `NETRA_API_KEY` bearer token with no scoping — `netra-mcp` inherits whatever that token can do. There is no way to hand an MCP client a token that can read but not mutate; the *only* mutation gate is `NETRA_MCP_ALLOW_MUTATIONS` on the `netra-mcp` process itself. Run a dedicated `netra-mcp` process (with mutations enabled) separately from any process serving human dashboards or other integrations, so a compromised or misbehaving agent's blast radius is limited to what this specific process was allowed to do.
-- **Every mutation is attributed and audited.** All 50 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
+- **Every mutation is attributed and audited.** All 51 mutating tools flow through the controller's existing audit log (`store.appendAuditLocked`), tagged with the `X-Netra-Actor` value from `NETRA_MCP_ACTOR` (default `mcp:hermes`). Check `netra_audit` (or `GET /api/v1/audit`) regularly if you enable mutations for an autonomous agent — this is the primary way to notice an agent doing something unexpected.
 - **Policy apply is the highest-consequence tool, and it's the most guarded.** `netra_policy_apply` requires a fresh `plan_token` from `netra_policy_plan` (single-use, content-hash-bound, 5-minute expiry) and, for high/critical-risk changes, an explicit `confirm_risk` echo. An agent cannot apply a policy it hasn't just planned, and cannot silently escalate past a risk warning — the confirmation string must appear as a literal argument value, which means the calling model has to have "read" the risk level and intentionally repeated it back, not just retried blindly.
 - **Enforce mode is time-bounded by design.** `netra_ebpf_mode` can flip the whole fast path from observe to enforce, but every enforce period requires a lease (1m-24h, default 15m) and the controller auto-reverts to observe on expiry (`store.SetMode`'s fail-open behavior) — an agent cannot leave the cluster in enforce mode indefinitely by mistake; the lease must be actively renewed.
 - **Baseline/rate-baseline clears require a literal confirmation value**, sent automatically by `netra-mcp` itself (`X-Netra-Confirm-Baseline-Clear: clear`) — this exists to stop an accidental clear via a generic scripted client, not to add friction for `netra-mcp`'s own calls; treat `netra_insights_baseline_clear`/`netra_insights_rate_baseline_clear` as fully live once mutations are enabled.
@@ -236,6 +236,7 @@ None of these mutate the cluster or Netra's store, and none record an audit even
 | `netra_policies_list` | `GET /api/v1/policies` | `namespace` (default `default`) | Raw CiliumNetworkPolicy list; requires Cilium integration enabled on the controller |
 | `netra_policies_history` | `GET /api/v1/policies/history` | `namespace`, `name`, `limit` (1-200, default 50) | Recorded revisions: checkpoints, applies, rollbacks, deletes |
 | `netra_policies_history_export` | `GET /api/v1/policies/history/export` | — | Full revision archive as JSON, for backup or `netra_policy_history_import` on another controller |
+| `netra_policy_gitops_status` | `GET /api/v1/policies/gitops/status` | — | GitOps reconciler status for every manifest under `NETRA_GITOPS_DIR`; 409 if GitOps is not enabled |
 | `netra_policy_build` | `POST /api/v1/policies/build` | body: `name` **(required)**, `namespace` **(required)**, `selector` (object), `kind`, `to` (array of CIDR/FQDN/entity strings), `port`, `protocol`, `includeDns` (bool) | Generates a manifest only — feed the result to `netra_policy_plan` |
 | `netra_policy_lockdown` | `POST /api/v1/policies/lockdown` | body: `name` **(required)**, `namespace` (default `default`), `kind` (`pod`\|`vm`, default `pod`), `selector` (auto-detected if omitted) | Generates a deny-all manifest only — feed the result to `netra_policy_plan`, or use `netra_policy_unlock` to remove an already-applied one |
 | `netra_policy_simulate` | `POST /api/v1/policies/simulate` | body: `manifest` **(required, raw CNP JSON/YAML)** | Evaluates candidate egress rules against observed traffic; `toFQDNs` destinations are always `"unverified"`, never a false `"denied"` |
@@ -251,6 +252,7 @@ None of these mutate the cluster or Netra's store, and none record an audit even
 | `netra_policy_delete` | `DELETE /api/v1/policies/{namespace}/{name}` | `namespace` **(path)**, `name` **(path)** | Records a checkpoint of the deleted manifest before deleting |
 | `netra_policy_unlock` | `DELETE /api/v1/policies/lockdown/{namespace}/{name}` | `namespace` **(path)**, `name` **(path, workload name)** | Deletes the lockdown policy for a workload, restoring normal access |
 | `netra_policy_history_import` | `POST /api/v1/policies/history/import` | `archive` **(required, object from `netra_policies_history_export`)**, `mode` (`merge`\|`replace`, default `merge`), `confirm_replace` (bool, required when `mode=replace`) | Discards existing history first when `mode=replace` |
+| `netra_policy_gitops_resync` | `POST /api/v1/policies/gitops/resync` | `manifest` **(required)**, `confirm_risk` (required only if risk is `high`/`critical`) | Human override for a manifest the GitOps reconciler declined to auto-apply (drift or risk too high); 409 if GitOps is not enabled |
 
 ### eBPF fast path — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)
 

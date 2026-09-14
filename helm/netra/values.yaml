@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.44"
+  tag: "0.27.45"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.44"
+  tag: "0.27.45"
 replicaCount: 1
 ha:
   enabled: false
@@ -41,6 +41,18 @@ ai:
   # Existing secret (keys: api-key) — never commit the key into values.
   existingSecret: ""
   apiKey: ""
+# Optional policy-as-code / GitOps reconciliation. Off by default. Reads
+# CiliumNetworkPolicy manifests from `dir` inside the netrad container —
+# populate it with your own git-sync-style sidecar (not included in this
+# chart) mounting the same "gitops-manifests" emptyDir this chart creates.
+# autoApply=false (the default even when enabled) computes and shows plans
+# only; nothing is applied without an explicit netractl policy gitops
+# resync, and a high/critical-risk change is never auto-applied regardless.
+gitops:
+  enabled: false
+  dir: /gitops/policies
+  autoApply: false
+  interval: 60s
 service:
   type: ClusterIP
   port: 30870

@@ -31,6 +31,8 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"POST", "/api/v1/policies/simulate"},
 		{"POST", "/api/v1/policies/lockdown"},
 		{"DELETE", "/api/v1/policies/lockdown/default/demo"},
+		{"GET", "/api/v1/policies/gitops/status"},
+		{"POST", "/api/v1/policies/gitops/resync"},
 		{"GET", "/api/v1/flows/summary"},
 		{"GET", "/api/v1/insights/summary"},
 		{"GET", "/api/v1/insights/dependencies"},

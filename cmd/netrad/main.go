@@ -17,6 +17,7 @@ import (
 
 	"github.com/zyvorai/netra/internal/alert"
 	"github.com/zyvorai/netra/internal/api"
+	"github.com/zyvorai/netra/internal/gitops"
 	"github.com/zyvorai/netra/internal/ha"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
@@ -24,7 +25,7 @@ import (
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.44"
+const version = "0.27.45"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -57,6 +58,7 @@ func main() {
 		dispatcher.Start(envInt("NETRA_ALERT_WORKERS", 2))
 		defer dispatcher.Stop()
 	}
+	gitopsCfg, gitopsEnabled := buildGitOps()
 
 	stateFile := strings.TrimSpace(os.Getenv("NETRA_STATE_FILE"))
 	haEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true")
@@ -65,7 +67,7 @@ func main() {
 			log.Error("HA startup refused", "reason", "NETRA_STATE_FILE is required in HA mode")
 			os.Exit(1)
 		}
-		runHA(ctx, log, k, h, stateFile, dispatcher, alertCfg)
+		runHA(ctx, log, k, h, stateFile, dispatcher, alertCfg, gitopsCfg, gitopsEnabled)
 		return
 	}
 
@@ -75,7 +77,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
-	handler := api.New(log, k, h, st).Handler()
+
+	var gr *gitops.Reconciler
+	if gitopsEnabled {
+		gr = gitops.New(log, k, st, gitopsCfg)
+	}
+	handler := api.New(log, k, h, st).WithGitOps(gr).Handler()
 
 	if dispatcher != nil {
 		var pollerWG sync.WaitGroup
@@ -88,8 +95,34 @@ func main() {
 		}()
 		defer pollerWG.Wait()
 	}
+	if gr != nil {
+		var gitopsWG sync.WaitGroup
+		gctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		gitopsWG.Add(1)
+		go func() {
+			defer gitopsWG.Done()
+			gr.Run(gctx)
+		}()
+		defer gitopsWG.Wait()
+	}
 
 	runHTTP(ctx, log, handler, st.Persistent(), false)
+}
+
+// buildGitOps reads NETRA_GITOPS_DIR/NETRA_GITOPS_AUTO_APPLY/NETRA_GITOPS_INTERVAL.
+// An empty NETRA_GITOPS_DIR means GitOps is off — the supported default,
+// matching every other optional feature in this codebase.
+func buildGitOps() (gitops.Config, bool) {
+	dir := strings.TrimSpace(os.Getenv("NETRA_GITOPS_DIR"))
+	if dir == "" {
+		return gitops.Config{}, false
+	}
+	return gitops.Config{
+		Dir:       dir,
+		AutoApply: strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_GITOPS_AUTO_APPLY")), "true"),
+		Interval:  envDuration("NETRA_GITOPS_INTERVAL", 60*time.Second),
+	}, true
 }
 
 // buildAlerting constructs the webhook dispatcher and alert-poller config
@@ -124,7 +157,7 @@ func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
 	return d, cfg
 }
 
-func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *webhook.Dispatcher, alertCfg alert.Config) {
+func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *webhook.Dispatcher, alertCfg alert.Config, gitopsCfg gitops.Config, gitopsEnabled bool) {
 	identity := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
 	if identity == "" {
 		identity, _ = os.Hostname()
@@ -151,7 +184,7 @@ func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Clie
 	electionWG.Add(1)
 	go func() {
 		defer electionWG.Done()
-		electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod, dispatcher, alertCfg)
+		electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod, dispatcher, alertCfg, gitopsCfg, gitopsEnabled)
 	}()
 	runHTTP(ctx, log, gate, true, true)
 	electionWG.Wait()
@@ -167,15 +200,20 @@ func electionLoop(
 	leaseDuration, renewDeadline, retryPeriod time.Duration,
 	dispatcher *webhook.Dispatcher,
 	alertCfg alert.Config,
+	gitopsCfg gitops.Config,
+	gitopsEnabled bool,
 ) {
 	var st *store.Store
 	var lastRenew time.Time
-	// pollerCancel/pollerWG track the alert poller started on this
-	// replica's current leadership stint, if any (only when dispatcher !=
-	// nil). Tied 1:1 to the store's own open/close lifecycle rather than to
-	// ha.Gate, which exposes no "give me the current store" query.
+	// pollerCancel/pollerWG (and gitopsCancel/gitopsWG, identically) track
+	// the alert poller (and GitOps reconciler) started on this replica's
+	// current leadership stint, if any. Tied 1:1 to the store's own
+	// open/close lifecycle rather than to ha.Gate, which exposes no "give
+	// me the current store" query.
 	var pollerCancel func()
 	var pollerWG sync.WaitGroup
+	var gitopsCancel func()
+	var gitopsWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
@@ -186,6 +224,11 @@ func electionLoop(
 			pollerCancel()
 			pollerWG.Wait()
 			pollerCancel = nil
+		}
+		if gitopsCancel != nil {
+			gitopsCancel()
+			gitopsWG.Wait()
+			gitopsCancel = nil
 		}
 		if st != nil {
 			if err := st.Close(); err != nil {
@@ -233,7 +276,11 @@ func electionLoop(
 			return
 		}
 		st = opened
-		gate.Promote(api.New(log, k, h, st).Handler())
+		var gr *gitops.Reconciler
+		if gitopsEnabled {
+			gr = gitops.New(log, k, st, gitopsCfg)
+		}
+		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).Handler())
 		if dispatcher != nil {
 			pctx, cancel := context.WithCancel(ctx)
 			pollerCancel = cancel
@@ -241,6 +288,15 @@ func electionLoop(
 			go func() {
 				defer pollerWG.Done()
 				alert.New(log, st, dispatcher.Publish, alertCfg, k.ListPods).Run(pctx)
+			}()
+		}
+		if gr != nil {
+			gctx, gcancel := context.WithCancel(ctx)
+			gitopsCancel = gcancel
+			gitopsWG.Add(1)
+			go func() {
+				defer gitopsWG.Done()
+				gr.Run(gctx)
 			}()
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)

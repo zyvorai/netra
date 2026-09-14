@@ -25,6 +25,7 @@ import (
 	"github.com/zyvorai/netra/internal/detective"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/flowstats"
+	"github.com/zyvorai/netra/internal/gitops"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/insights"
@@ -45,6 +46,7 @@ type Server struct {
 	kube             *kube.Client
 	hubble           *hubble.Client
 	store            *store.Store
+	gitops           *gitops.Reconciler
 	apiKey           string
 	agentKey         string
 	webDir           string
@@ -68,16 +70,24 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	return &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}}
 }
 
+// WithGitOps attaches a gitops.Reconciler so GET/POST /api/v1/policies/gitops/*
+// have something to read/act on — optional, since GitOps is off unless
+// NETRA_GITOPS_DIR is set. Returns s for chaining onto New(...).
+func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
+	s.gitops = r
+	return s
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.44"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.45"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.44"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.45"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.44"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.45"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
@@ -88,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/policies/apply", s.auth(s.cilium(http.HandlerFunc(s.applyPolicy))))
 	mux.Handle("POST /api/v1/policies/lockdown", s.auth(s.cilium(http.HandlerFunc(s.lockdownPolicy))))
 	mux.Handle("DELETE /api/v1/policies/lockdown/{namespace}/{name}", s.auth(s.cilium(http.HandlerFunc(s.unlockPolicy))))
+	mux.Handle("GET /api/v1/policies/gitops/status", s.auth(http.HandlerFunc(s.gitopsStatus)))
+	mux.Handle("POST /api/v1/policies/gitops/resync", s.auth(s.cilium(http.HandlerFunc(s.gitopsResync))))
 	mux.Handle("GET /api/v1/policies/history", s.auth(http.HandlerFunc(s.policyHistory)))
 	mux.Handle("GET /api/v1/policies/history/export", s.auth(http.HandlerFunc(s.exportPolicyHistory)))
 	mux.Handle("POST /api/v1/policies/history/import", s.auth(http.HandlerFunc(s.importPolicyHistory)))
@@ -277,7 +289,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.44", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.45", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -460,6 +472,39 @@ func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request) {
 		s.stateWarning(w, s.store.AddAudit(models.AuditEvent{Actor: who, Action: "policy.apply", Target: ns + "/" + name}))
 	}
 	writeRawJSON(w, 200, out)
+}
+
+var errGitOpsDisabled = errors.New("GitOps is not enabled (set NETRA_GITOPS_DIR)")
+
+func (s *Server) gitopsStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.gitops == nil {
+		errorJSON(w, http.StatusConflict, errGitOpsDisabled.Error())
+		return
+	}
+	writeJSON(w, 200, s.gitops.Status())
+}
+
+// gitopsResync is the explicit human override for a manifest Reconcile's
+// unattended pass declined to auto-apply (drift, or high/critical risk) —
+// same X-Netra-Confirm-Risk semantics as any other high-blast-radius
+// mutation in this codebase.
+func (s *Server) gitopsResync(w http.ResponseWriter, r *http.Request) {
+	if s.gitops == nil {
+		errorJSON(w, http.StatusConflict, errGitOpsDisabled.Error())
+		return
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	confirmedRisk := strings.TrimSpace(r.Header.Get("X-Netra-Confirm-Risk"))
+	plan, err := s.gitops.Resync(r.Context(), b, confirmedRisk)
+	if err != nil {
+		errorJSON(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, plan)
 }
 
 func (s *Server) policyHistory(w http.ResponseWriter, r *http.Request) {

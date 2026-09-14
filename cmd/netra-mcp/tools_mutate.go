@@ -431,7 +431,10 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 	if err := registerPolicyHistoryImport(srv, c); err != nil {
 		return err
 	}
-	return registerNetPolDefaultDenySet(srv, c)
+	if err := registerNetPolDefaultDenySet(srv, c); err != nil {
+		return err
+	}
+	return registerPolicyGitOpsResync(srv, c)
 }
 
 // registerNetPolDefaultDenySet wraps PUT /api/v1/ebpf/netpol/default-deny.
@@ -552,6 +555,41 @@ func registerPolicyApply(srv *mcpserver.Server, c *client) error {
 				extra["X-Netra-Confirm-Risk"] = x.ConfirmRisk
 			}
 			out, status, err := c.do(ctx, "POST", "/api/v1/policies/apply", []byte(x.Manifest), extra)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+// registerPolicyGitOpsResync wraps POST /api/v1/policies/gitops/resync, the
+// explicit human override for a manifest the GitOps reconciler's unattended
+// pass declined to auto-apply (drift detected, or risk too high) — bespoke
+// for the same reason netra_policy_apply is: the request body is the raw
+// candidate manifest, and the risk confirmation travels as a header, not a
+// JSON field.
+func registerPolicyGitOpsResync(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name: "netra_policy_gitops_resync",
+		Description: "Explicitly apply a candidate manifest via the GitOps pipeline, bypassing the reconciler's own auto-apply gating (drift or high/critical risk) — the human override for a manifest netra_policy_gitops_status shows as pending. If the computed risk is \"high\" or \"critical\", confirm_risk must be passed and must equal that risk level, or the call is rejected. 409 if GitOps is not enabled.",
+		InputSchema: objSchema(map[string]any{
+			"manifest":     strProp("Full CiliumNetworkPolicy manifest (YAML or JSON) to resync."),
+			"confirm_risk": enumProp("Required only when the computed risk is high/critical; must match exactly.", "low", "medium", "high", "critical"),
+		}, "manifest"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				Manifest    string `json:"manifest"`
+				ConfirmRisk string `json:"confirm_risk"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			var extra map[string]string
+			if x.ConfirmRisk != "" {
+				extra = map[string]string{"X-Netra-Confirm-Risk": x.ConfirmRisk}
+			}
+			out, status, err := c.do(ctx, "POST", "/api/v1/policies/gitops/resync", []byte(x.Manifest), extra)
 			if err != nil {
 				return nil, true, err
 			}

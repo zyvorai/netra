@@ -282,6 +282,57 @@ func TestPolicySimulate_SendsRawManifestBodyAndAvailableWithoutMutations(t *test
 	}
 }
 
+func TestPolicyGitOpsResync_SendsManifestAndConfirmRiskHeader(t *testing.T) {
+	var gotBody, gotRisk string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/policies/gitops/resync" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		gotRisk = r.Header.Get("X-Netra-Confirm-Risk")
+		w.Write([]byte(`{"risk":"critical"}`))
+	}))
+	defer ts.Close()
+
+	c := testClient(t, ts)
+	result := callTool(t, c, true, "netra_policy_gitops_resync", map[string]any{
+		"manifest":     `{"kind":"CiliumNetworkPolicy"}`,
+		"confirm_risk": "critical",
+	})
+	if result.IsError {
+		t.Fatalf("expected success, got error result: %+v", result)
+	}
+	if gotBody != `{"kind":"CiliumNetworkPolicy"}` {
+		t.Fatalf("expected the raw manifest as the request body, got %q", gotBody)
+	}
+	if gotRisk != "critical" {
+		t.Fatalf("expected X-Netra-Confirm-Risk: critical, got %q", gotRisk)
+	}
+}
+
+func TestPolicyGitOpsResync_GatedBehindMutations(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
+	defer ts.Close()
+	c := testClient(t, ts)
+
+	withoutMutations, err := buildServer(c, false)
+	if err != nil {
+		t.Fatalf("buildServer(false): %v", err)
+	}
+	if names := toolNames(t, withoutMutations); contains(names, "netra_policy_gitops_resync") {
+		t.Fatal("expected netra_policy_gitops_resync to be absent when mutations are disabled")
+	}
+
+	withMutations, err := buildServer(c, true)
+	if err != nil {
+		t.Fatalf("buildServer(true): %v", err)
+	}
+	if names := toolNames(t, withMutations); !contains(names, "netra_policy_gitops_resync") {
+		t.Fatal("expected netra_policy_gitops_resync to be present when mutations are enabled")
+	}
+}
+
 func TestMutationGating(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))

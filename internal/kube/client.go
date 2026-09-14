@@ -57,6 +57,17 @@ func NewFromEnvironment() (*Client, error) {
 	}, nil
 }
 
+// NewForTesting builds a Client pointing at a fake backend (typically an
+// httptest.Server) instead of a real in-cluster Kubernetes API server —
+// NewFromEnvironment always dials HTTPS with in-cluster credentials, which
+// a plain httptest server can't satisfy. Exported so other packages' tests
+// (internal/gitops's Reconcile/Resync tests, in particular) can exercise
+// GetPolicy/ApplyPolicy/etc. against a fake HTTP backend. Not meant for
+// production use — there is no token/TLS here at all.
+func NewForTesting(base string, httpClient *http.Client) *Client {
+	return &Client{base: base, http: httpClient, streamHTTP: httpClient}
+}
+
 func (c *Client) do(ctx context.Context, method, p string, body []byte, contentType string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+p, bytes.NewReader(body))
 	if err != nil {

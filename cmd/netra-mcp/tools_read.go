@@ -309,6 +309,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_policy_gitops_status", method: "GET", path: "/api/v1/policies/gitops/status",
+			description: "GitOps reconciler status: every manifest under NETRA_GITOPS_DIR, its computed change plan, whether it applied, and whether it's drifted (live policy differs from the last GitOps-applied revision — never auto-applied over). 409 if GitOps is not enabled (NETRA_GITOPS_DIR unset).",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

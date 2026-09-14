@@ -140,8 +140,16 @@ spec:
           value: {{ .Values.ai.apiKey | quote }}
         {{- end }}
         {{- end }}
+        {{- if .Values.gitops.enabled }}
+        - name: NETRA_GITOPS_DIR
+          value: {{ .Values.gitops.dir | quote }}
+        - name: NETRA_GITOPS_AUTO_APPLY
+          value: {{ .Values.gitops.autoApply | quote }}
+        - name: NETRA_GITOPS_INTERVAL
+          value: {{ .Values.gitops.interval | quote }}
+        {{- end }}
         resources: {{- toYaml .Values.resources | nindent 10 }}
-        {{- if or .Values.tls.enabled .Values.persistence.enabled }}
+        {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
         volumeMounts:
         {{- if .Values.tls.enabled }}
         - {name: tls-certs, mountPath: /certs, readOnly: true}
@@ -149,6 +157,11 @@ spec:
         {{- if .Values.persistence.enabled }}
         - name: state
           mountPath: /var/lib/netra
+        {{- end }}
+        {{- if .Values.gitops.enabled }}
+        - name: gitops-manifests
+          mountPath: {{ .Values.gitops.dir | quote }}
+          readOnly: true
         {{- end }}
         {{- end }}
         securityContext:
@@ -175,7 +188,7 @@ spec:
             {{- end }}
           initialDelaySeconds: 5
           periodSeconds: 10
-      {{- if or .Values.tls.enabled .Values.persistence.enabled }}
+      {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
       volumes:
       {{- if .Values.tls.enabled }}
       - {name: tls-certs, emptyDir: {}}
@@ -184,5 +197,12 @@ spec:
       - name: state
         persistentVolumeClaim:
           claimName: {{ default "netra-state" .Values.persistence.existingClaim }}
+      {{- end }}
+      {{- if .Values.gitops.enabled }}
+      # An emptyDir shared with an operator-supplied git-sync-style sidecar
+      # (not part of this chart — patch this Deployment to add one) that
+      # keeps this directory in sync with a Git ref. netrad only ever reads
+      # from it (readOnly mount above); the chart stays Git-agnostic.
+      - {name: gitops-manifests, emptyDir: {}}
       {{- end }}
       {{- end }}
