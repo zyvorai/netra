@@ -43,7 +43,7 @@ const FeatureList: FeatureItem[] = [
   {
     title: 'AI agent integration',
     description:
-      'netra-mcp exposes the controller API as 100 stdio tools for AI agents, with mutating tools opt-in and off by default.',
+      'netra-mcp exposes the controller API as 101 stdio tools for AI agents, with mutating tools opt-in and off by default.',
     to: 'https://github.com/zyvorai/netra/blob/main/docs/mcp-integration.md',
   },
 ];

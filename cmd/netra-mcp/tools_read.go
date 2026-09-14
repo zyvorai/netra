@@ -272,6 +272,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"threshold"},
 		},
 		{
+			name: "netra_incidents_timeline", method: "GET", path: "/api/v1/incidents/timeline",
+			description: "Chronological, human-readable timeline merging the audit log with cluster-health-signature (AI digest fingerprint) transitions. Each entry is a plain sentence, never raw counters. An optional LLM prose rewrite (engine=\"llm\") is attempted only when NETRA_AI_API_KEY is set; the deterministic bullet-point entries are always present and complete on their own.",
+			schema:      objSchema(map[string]any{"since": strProp("RFC3339 timestamp; only entries at or after this time are returned. Omit for everything retained (audit: up to 1000 events; health samples: up to 2h).")}),
+			queryParams: []string{"since"},
+		},
+		{
 			name: "netra_ai_status", method: "GET", path: "/api/v1/ai/status",
 			description: "Whether the optional LLM rewrite path is configured. Heuristic briefs always work; an API key is required only for prose rewrite. AI endpoints never mutate.",
 			schema:      emptySchema(),

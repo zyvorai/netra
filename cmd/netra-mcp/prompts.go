@@ -46,6 +46,17 @@ func registerPrompts(srv *mcpserver.Server) error {
 			}},
 		},
 		{
+			Name:        "netra_incident_timeline",
+			Description: "Narrate what happened in the cluster over a time window, in order. Read-only.",
+			Arguments: []mcpserver.PromptArg{
+				{Name: "since", Description: "RFC3339 timestamp to start from. Omit for everything retained.", Required: false},
+			},
+			Messages: []mcpserver.PromptMessage{{
+				Role: "user",
+				Text: "Call netra_incidents_timeline with since={{since}}. Present the entries in chronological order as a short narrative. Each entry is either an audit-log action or a cluster-health-signature change — say which. Do not invent an entry, a cause, or a timestamp the tool did not return. Stay read-only.",
+			}},
+		},
+		{
 			Name:        "netra_policy_review",
 			Description: "Review insight-generated policy drafts. Never apply them.",
 			Arguments: []mcpserver.PromptArg{

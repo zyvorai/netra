@@ -37,3 +37,26 @@ type HealthTrend struct {
 	Confidence string `json:"confidence,omitempty"`
 	Note       string `json:"note"`
 }
+
+// TimelineEntry is one point in an internal/timeline.Build result: either an
+// audit-log event rendered to a sentence, or a "digest-transition" marking a
+// change in the AI on-call digest's fingerprint between two health samples.
+// Severity is set only for digest-transition entries.
+type TimelineEntry struct {
+	At       time.Time `json:"at"`
+	Kind     string    `json:"kind"` // "audit" or "digest-transition"
+	Text     string    `json:"text"`
+	Severity string    `json:"severity,omitempty"`
+}
+
+// Timeline is the result of internal/timeline.Build (and, optionally,
+// internal/timeline.Narrate's LLM prose rewrite on top of it). Entries is
+// always a complete, deterministic answer; Prose/Engine=="llm" are set only
+// when a provider was configured and the rewrite succeeded.
+type Timeline struct {
+	GeneratedAt time.Time       `json:"generatedAt"`
+	Since       *time.Time      `json:"since,omitempty"`
+	Entries     []TimelineEntry `json:"entries"`
+	Prose       string          `json:"prose,omitempty"`
+	Engine      string          `json:"engine"` // "heuristic" or "llm"
+}

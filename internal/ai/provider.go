@@ -100,9 +100,6 @@ type chatResponse struct {
 // a short operator paragraph. The system prompt forbids mutations,
 // secrets, and invented counters.
 func (p *Provider) Rewrite(ctx context.Context, snap Snapshot, brief Brief, question string) (string, error) {
-	if !p.Enabled() {
-		return "", fmt.Errorf("ai provider disabled")
-	}
 	snapJSON, err := json.Marshal(snap)
 	if err != nil {
 		return "", err
@@ -117,13 +114,24 @@ func (p *Provider) Rewrite(ctx context.Context, snap Snapshot, brief Brief, ques
 		"Keep the answer under 180 words.",
 	}, " ")
 	user := "Question: " + strings.TrimSpace(question) + "\n\nHeuristic brief:\n" + brief.Headline + "\n" + brief.Summary + "\n\nSnapshot JSON:\n" + string(snapJSON)
+	return p.RewriteText(ctx, sys, user)
+}
 
+// RewriteText is the Snapshot-agnostic primitive Rewrite builds on: given a
+// system prompt and a user prompt, ask the provider for a short completion.
+// Other deterministic-then-optionally-rewritten features (e.g.
+// internal/timeline's incident timeline) call this directly instead of
+// forcing their own data into a Snapshot just to reuse Rewrite.
+func (p *Provider) RewriteText(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if !p.Enabled() {
+		return "", fmt.Errorf("ai provider disabled")
+	}
 	body, err := json.Marshal(chatRequest{
 		Model:       p.Model,
 		Temperature: 0.2,
 		Messages: []chatMessage{
-			{Role: "system", Content: sys},
-			{Role: "user", Content: user},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
 		},
 	})
 	if err != nil {

@@ -50,6 +50,8 @@ func main() {
 		err = ebpf()
 	case "insights":
 		err = insightCmd()
+	case "incidents":
+		err = incidentsCmd()
 	case "ai":
 		err = aiCmd()
 	default:
@@ -112,6 +114,7 @@ func usage() {
   insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
   insights blast-radius <root> [hops]
   insights health-trend [threshold]
+  incidents timeline [since-RFC3339]
   insights rate-baseline show | capture [window] | clear
   ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
@@ -1325,6 +1328,22 @@ func insightCmd() error {
 		}
 	default:
 		return fmt.Errorf("unknown insights command")
+	}
+}
+
+func incidentsCmd() error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("incidents subcommand required")
+	}
+	switch os.Args[2] {
+	case "timeline":
+		p := "/api/v1/incidents/timeline"
+		if len(os.Args) > 3 {
+			p += "?since=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	default:
+		return fmt.Errorf("unknown incidents command")
 	}
 }
 

@@ -18,6 +18,7 @@ func registerResources(srv *mcpserver.Server, c *client) error {
 		{"netra://ai/digest", "On-call digest", "Pager/Slack card plus incident fingerprint from /api/v1/ai/digest.", "/api/v1/ai/digest"},
 		{"netra://ai/suggestions", "Live questions", "Snapshot-derived follow-up questions.", "/api/v1/ai/suggestions"},
 		{"netra://status", "Controller status", "GET /api/v1/status.", "/api/v1/status"},
+		{"netra://incidents/timeline", "Incident timeline", "Chronological, human-readable merge of the audit log and cluster-health-signature transitions from /api/v1/incidents/timeline.", "/api/v1/incidents/timeline"},
 	}
 	for _, it := range items {
 		it := it
