@@ -13,6 +13,7 @@ export type Page =
   | 'drops'
   | 'l7'
   | 'insights'
+  | 'topology'
   | 'policies'
   | 'flows'
   | 'ebpf'
@@ -30,6 +31,7 @@ const items: [Page, string][] = [
   ['drops', 'Drops'],
   ['l7', 'L7'],
   ['insights', 'Insights'],
+  ['topology', 'Topology'],
   ['ebpf', 'Firewall'],
   ['flows', 'Hubble'],
   ['policies', 'Policies'],

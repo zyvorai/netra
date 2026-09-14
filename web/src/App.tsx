@@ -8,6 +8,7 @@ import { readRoute } from './lib/investigation';
 import Path from './pages/Path';
 import Drops from './pages/Drops';
 import Insights from './pages/Insights';
+import Topology from './pages/Topology';
 import L7 from './pages/L7';
 import Policies from './pages/Policies';
 import Flows from './pages/Flows';
@@ -77,6 +78,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Baselines, drift, and review-only remediation proposals derived from exact eBPF counters.',
     tint: 'purple',
   },
+  topology: {
+    eyebrow: 'Insights',
+    title: 'See the graph move.',
+    lede: 'The same observed-traffic dependency graph, live and force-directed — drift, rate-drift, and exposure findings overlaid as node color.',
+    tint: 'purple',
+  },
   ebpf: {
     eyebrow: 'Firewall',
     title: 'Observe everywhere. Enforce when leased.',
@@ -144,6 +151,7 @@ export default function App() {
     drops: <Drops />,
     l7: <L7 />,
     insights: <Insights />,
+    topology: <Topology />,
     policies: <Policies />,
     flows: <Flows />,
     ebpf: <EBPF />,
