@@ -30,8 +30,14 @@ func TestNetPolPortOnly(t *testing.T) {
 	if err := enabled.Put(uint32(0), uint32(1)); err != nil {
 		t.Fatalf("enable netpol v2: %v", err)
 	}
+	var enabledReadback uint32
+	if err := enabled.Lookup(uint32(0), &enabledReadback); err != nil {
+		t.Fatalf("read back netpol_v2_enabled: %v", err)
+	}
+	t.Logf("DIAG netpol_v2_enabled readback = %d", enabledReadback)
 
 	cgroupID := selfCgroupID(t)
+	t.Logf("DIAG selfCgroupID = %d (0x%x)", cgroupID, cgroupID)
 	const dirEgress = 2
 	const protoTCP = 6
 	srcIP := net.ParseIP("10.0.0.7")
@@ -49,10 +55,16 @@ func TestNetPolPortOnly(t *testing.T) {
 
 	t.Run("exact_peer_and_port_deny", func(t *testing.T) {
 		peer := net.ParseIP("1.2.3.4")
-		if err := rules.Put(netpolRuleKey(cgroupID, peer, 443, protoTCP, dirEgress), uint8(1)); err != nil {
+		key := netpolRuleKey(cgroupID, peer, 443, protoTCP, dirEgress)
+		if err := rules.Put(key, uint8(1)); err != nil {
 			t.Fatalf("seed exact-peer rule: %v", err)
 		}
-		defer rules.Delete(netpolRuleKey(cgroupID, peer, 443, protoTCP, dirEgress))
+		defer rules.Delete(key)
+		var readback uint8
+		if err := rules.Lookup(key, &readback); err != nil {
+			t.Fatalf("DIAG: read back just-written rule with the exact same key failed: %v", err)
+		}
+		t.Logf("DIAG readback of just-written key = %v (raw key bytes = %x)", readback, key)
 
 		frame := buildCgroupFrame(srcIP, peer, 41002, 443, tcpSYN)
 		ret, _, err := prog.Test(frame)
