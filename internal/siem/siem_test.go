@@ -4,6 +4,9 @@ package siem
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -174,5 +177,55 @@ func TestEmptyEncodeStillValid(t *testing.T) {
 				t.Fatalf("%s not json: %v", f, err)
 			}
 		}
+	}
+}
+
+func TestFromFlowBlockedIsWarning(t *testing.T) {
+	rec := FromFlow("n1", models.DestinationStat{
+		DestinationIP: "203.0.113.9",
+		Port:          443,
+		Protocol:      "TCP",
+		Packets:       10,
+		Blocked:       3,
+		Namespace:     "prod",
+		Pod:           "api-1",
+	}, time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC))
+	if rec.Class != "flow" || rec.Severity != "warning" {
+		t.Fatalf("%#v", rec)
+	}
+	if rec.Subject != "prod/api-1 → 203.0.113.9" {
+		t.Fatalf("subject=%s", rec.Subject)
+	}
+}
+
+func TestForwarderUDP(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	got := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		n, _, err := pc.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		got <- string(buf[:n])
+	}()
+	fwd, err := NewForwarder(ForwardConfig{Network: "udp", Addr: pc.LocalAddr().String(), Format: FormatSyslog}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fwd.Send([]Record{FromAudit(models.AuditEvent{At: time.Now().UTC(), Actor: "t", Action: "ebpf.mode", Target: "observe"})}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-got:
+		if !strings.Contains(body, "netra") {
+			t.Fatalf("payload: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no udp payload")
 	}
 }

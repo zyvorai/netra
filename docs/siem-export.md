@@ -14,9 +14,14 @@ existing HMAC-signed webhook path (`docs/alerting.md`).
 |---|---|---|
 | `GET` | `/api/v1/export/audit` | Last *N* `store.Audit` events |
 | `GET` | `/api/v1/export/events` | Current health anomalies and/or incident clusters (optional audit) |
+| `GET` | `/api/v1/export/flows` | Current destination-flow counters from fresh agents |
+| `GET` | `/api/v1/export/status` | Configured encodings + whether syslog push is on |
 | `GET` | `/api/v1/report` | Point-in-time operator briefing |
+| `GET` | `/api/v1/playbooks` | Review-only next-step playbook from that briefing |
+| `GET` | `/api/v1/audit/summary` | Actor/action/hour rollup of the audit log |
+| `POST` | `/api/v1/intel/preview` | Parse a threat-intel list; applies nothing |
 
-All three sit behind the same bearer token as the rest of `/api/v1/*`.
+All of these sit behind the same bearer token as the rest of `/api/v1/*`. Preview never writes deny maps.
 
 ### Query parameters
 
@@ -60,8 +65,15 @@ collector can ingest it today without an OTEL SDK in `netrad`.
 ```bash
 netractl export audit --format cef --limit 200
 netractl export events --format syslog --include anomaly,incident,audit
+netractl export flows --format jsonl --limit 500
 netractl report
 netractl report --format json
+netractl playbooks
+netractl audit summary
+netractl intel preview ./feed.csv
+
+# optional push (controller env, off by default, leader-only in HA)
+# NETRA_SYSLOG_ADDR=127.0.0.1:514 NETRA_SYSLOG_NETWORK=udp NETRA_SYSLOG_FORMAT=syslog
 ```
 
 `netractl` already pretty-prints JSON and prints non-JSON bodies raw, so

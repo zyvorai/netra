@@ -16,6 +16,7 @@ import Flows from './pages/Flows';
 import EBPF from './pages/EBPF';
 import Health from './pages/Health';
 import Audit from './pages/Audit';
+import Report from './pages/Report';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -113,6 +114,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Controller audit trail for policy and datapath actions.',
     tint: 'red',
   },
+  report: {
+    eyebrow: 'Report',
+    title: 'Brief the next operator.',
+    lede: 'A point-in-time health, drift, and incident briefing plus review-only playbook steps. Nothing on this page applies policy.',
+    tint: 'amber',
+  },
 };
 
 export default function App() {
@@ -164,6 +171,7 @@ export default function App() {
     flows: <Flows />,
     ebpf: <EBPF />,
     audit: <Audit />,
+    report: <Report />,
   }[page];
 
   const hero = pageHero[page];

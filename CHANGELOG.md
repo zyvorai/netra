@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.58 — 2026-09-15
+
+- **Playbooks, intel preview, flow export, audit rollup, optional syslog push.** Second observe-only wave on top of the SIEM/report surface.
+  - `GET /api/v1/playbooks` (`internal/playbook`) turns the operator snapshot into stable-id review-only steps. `AutoApply` is always false.
+  - `POST /api/v1/intel/preview` (`internal/intel`) parses JSON/CSV/bare IP-CIDR-DNS lists into the existing deny-import entry shape and applies nothing.
+  - `GET /api/v1/export/flows` emits current non-stale destination counters as SIEM records. `GET /api/v1/audit/summary` rolls the audit log by actor/action/hour (`internal/auditstats`).
+  - Optional `NETRA_SYSLOG_ADDR` push sink (`internal/siem.Forwarder`) — UDP/TCP, syslog/cef/jsonl, best-effort, leader-only in HA. Pull export remains the supported default.
+  - Dashboard **Report** page. CLI: `netractl playbooks`, `netractl intel preview FILE`, `netractl export flows|status`, `netractl audit summary`.
+  - MCP: `netra_playbooks`, `netra_intel_preview`, `netra_export_flows`, `netra_export_status`, `netra_audit_summary` (65 read / 50 mutate / 115 total).
+- Version bumped to 0.27.58 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.57 — 2026-09-15
 
 - **SIEM export and operator report (observe-only).** Controllers already retain audit events, health anomalies, and incident clusters; there was no first-class way to hand those records to a SIEM or paste a briefing into a ticket without screen-scraping JSON.

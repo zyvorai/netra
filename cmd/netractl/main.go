@@ -39,11 +39,19 @@ func main() {
 	case "status":
 		err = request("GET", "/api/v1/status", nil)
 	case "audit":
-		err = request("GET", "/api/v1/audit?limit=100", nil)
+		if len(os.Args) >= 3 && os.Args[2] == "summary" {
+			err = request("GET", "/api/v1/audit/summary", nil)
+		} else {
+			err = request("GET", "/api/v1/audit?limit=100", nil)
+		}
 	case "export":
 		err = exportCmd(os.Args[2:])
 	case "report":
 		err = reportCmd(os.Args[2:])
+	case "playbooks", "playbook":
+		err = playbooksCmd(os.Args[2:])
+	case "intel":
+		err = intelCmd(os.Args[2:])
 	case "policy":
 		err = policy()
 	case "flows":
@@ -70,8 +78,10 @@ func main() {
 func usage() {
 	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
   status | audit
-  export audit|events [--format json|jsonl|cef|syslog|otlp] [--limit N] [--include anomaly,incident,audit]
+  export audit|events|flows|status [--format json|jsonl|cef|syslog|otlp] [--limit N] [--include anomaly,incident,audit]
   report [--format markdown|json]
+  playbooks [--format markdown|json]
+  intel preview FILE
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE

@@ -64,6 +64,36 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"format"},
 		},
 		{
+			name: "netra_playbooks", method: "GET", path: "/api/v1/playbooks",
+			description: "Review-only operator playbook derived from the current report snapshot. AutoApply is always false; steps suggest netractl/API actions a human still has to run.",
+			schema:      objSchema(map[string]any{"format": enumProp("Playbook encoding.", "json", "markdown")}),
+			queryParams: []string{"format"},
+		},
+		{
+			name: "netra_audit_summary", method: "GET", path: "/api/v1/audit/summary",
+			description: "Rollup of the audit log by actor, action, and hour. Observe-only.",
+			schema: objSchema(map[string]any{
+				"limit": intProp("Max audit events to aggregate, 1-1000. Default 500."),
+				"since": strProp("RFC3339 lower bound."),
+				"until": strProp("RFC3339 upper bound."),
+			}),
+			queryParams: []string{"limit", "since", "until"},
+		},
+		{
+			name: "netra_export_flows", method: "GET", path: "/api/v1/export/flows",
+			description: "Export current non-stale destination-flow counters (5-tuple + packets/bytes/blocked) in the SIEM encodings. No payloads.",
+			schema: objSchema(map[string]any{
+				"format": enumProp("Export encoding.", "json", "jsonl", "cef", "syslog", "otlp"),
+				"limit":  intProp("Max flow rows, 1-2000. Default 200."),
+			}),
+			queryParams: []string{"format", "limit"},
+		},
+		{
+			name: "netra_export_status", method: "GET", path: "/api/v1/export/status",
+			description: "Whether optional syslog push is configured, plus the pull-export endpoints and encodings this controller supports.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),
@@ -445,7 +475,10 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			return err
 		}
 	}
-	return registerPolicySimulate(srv, c)
+	if err := registerPolicySimulate(srv, c); err != nil {
+		return err
+	}
+	return registerIntelPreview(srv, c)
 }
 
 // registerPolicySimulate is bespoke (not table-driven) for the same reason
@@ -470,6 +503,33 @@ func registerPolicySimulate(srv *mcpserver.Server, c *client) error {
 				return fmt.Sprintf("invalid arguments: %v", err), true, nil
 			}
 			out, status, err := c.do(ctx, "POST", "/api/v1/policies/simulate", []byte(x.Manifest), nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+// registerIntelPreview posts the raw feed text as the entire body — the
+// controller accepts JSON, CSV, or a plain IP/CIDR/DNS list. Preview
+// applies nothing; feeding preview.entries to deny/import is a separate,
+// mutation-gated tool.
+func registerIntelPreview(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_intel_preview",
+		Description: "Parse a threat-intel or deny list (JSON entries, CSV type,value,direction, or bare IPs/CIDRs/DNS names) into the shape POST /api/v1/ebpf/deny/import accepts. Applies nothing.",
+		InputSchema: objSchema(map[string]any{
+			"text": strProp("Feed body: JSON, CSV, or newline-separated IPs/CIDRs/names."),
+		}, "text"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			out, status, err := c.do(ctx, "POST", "/api/v1/intel/preview", []byte(x.Text), nil)
 			if err != nil {
 				return nil, true, err
 			}

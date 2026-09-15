@@ -107,6 +107,46 @@ func FromIncident(c models.IncidentCluster) Record {
 	}
 }
 
+// FromFlow maps one destination counter from an agent report. Class is
+// "flow". Blocked>0 is warning; otherwise info. No payloads — counters
+// and 5-tuple metadata only.
+func FromFlow(node string, st models.DestinationStat, at time.Time) Record {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	sev := "info"
+	if st.Blocked > 0 {
+		sev = "warning"
+	}
+	subj := st.DestinationIP
+	if st.Namespace != "" && st.Pod != "" {
+		subj = st.Namespace + "/" + st.Pod + " → " + st.DestinationIP
+	}
+	return Record{
+		At:       at.UTC(),
+		Class:    "flow",
+		Severity: sev,
+		Node:     node,
+		Subject:  subj,
+		Action:   st.Direction,
+		Target:   st.DestinationIP,
+		Kind:     st.Protocol,
+		Message:  fmt.Sprintf("%s %s:%d pkts=%d bytes=%d blocked=%d", st.Protocol, st.DestinationIP, st.Port, st.Packets, st.Bytes, st.Blocked),
+		Details: map[string]any{
+			"sourceIp":   st.SourceIP,
+			"sourcePort": st.SourcePort,
+			"port":       st.Port,
+			"protocol":   st.Protocol,
+			"direction":  st.Direction,
+			"packets":    st.Packets,
+			"bytes":      st.Bytes,
+			"blocked":    st.Blocked,
+			"namespace":  st.Namespace,
+			"pod":        st.Pod,
+		},
+	}
+}
+
 func auditMessage(e models.AuditEvent) string {
 	if e.Target == "" {
 		return e.Action

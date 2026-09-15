@@ -21,11 +21,13 @@ import (
 	"github.com/zyvorai/netra/internal/ha"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
+	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/siem"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.57"
+const version = "0.27.58"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -106,8 +108,45 @@ func main() {
 		}()
 		defer gitopsWG.Wait()
 	}
+	var syslogWG sync.WaitGroup
+	if stop := startSyslog(ctx, log, st, &syslogWG); stop != nil {
+		defer stop()
+		defer syslogWG.Wait()
+	}
 
 	runHTTP(ctx, log, handler, st.Persistent(), false)
+}
+
+// startSyslog starts the optional RFC5424/CEF/JSONL push sink when
+// NETRA_SYSLOG_ADDR is set. Off by default. Best-effort; pull export
+// still works if the collector is down. Leader-only callers must cancel
+// on demote so two replicas never double-ship.
+func startSyslog(ctx context.Context, log *slog.Logger, st *store.Store, wg *sync.WaitGroup) func() {
+	addr := strings.TrimSpace(os.Getenv("NETRA_SYSLOG_ADDR"))
+	if addr == "" || st == nil || wg == nil {
+		return nil
+	}
+	fwd, err := siem.NewForwarder(siem.ForwardConfig{
+		Network: env("NETRA_SYSLOG_NETWORK", "udp"),
+		Addr:    addr,
+		Format:  env("NETRA_SYSLOG_FORMAT", "syslog"),
+		Timeout: envDuration("NETRA_SYSLOG_TIMEOUT", 3*time.Second),
+	}, log)
+	if err != nil {
+		log.Error("syslog forwarder config", "error", err)
+		os.Exit(1)
+	}
+	interval := envDuration("NETRA_SYSLOG_INTERVAL", 15*time.Second)
+	sctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Info("syslog forwarder started", "addr", addr, "interval", interval)
+		fwd.Run(sctx, interval, func() []models.AuditEvent {
+			return st.Audit(200)
+		})
+	}()
+	return cancel
 }
 
 // buildGitOps reads NETRA_GITOPS_DIR/NETRA_GITOPS_AUTO_APPLY/NETRA_GITOPS_INTERVAL.
@@ -214,6 +253,8 @@ func electionLoop(
 	var pollerWG sync.WaitGroup
 	var gitopsCancel func()
 	var gitopsWG sync.WaitGroup
+	var syslogCancel func()
+	var syslogWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
@@ -229,6 +270,11 @@ func electionLoop(
 			gitopsCancel()
 			gitopsWG.Wait()
 			gitopsCancel = nil
+		}
+		if syslogCancel != nil {
+			syslogCancel()
+			syslogWG.Wait()
+			syslogCancel = nil
 		}
 		if st != nil {
 			if err := st.Close(); err != nil {
@@ -298,6 +344,9 @@ func electionLoop(
 				defer gitopsWG.Done()
 				gr.Run(gctx)
 			}()
+		}
+		if stop := startSyslog(ctx, log, st, &syslogWG); stop != nil {
+			syslogCancel = stop
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)
 	}

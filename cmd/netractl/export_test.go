@@ -27,3 +27,15 @@ func TestReportCmdUnknownFlag(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestIntelCmdRequiresPreviewFile(t *testing.T) {
+	if err := intelCmd(nil); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestPlaybooksCmdUnknownFlag(t *testing.T) {
+	if err := playbooksCmd([]string{"--nope"}); err == nil {
+		t.Fatal("expected error")
+	}
+}
