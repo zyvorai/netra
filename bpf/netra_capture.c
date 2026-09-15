@@ -291,6 +291,13 @@ static __always_inline int handle_capture(struct __sk_buff *skb, __u8 direction)
     __u32 cap_len = orig_len < snap ? orig_len : snap;
     if (cap_len > NETRA_CAP_MAX_LEN)
         cap_len = NETRA_CAP_MAX_LEN; // re-clamp for the verifier's own bounds tracking
+    if (cap_len == 0) {
+        // bpf_skb_load_bytes' len arg must be provably non-zero to the
+        // verifier; without this branch its tracked range is [0, MAX],
+        // which the verifier rejects as an "invalid zero-sized read".
+        bpf_ringbuf_discard(e, 0);
+        return TC_ACT_UNSPEC;
+    }
 
     e->ts_ns = now_ns;
     e->ifindex = skb->ifindex;
