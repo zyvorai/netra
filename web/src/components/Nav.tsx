@@ -79,7 +79,7 @@ const groups: NavGroup[] = [
 ];
 
 const OPEN_DELAY_MS = 120;
-const CLOSE_DELAY_MS = 200;
+const CLOSE_DELAY_MS = 450;
 
 export default function Nav({
   page,

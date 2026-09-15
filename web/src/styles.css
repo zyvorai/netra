@@ -481,9 +481,7 @@ button:disabled,
   transform: translateX(-50%) translateY(-6px);
   min-width: 480px;
   max-width: 720px;
-  background: var(--nav-bg);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 var(--radius-md, 12px) var(--radius-md, 12px);
