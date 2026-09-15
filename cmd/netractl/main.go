@@ -77,7 +77,7 @@ func main() {
 }
 func usage() {
 	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
-  status | audit
+  status | audit | audit summary
   export audit|events|flows|status [--format json|jsonl|cef|syslog|otlp] [--limit N] [--include anomaly,incident,audit]
   report [--format markdown|json]
   playbooks [--format markdown|json]
@@ -95,7 +95,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | health | capdrift | path | drops | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | health | capdrift | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
@@ -624,6 +624,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/agents", nil)
 	case "summary":
 		return request("GET", "/api/v1/ebpf/summary", nil)
+	case "coverage":
+		return request("GET", "/api/v1/ebpf/coverage", nil)
 	case "health":
 		return request("GET", "/api/v1/ebpf/health", nil)
 	case "capdrift":

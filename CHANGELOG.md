@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.59 — 2026-09-15
+
+- **Per-node eBPF hook/program coverage matrix (observe-only).** Third wave on top of the playbooks/intel/flows/audit-rollup surface.
+  - `GET /api/v1/ebpf/coverage` (`internal/coverage`) reports attached vs detached programs, missing maps, and stale agents per node.
+  - CLI: `netractl ebpf coverage`. MCP: `netra_ebpf_coverage` (66 read / 50 mutate / 116 total).
+- Version bumped to 0.27.59 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.58 — 2026-09-15
 
 - **Playbooks, intel preview, flow export, audit rollup, optional syslog push.** Second observe-only wave on top of the SIEM/report surface.

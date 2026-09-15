@@ -104,7 +104,7 @@ func TestOperatorReportMarkdownAndJSON(t *testing.T) {
 func TestExportRoutesRequireAuth(t *testing.T) {
 	s := testExportServer(t)
 	h := s.Handler()
-	for _, path := range []string{"/api/v1/export/audit", "/api/v1/export/events", "/api/v1/export/flows", "/api/v1/report", "/api/v1/playbooks"} {
+	for _, path := range []string{"/api/v1/export/audit", "/api/v1/export/events", "/api/v1/export/flows", "/api/v1/report", "/api/v1/playbooks", "/api/v1/ebpf/coverage"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

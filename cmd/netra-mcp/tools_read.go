@@ -94,6 +94,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_ebpf_coverage", method: "GET", path: "/api/v1/ebpf/coverage",
+			description: "Per-node hook/program coverage matrix: attached vs detached programs, missing maps, stale agents. Observe-only.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),

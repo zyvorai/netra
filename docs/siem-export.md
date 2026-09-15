@@ -19,6 +19,7 @@ existing HMAC-signed webhook path (`docs/alerting.md`).
 | `GET` | `/api/v1/report` | Point-in-time operator briefing |
 | `GET` | `/api/v1/playbooks` | Review-only next-step playbook from that briefing |
 | `GET` | `/api/v1/audit/summary` | Actor/action/hour rollup of the audit log |
+| `GET` | `/api/v1/ebpf/coverage` | Per-node hook/program coverage matrix |
 | `POST` | `/api/v1/intel/preview` | Parse a threat-intel list; applies nothing |
 
 All of these sit behind the same bearer token as the rest of `/api/v1/*`. Preview never writes deny maps.

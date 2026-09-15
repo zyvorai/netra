@@ -108,8 +108,8 @@ func FromIncident(c models.IncidentCluster) Record {
 }
 
 // FromFlow maps one destination counter from an agent report. Class is
-// "flow". Blocked>0 is warning; otherwise info. No payloads — counters
-// and 5-tuple metadata only.
+// "flow". Blocked>0 is warning; otherwise info. Counters and 5-tuple
+// metadata only — no payloads.
 func FromFlow(node string, st models.DestinationStat, at time.Time) Record {
 	if at.IsZero() {
 		at = time.Now().UTC()

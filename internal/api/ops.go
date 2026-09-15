@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/auditstats"
+	"github.com/zyvorai/netra/internal/coverage"
 	"github.com/zyvorai/netra/internal/intel"
 	"github.com/zyvorai/netra/internal/playbook"
 	"github.com/zyvorai/netra/internal/siem"
@@ -90,6 +91,11 @@ func (s *Server) intelPreview(w http.ResponseWriter, r *http.Request) {
 		"applyHint":   "POST /api/v1/ebpf/deny/import with {\"entries\": preview.entries} — this preview applied nothing",
 		"autoApplied": false,
 	})
+}
+
+func (s *Server) ebpfCoverage(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now().UTC()
+	writeJSON(w, 200, coverage.Build(s.store.AgentStatuses(now, s.agentStaleAfter), now))
 }
 
 func (s *Server) exportStatus(w http.ResponseWriter, _ *http.Request) {
