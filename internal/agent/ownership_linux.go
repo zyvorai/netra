@@ -102,3 +102,57 @@ func (a *Agent) watchCapChanges(meta []models.ProcessMetaStat, pidCgroup map[uin
 	}
 	return out
 }
+
+// watchNamespaceChanges compares each process's network-namespace inode
+// (procmeta.Meta.NetNS) against the previous sync cycle, exactly
+// mirroring watchCapChanges' identity/dedup/pruning/cap shape. A live
+// process moving network namespaces after start (setns(2)) is a
+// container-escape or cross-namespace-debugging signal CapEff alone
+// would not catch. No new BPF; gated by procmeta.
+func (a *Agent) watchNamespaceChanges(meta []models.ProcessMetaStat, pidCgroup map[uint32]uint64) []models.NamespaceChangeEvent {
+	if !a.procMetaEnabled || len(meta) == 0 {
+		return nil
+	}
+	if a.prevNetNS == nil {
+		a.prevNetNS = map[uint64]uint64{}
+	}
+	var out []models.NamespaceChangeEvent
+	seen := map[uint64]struct{}{}
+	for _, m := range meta {
+		if m.AttributionError != "" || m.PID == 0 || m.NetNS == 0 {
+			continue
+		}
+		key := uint64(m.PID)<<32 ^ m.StartTimeJiffies
+		seen[key] = struct{}{}
+		prev, ok := a.prevNetNS[key]
+		a.prevNetNS[key] = m.NetNS
+		if !ok || prev == m.NetNS {
+			continue
+		}
+		ev := models.NamespaceChangeEvent{
+			PID:              m.PID,
+			StartTimeJiffies: m.StartTimeJiffies,
+			Comm:             m.Comm,
+			Exe:              m.Exe,
+			PreviousNetNS:    prev,
+			CurrentNetNS:     m.NetNS,
+			CgroupID:         pidCgroup[m.PID],
+		}
+		if ev.CgroupID != 0 {
+			if w, ok := a.workloadIdentity(ev.CgroupID); ok {
+				ev.Namespace, ev.Pod, ev.WorkloadKind, ev.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+			}
+		}
+		out = append(out, ev)
+	}
+	// Drop identities no longer in the report so the map cannot grow unboundedly.
+	for k := range a.prevNetNS {
+		if _, ok := seen[k]; !ok {
+			delete(a.prevNetNS, k)
+		}
+	}
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}

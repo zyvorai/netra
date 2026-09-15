@@ -14,7 +14,7 @@ func TestBuildObserveQuiet(t *testing.T) {
 	at := time.Date(2026, 9, 14, 15, 0, 0, 0, time.UTC)
 	s := Build(Input{
 		GeneratedAt:   at,
-		Version:       "0.27.63",
+		Version:       "0.27.64",
 		Mode:          "observe",
 		ScopeMode:     "all",
 		Agents:        3,

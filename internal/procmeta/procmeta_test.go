@@ -208,3 +208,31 @@ func TestReadSelfSaneSummary(t *testing.T) {
 		t.Errorf("Seccomp = %d out of range", m.Seccomp)
 	}
 }
+
+func TestReadSelfHasNetNS(t *testing.T) {
+	m, err := Read(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.NetNS == 0 {
+		t.Fatal("expected a non-zero network namespace inode for the running test process")
+	}
+}
+
+func TestParseNSInode(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		want   uint64
+	}{
+		{"net:[4026531840]", 4026531840},
+		{"mnt:[4026531841]", 4026531841},
+		{"", 0},
+		{"net:[]", 0},
+		{"net:[notanumber]", 0},
+		{"garbage", 0},
+	} {
+		if got := parseNSInode(tc.target); got != tc.want {
+			t.Errorf("parseNSInode(%q) = %d, want %d", tc.target, got, tc.want)
+		}
+	}
+}

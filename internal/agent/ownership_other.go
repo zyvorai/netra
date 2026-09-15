@@ -12,3 +12,7 @@ func (a *Agent) enrichSocketOwnership(_ []models.TCPHealthStat, _ []models.Proce
 func (a *Agent) watchCapChanges(_ []models.ProcessMetaStat, _ map[uint32]uint64) []models.CapChangeEvent {
 	return nil
 }
+
+func (a *Agent) watchNamespaceChanges(_ []models.ProcessMetaStat, _ map[uint32]uint64) []models.NamespaceChangeEvent {
+	return nil
+}

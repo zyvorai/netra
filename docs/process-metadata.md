@@ -35,7 +35,7 @@ This sets `NETRA_PROCMETA_ENABLED=true` on the agent **and** adds `hostPID: true
 
 Once enabled, the agent collects the unique nonzero PIDs seen in the current `TCPHealth` snapshot each sync cycle, resolves each through a bounded, TTL'd cache (`procmeta.Cache`, 30s TTL / 8192 entries by default), and reports the results in `AgentReport.ProcessMeta`, keyed by `pid` + `startTimeJiffies`. A PID that has already exited by the time it's resolved gets an entry with only `attributionError` set, rather than being dropped — so a caller can still see that enrichment was attempted.
 
-When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events.
+When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events, and network-namespace changes (see below) as `namespaceChanges` events.
 
 ## Capability-drift alerting (`internal/capdrift`)
 
@@ -46,6 +46,17 @@ When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` ont
 - **A real blind spot, surfaced rather than hidden**: the diff state (`prevCaps`) `watchCapChanges` compares against is in-memory and resets on every agent restart, so a capability change that happened before the restart, or while the agent was down, produces no event. `capdrift.Build` emits a distinct `capdrift-coverage-gap` finding whenever an agent's own `AgentStartedAt` is recent (within 2 minutes of the current report), naming the affected node, so a quiet capability-drift feed after a rollout reads as "coverage gap, check separately" rather than "confirmed no drift."
 
 `GET /api/v1/ebpf/capdrift`, `netractl ebpf capdrift`, and the `netra_ebpf_capdrift` MCP tool all return the same `{anomalies, events}` shape; the Health page's CAPABILITY DRIFT card renders the anomalies. Like everything else in this file, it does nothing without `NETRA_PROCMETA_ENABLED=true`.
+
+## Namespace-change watch (`internal/nsdrift`)
+
+`docs/exporter-tetragon-borrow-backlog.md` deferred this behind capability-drift shipping first ("Cap watch ships first; ns change can follow the same socket-owner scope") — it now does, following the identical identity/diff/pruning shape.
+
+`procmeta.Meta.NetNS` is the inode number parsed from `/proc/PID/ns/net`'s symlink target (`net:[INODE]`), the kernel's own stable identifier for a network namespace. `watchNamespaceChanges` compares it per process identity (`pid`+`startTimeJiffies`) across sync cycles, exactly mirroring `watchCapChanges`: same 64-event cap, same in-memory pruning of identities no longer present, same restart blind spot.
+
+- Unlike capability drift, there is no benign direction here — a live process changing network namespaces after start (a `setns(2)` call) is always `warning` (`nsdrift-netns-changed`), whether from a container-escape attempt or a debugging tool attaching across namespaces. Netra does not distinguish the two; it only reports that it happened.
+- Same coverage-gap honesty as capdrift: `internal/nsdrift.Build` emits `nsdrift-coverage-gap` (`info`) when an agent restarted within the last 2 minutes, since the in-memory `prevNetNS` diff state resets on restart.
+
+`GET /api/v1/ebpf/nsdrift`, `netractl ebpf nsdrift`, and the `netra_ebpf_nsdrift` MCP tool return the same `{anomalies, events}` shape as capdrift. No dashboard card yet — same `NETRA_PROCMETA_ENABLED=true` gate as everything else in this file.
 
 ## Limits
 

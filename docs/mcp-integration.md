@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 73 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 74 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -204,6 +204,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ebpf_summary` | `GET /api/v1/ebpf/summary` | — | High-level rollup of fast-path activity across agents |
 | `netra_ebpf_health` | `GET /api/v1/ebpf/health` | `limit` (1-200, default 20) | TCP health/retransmit/connect-latency anomalies |
 | `netra_ebpf_capdrift` | `GET /api/v1/ebpf/capdrift` | `limit` (1-200, default 50) | Effective-capability gain/loss on tracked processes; agent-sourced from a periodic `/proc` scan, not a live kernel read; includes a `capdrift-coverage-gap` finding on recent agent restart |
+| `netra_ebpf_nsdrift` | `GET /api/v1/ebpf/nsdrift` | `limit` (1-200, default 50) | Network-namespace changes on tracked processes (`setns` after start); same agent-sourced /proc-scan shape as capdrift, including an `nsdrift-coverage-gap` finding on recent agent restart |
 | `netra_ebpf_path` | `GET /api/v1/ebpf/path` | `limit` (1-500, default 50) | Per-hop/per-hook path diagnostics |
 | `netra_ebpf_drops` | `GET /api/v1/ebpf/drops` | `limit` (1-500, default 50) | Kernel skb drop-reason counters aggregated across agents |
 | `netra_ebpf_diagnose` | `GET /api/v1/ebpf/diagnose` | `limit` (default 50) | Drop-detective root-cause findings correlated with current fast-path config |

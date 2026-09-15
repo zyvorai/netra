@@ -34,6 +34,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/nsdrift"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/policy"
@@ -120,13 +121,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.63"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.64"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.63"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.64"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.63"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.64"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -225,6 +226,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/summary", s.auth(http.HandlerFunc(s.ebpfSummary)))
 	mux.Handle("GET /api/v1/ebpf/health", s.auth(http.HandlerFunc(s.ebpfHealth)))
 	mux.Handle("GET /api/v1/ebpf/capdrift", s.auth(http.HandlerFunc(s.ebpfCapDrift)))
+	mux.Handle("GET /api/v1/ebpf/nsdrift", s.auth(http.HandlerFunc(s.ebpfNamespaceDrift)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/drops", s.auth(http.HandlerFunc(s.ebpfDropDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/ipv6", s.auth(http.HandlerFunc(s.ebpfIPv6Diagnostics)))
@@ -374,7 +376,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.63", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.64", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2362,6 +2364,20 @@ func (s *Server) ebpfCapDrift(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, capdrift.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), topN))
+}
+
+// ebpfNamespaceDrift mirrors ebpfCapDrift exactly, for the observe-only
+// namespace-change watch (docs/exporter-tetragon-borrow-backlog.md's
+// "Namespace-change watch" item — "Cap watch ships first; ns change can
+// follow the same socket-owner scope").
+func (s *Server) ebpfNamespaceDrift(w http.ResponseWriter, r *http.Request) {
+	topN := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 200 {
+			topN = n
+		}
+	}
+	writeJSON(w, 200, nsdrift.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), topN))
 }
 func (s *Server) ebpfPathDiagnostics(w http.ResponseWriter, r *http.Request) {
 	limit := 50

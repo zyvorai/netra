@@ -41,6 +41,7 @@ func (a *Agent) readProcessMeta(pids []uint32) []models.ProcessMetaStat {
 			SeccompMode:      m.Seccomp,
 			LSMLabel:         m.LSMLabel,
 			Exe:              m.Exe,
+			NetNS:            m.NetNS,
 			CapEff:           m.Caps.Eff,
 			CapNames:         m.Caps.NetworkRelevant(),
 			ContainerPID:     m.ContainerPID(),

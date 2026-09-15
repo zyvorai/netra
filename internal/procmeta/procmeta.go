@@ -92,6 +92,15 @@ type Meta struct {
 	// permission is denied.
 	Exe string `json:"exe,omitempty"`
 
+	// NetNS is the inode number of /proc/PID/ns/net — the kernel's own
+	// stable identifier for a network namespace, parsed from the symlink
+	// target "net:[INODE]". Zero when unreadable (permission, or the
+	// process exited mid-read). Comparing this across syncs for the same
+	// process identity (pid+startTime) detects a live process moving
+	// network namespaces after start — e.g. setns(2) from a container
+	// escape or debugging tool — something CapEff alone would not catch.
+	NetNS uint64 `json:"netNs,omitempty"`
+
 	// Cgroup identifies the cgroup v2 workload. Nil if /proc/PID/cgroup
 	// could not be read or had no v2 entry. PodUID and ContainerID are
 	// populated only for kubepods paths.
@@ -212,6 +221,10 @@ func readFromStat(pid int, statB []byte) (*Meta, error) {
 		m.Exe = exePath
 	}
 
+	if ns, err := os.Readlink(root + "/ns/net"); err == nil {
+		m.NetNS = parseNSInode(ns)
+	}
+
 	cmdlineB, cmdlineErr := os.ReadFile(root + "/cmdline")
 	haveCmdline := cmdlineErr == nil && len(bytes.Trim(cmdlineB, "\x00")) > 0
 
@@ -323,6 +336,23 @@ func parseUint32(s string) uint32 {
 
 // parseUint64Hex parses the hex masks printed in /proc/PID/status. The
 // kernel prints them without an 0x prefix, but tolerate one.
+// parseNSInode extracts the inode number from a /proc/PID/ns/* symlink
+// target of the form "net:[4026531840]". Returns 0 for any other shape
+// rather than erroring — a namespace inode of 0 is not a valid kernel
+// value, so callers can treat it as "unknown" the same as a read failure.
+func parseNSInode(target string) uint64 {
+	open := strings.IndexByte(target, '[')
+	closeIdx := strings.LastIndexByte(target, ']')
+	if open < 0 || closeIdx < 0 || closeIdx <= open+1 {
+		return 0
+	}
+	n, err := strconv.ParseUint(target[open+1:closeIdx], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 func parseUint64Hex(s string) uint64 {
 	s = strings.TrimPrefix(s, "0x")
 	n, _ := strconv.ParseUint(s, 16, 64)

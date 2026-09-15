@@ -366,6 +366,34 @@ type CapDriftResponse struct {
 	Events    []CapChangeEvent       `json:"events"`
 }
 
+// NamespaceChangeEvent is an observe-only notice that a live process's
+// network namespace changed after start — e.g. a setns(2) call from a
+// container-escape attempt or a debugging tool attaching across
+// namespaces. Same identity/shape as CapChangeEvent, mirrored
+// deliberately so downstream consumers (API, alerting, dashboard) treat
+// both drift signals identically.
+type NamespaceChangeEvent struct {
+	PID              uint32 `json:"pid"`
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	PreviousNetNS    uint64 `json:"previousNetNs"`
+	CurrentNetNS     uint64 `json:"currentNetNs"`
+	CgroupID         uint64 `json:"cgroupId,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+	WorkloadKind     string `json:"workloadKind,omitempty"`
+	WorkloadName     string `json:"workloadName,omitempty"`
+}
+
+// NamespaceDriftResponse is internal/nsdrift.Build's output, mirroring
+// CapDriftResponse's shape so it plugs into the same
+// alert/dashboard/API consumption pattern.
+type NamespaceDriftResponse struct {
+	Anomalies []NetworkHealthAnomaly `json:"anomalies"`
+	Events    []NamespaceChangeEvent `json:"events"`
+}
+
 // CapabilityBit maps the capability names capability-gated socket deny
 // accepts (see EBPFFastPathConfig.DeniedCapabilities) to their Linux
 // capability bit position (<linux/capability.h>). Deliberately a small,
@@ -921,6 +949,10 @@ type AgentReport struct {
 	// with empty/zero fields.
 	EdgeIntel  *EdgeIntelSummary `json:"edgeIntel,omitempty"`
 	CapChanges []CapChangeEvent  `json:"capChanges,omitempty"`
+	// NamespaceChanges mirrors CapChanges' blind-spot caveat below — its
+	// diffing state (watchNamespaceChanges' prevNetNS) resets on restart
+	// the same way.
+	NamespaceChanges []NamespaceChangeEvent `json:"namespaceChanges,omitempty"`
 	// AgentStartedAt is set once at agent process boot (New()), not per
 	// report. Used to detect a recent restart, which resets in-memory
 	// diffing state like watchCapChanges' prevCaps — a real blind-spot
@@ -949,6 +981,7 @@ type ProcessMetaStat struct {
 	SeccompMode      int      `json:"seccompMode,omitempty"`
 	LSMLabel         string   `json:"lsmLabel,omitempty"`
 	Exe              string   `json:"exe,omitempty"`
+	NetNS            uint64   `json:"netNs,omitempty"`
 	CapEff           uint64   `json:"capEff,omitempty"`
 	CapNames         []string `json:"capNames,omitempty"`
 	ContainerPID     int      `json:"containerPid,omitempty"`

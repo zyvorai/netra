@@ -237,6 +237,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_nsdrift", method: "GET", path: "/api/v1/ebpf/nsdrift",
+			description: "Network-namespace-change anomalies on processes the eBPF datapath already tracks — a live process moving network namespaces after start (setns), agent-sourced from the same periodic /proc scan capability-drift uses (requires NETRA_PROCMETA_ENABLED). Includes an nsdrift-coverage-gap finding when an agent restarted recently.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-200. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_ebpf_path", method: "GET", path: "/api/v1/ebpf/path",
 			description: "Path diagnostics: per-hop/per-hook health signals for traffic across the cluster.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),

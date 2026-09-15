@@ -107,7 +107,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | coverage | reasons | health | capdrift | path | drops | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | reasons | health | capdrift | nsdrift | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
@@ -644,6 +644,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/health", nil)
 	case "capdrift":
 		return request("GET", "/api/v1/ebpf/capdrift", nil)
+	case "nsdrift":
+		return request("GET", "/api/v1/ebpf/nsdrift", nil)
 	case "path":
 		return request("GET", "/api/v1/ebpf/path", nil)
 	case "drops":

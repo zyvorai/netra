@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.64 — 2026-09-15
+
+- **Namespace-change watch (`internal/nsdrift`) — closes `docs/exporter-tetragon-borrow-backlog.md`'s deferred item.** "Cap watch ships first; ns change can follow the same socket-owner scope" — it now does, mirroring `internal/capdrift`'s identity/diff/pruning shape exactly. No new BPF: agent/Go-side only, gated by the existing `NETRA_PROCMETA_ENABLED`.
+  - `procmeta.Meta.NetNS` parses the inode from `/proc/PID/ns/net`'s symlink target (`net:[INODE]`), the kernel's own stable namespace identifier.
+  - `watchNamespaceChanges` (`internal/agent/ownership_linux.go`) compares it per process identity (`pid`+`startTimeJiffies`) across sync cycles — same 64-event cap, same stale-identity pruning, same in-memory reset-on-restart caveat as `watchCapChanges`.
+  - `internal/nsdrift.Build` turns `NamespaceChangeEvent`s into anomaly-shaped findings: always `warning` (`nsdrift-netns-changed`, no benign direction like capdrift's gain/loss split), plus an `nsdrift-coverage-gap` (`info`) on recent agent restart.
+  - `GET /api/v1/ebpf/nsdrift`, `netractl ebpf nsdrift`, `netra_ebpf_nsdrift` MCP tool (74 read / 50 mutate / 124 total). No dashboard card yet.
+  - Docs: new "Namespace-change watch" section in `docs/process-metadata.md`, mirroring the capability-drift section above it.
+  - Verified: `go build/vet/test ./...`, `GOOS=linux go build/vet` plus a cross-compiled (not run — no Linux toolchain on this dev machine) `internal/procmeta` test binary, new unit tests for `parseNSInode` and `internal/nsdrift.Build` (namespace-change-is-warning, coverage-gap on/off, stale-agent skip, topN truncation). **Not live-kernel-verified** — this reads an existing `/proc` file the agent already has access to (same privilege level as the existing `exe`/`CapEff` reads), so the risk profile matches capdrift's, but a real live-cluster confirmation (a process actually calling `setns(2)` and the event showing up) has not been run this session.
+- Version bumped to 0.27.64 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.63 — 2026-09-15
 
 - **OTEL spans for block/deny — closes the last "adapted later" item in `docs/exporter-tetragon-borrow-backlog.md`'s OTEL row.** The logs exporter shipped in 0.27.57 explicitly deferred traces to "a later, separate program."
