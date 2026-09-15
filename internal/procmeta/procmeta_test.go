@@ -3,6 +3,8 @@
 package procmeta
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"strings"
@@ -216,6 +218,55 @@ func TestReadSelfHasNetNS(t *testing.T) {
 	}
 	if m.NetNS == 0 {
 		t.Fatal("expected a non-zero network namespace inode for the running test process")
+	}
+}
+
+func TestHashExeMatchesSHA256(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/fake-exe"
+	content := []byte("not a real binary, just deterministic test content")
+	if err := os.WriteFile(path, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	want := hex.EncodeToString(sum[:])
+	if got := hashExe(path); got != want {
+		t.Fatalf("hashExe = %q, want %q", got, want)
+	}
+}
+
+func TestHashExeMissingFile(t *testing.T) {
+	if got := hashExe("/nonexistent/path/for/test"); got != "" {
+		t.Fatalf("expected empty hash for missing file, got %q", got)
+	}
+}
+
+func TestHashExeOverSizeCapIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/big"
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxExeHashBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if got := hashExe(path); got != "" {
+		t.Fatalf("expected empty hash for oversized file, got %q", got)
+	}
+}
+
+func TestReadSelfHasExeHash(t *testing.T) {
+	m, err := Read(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ExeHash == "" {
+		t.Fatal("expected a non-empty exe hash for the running test binary")
+	}
+	if len(m.ExeHash) != 64 {
+		t.Fatalf("expected a 64-char hex SHA-256, got %d chars: %q", len(m.ExeHash), m.ExeHash)
 	}
 }
 

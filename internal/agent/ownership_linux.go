@@ -156,3 +156,58 @@ func (a *Agent) watchNamespaceChanges(meta []models.ProcessMetaStat, pidCgroup m
 	}
 	return out
 }
+
+// watchExeHashChanges compares each process's on-disk executable
+// content hash (procmeta.Meta.ExeHash) against the previous sync
+// cycle, mirroring watchCapChanges/watchNamespaceChanges' identity/
+// dedup/pruning/cap shape exactly. A live process's backing binary
+// changing on disk is the observe-only half of the "Exe-hash leased
+// deny" backlog item — no enforcement here, and no new BPF; gated by
+// procmeta.
+func (a *Agent) watchExeHashChanges(meta []models.ProcessMetaStat, pidCgroup map[uint32]uint64) []models.ExeHashChangeEvent {
+	if !a.procMetaEnabled || len(meta) == 0 {
+		return nil
+	}
+	if a.prevExeHash == nil {
+		a.prevExeHash = map[uint64]string{}
+	}
+	var out []models.ExeHashChangeEvent
+	seen := map[uint64]struct{}{}
+	for _, m := range meta {
+		if m.AttributionError != "" || m.PID == 0 || m.ExeHash == "" {
+			continue
+		}
+		key := uint64(m.PID)<<32 ^ m.StartTimeJiffies
+		seen[key] = struct{}{}
+		prev, ok := a.prevExeHash[key]
+		a.prevExeHash[key] = m.ExeHash
+		if !ok || prev == m.ExeHash {
+			continue
+		}
+		ev := models.ExeHashChangeEvent{
+			PID:              m.PID,
+			StartTimeJiffies: m.StartTimeJiffies,
+			Comm:             m.Comm,
+			Exe:              m.Exe,
+			PreviousExeHash:  prev,
+			CurrentExeHash:   m.ExeHash,
+			CgroupID:         pidCgroup[m.PID],
+		}
+		if ev.CgroupID != 0 {
+			if w, ok := a.workloadIdentity(ev.CgroupID); ok {
+				ev.Namespace, ev.Pod, ev.WorkloadKind, ev.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+			}
+		}
+		out = append(out, ev)
+	}
+	// Drop identities no longer in the report so the map cannot grow unboundedly.
+	for k := range a.prevExeHash {
+		if _, ok := seen[k]; !ok {
+			delete(a.prevExeHash, k)
+		}
+	}
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}

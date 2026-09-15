@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.65 — 2026-09-15
+
+- **Exe-hash change watch (`internal/exehash`) — observe-only half of `docs/exporter-tetragon-borrow-backlog.md`'s "Exe-hash leased deny" item.** "Observe `exe` first; optional fail-open lease map later" — this ships the observe half only; no lease map, deny list, or enforcement exists anywhere for this yet. No new BPF: agent/Go-side only, mirroring `internal/capdrift`/`internal/nsdrift`'s identity/diff/pruning shape.
+  - `procmeta.Meta.ExeHash` is the SHA-256 (hex) of the executable backing a process, read from the magic `/proc/PID/exe` symlink itself (not `os.Readlink`'s string target) — the kernel resolves it to the live backing inode even after an on-disk replace, so the common benign case (a package upgrade replacing the file at that path while an old process instance keeps running) does not false-flag. Capped at 64MiB per binary (`internal/procmeta.maxExeHashBytes`); oversized or unreadable executables report an empty hash rather than a partial one.
+  - `watchExeHashChanges` (`internal/agent/ownership_linux.go`) diffs it per process identity across sync cycles — same 64-event cap, same stale-identity pruning, same reset-on-restart caveat as its siblings.
+  - `internal/exehash.Build` turns `ExeHashChangeEvent`s into findings: always `warning` (`exehash-changed`) — because of how the hash is read, a genuine change means the process's own backing inode content changed while running, a narrower and rarer signal than capability or namespace drift — plus `exehash-coverage-gap` (`info`) on recent agent restart.
+  - `GET /api/v1/ebpf/exehash`, `netractl ebpf exehash`, `netra_ebpf_exehash` MCP tool (75 read / 50 mutate / 125 total). No dashboard card yet.
+  - Docs: new "Exe-hash change watch" section in `docs/process-metadata.md`, mirroring the namespace-change section above it.
+  - Verified: `go build/vet/test ./...`, `GOOS=linux go build/vet` plus a cross-compiled (not run — no Linux toolchain here) `internal/procmeta` test binary, new unit tests for `hashExe` (content match, missing file, over-size-cap) and `internal/exehash.Build` (change-is-warning, coverage-gap on/off, stale-agent skip, topN truncation). **Not live-kernel-verified** — same caveat as namespace-change watch: reads an existing `/proc` file at the same privilege level as existing fields, but no real in-place binary rewrite was exercised against a live agent this session.
+- Version bumped to 0.27.65 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.64 — 2026-09-15
 
 - **Namespace-change watch (`internal/nsdrift`) — closes `docs/exporter-tetragon-borrow-backlog.md`'s deferred item.** "Cap watch ships first; ns change can follow the same socket-owner scope" — it now does, mirroring `internal/capdrift`'s identity/diff/pruning shape exactly. No new BPF: agent/Go-side only, gated by the existing `NETRA_PROCMETA_ENABLED`.

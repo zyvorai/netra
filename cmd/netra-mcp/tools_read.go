@@ -243,6 +243,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_exehash", method: "GET", path: "/api/v1/ebpf/exehash",
+			description: "Executable-content-hash-change anomalies on processes the eBPF datapath already tracks — a live process's on-disk binary content changing while it runs. Observe-only half of exe-hash leased deny; agent-sourced from the same periodic /proc scan capability-drift uses (requires NETRA_PROCMETA_ENABLED). Includes an exehash-coverage-gap finding when an agent restarted recently.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-200. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_ebpf_path", method: "GET", path: "/api/v1/ebpf/path",
 			description: "Path diagnostics: per-hop/per-hook health signals for traffic across the cluster.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),

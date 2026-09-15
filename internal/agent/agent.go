@@ -94,6 +94,8 @@ type Agent struct {
 	prevCaps map[uint64]uint64
 	// prevNetNS mirrors prevCaps for observe-only network-namespace-change watch.
 	prevNetNS map[uint64]uint64
+	// prevExeHash mirrors prevCaps for observe-only exe-hash-change watch.
+	prevExeHash map[uint64]string
 	// startedAt is set once here at process boot, reported on every cycle as
 	// AgentReport.AgentStartedAt — lets consumers (internal/capdrift) detect
 	// a recent restart, which resets prevCaps and opens a real blind-spot
@@ -119,6 +121,7 @@ func New(log *slog.Logger) *Agent {
 		attachedProgs:   map[string]bool{},
 		prevCaps:        map[uint64]uint64{},
 		prevNetNS:       map[uint64]uint64{},
+		prevExeHash:     map[uint64]string{},
 	}
 }
 
@@ -663,6 +666,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	a.enrichSocketOwnership(tcpHealth, processMeta)
 	capChanges := a.watchCapChanges(processMeta, cgroupsByPID(tcpHealth))
 	namespaceChanges := a.watchNamespaceChanges(processMeta, cgroupsByPID(tcpHealth))
+	exeHashChanges := a.watchExeHashChanges(processMeta, cgroupsByPID(tcpHealth))
 	tcpPressure, err := a.readTCPPressure()
 	if err != nil {
 		return err
@@ -789,7 +793,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 	})

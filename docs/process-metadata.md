@@ -35,7 +35,7 @@ This sets `NETRA_PROCMETA_ENABLED=true` on the agent **and** adds `hostPID: true
 
 Once enabled, the agent collects the unique nonzero PIDs seen in the current `TCPHealth` snapshot each sync cycle, resolves each through a bounded, TTL'd cache (`procmeta.Cache`, 30s TTL / 8192 entries by default), and reports the results in `AgentReport.ProcessMeta`, keyed by `pid` + `startTimeJiffies`. A PID that has already exited by the time it's resolved gets an entry with only `attributionError` set, rather than being dropped — so a caller can still see that enrichment was attempted.
 
-When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events, and network-namespace changes (see below) as `namespaceChanges` events.
+When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` onto matching `TCPHealth` rows. When enrichment fails for a PID that eBPF attributed, that row's PID/comm are cleared and `ownershipStale` is set so UI and Drop Detective do not treat a recycled PID as the socket owner. CapEff changes for those live owners are reported as observe-only `capChanges` events, network-namespace changes (see below) as `namespaceChanges` events, and executable-content changes as `exeHashChanges` events.
 
 ## Capability-drift alerting (`internal/capdrift`)
 
@@ -57,6 +57,18 @@ When enrichment succeeds, the agent also writes `startTimeJiffies` and `exe` ont
 - Same coverage-gap honesty as capdrift: `internal/nsdrift.Build` emits `nsdrift-coverage-gap` (`info`) when an agent restarted within the last 2 minutes, since the in-memory `prevNetNS` diff state resets on restart.
 
 `GET /api/v1/ebpf/nsdrift`, `netractl ebpf nsdrift`, and the `netra_ebpf_nsdrift` MCP tool return the same `{anomalies, events}` shape as capdrift. No dashboard card yet — same `NETRA_PROCMETA_ENABLED=true` gate as everything else in this file.
+
+## Exe-hash change watch (`internal/exehash`) — observe-only half of exe-hash leased deny
+
+`docs/exporter-tetragon-borrow-backlog.md` staged this feature explicitly: "Observe `exe` first; optional fail-open lease map later." This ships the observe half; there is no lease map, deny list, or enforcement anywhere in this codebase yet.
+
+`procmeta.Meta.ExeHash` is the SHA-256 (hex) of the executable backing a process, read from the magic `/proc/PID/exe` symlink **itself**, not the string target `os.Readlink` returns — the kernel resolves that symlink to the live backing inode even after the on-disk file at that path was replaced or unlinked (a package upgrade doing exactly that while an old process instance keeps running is the common benign case this design avoids false-flagging). `watchExeHashChanges` diffs it per process identity (`pid`+`startTimeJiffies`) across sync cycles, mirroring `watchCapChanges`/`watchNamespaceChanges` exactly: same 64-event cap, same stale-identity pruning, same in-memory reset-on-restart caveat.
+
+- Because of how `ExeHash` is read, a genuine change means the process's own backing inode content changed while it was running — a narrower, rarer signal than capability or namespace drift, not a false alarm from routine package upgrades.
+- Always `warning` (`exehash-changed`), plus `exehash-coverage-gap` (`info`) on recent agent restart, same coverage-gap honesty as capdrift/nsdrift.
+- Hashing is capped at 64MiB per executable (`internal/procmeta.maxExeHashBytes`) to bound a single pathological case; oversized or unreadable executables report an empty hash rather than a partial/misleading one.
+
+`GET /api/v1/ebpf/exehash`, `netractl ebpf exehash`, and the `netra_ebpf_exehash` MCP tool return the same `{anomalies, events}` shape. No dashboard card yet — same `NETRA_PROCMETA_ENABLED=true` gate.
 
 ## Limits
 

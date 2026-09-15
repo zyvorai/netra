@@ -24,7 +24,7 @@ Netra stays a Cilium-independent network observability + leased emergency contai
 | SYN backlog depth histogram | Needs optional sensor; counters only for now |
 | OTEL *logs* for audit/anomaly/incident | Shipped as pull-based `GET /api/v1/export/*?format=otlp` (`internal/siem`). Stdlib JSON Logs body only — no OTEL SDK, does not replace the JSON API. See `docs/siem-export.md` |
 | OTEL *spans* for block/deny | Shipped as pull-based `GET /api/v1/export/blocks?format=otlp-trace` (`internal/siem`). One zero-parent span per already-captured blocked/dropped `FastPathEvent`; no OTEL SDK, does not replace the JSON API. See `docs/siem-export.md` |
-| Exe-hash leased deny | Observe `exe` first; optional fail-open lease map later |
+| Exe-hash leased deny | Observe half shipped as `internal/exehash` (`GET /api/v1/ebpf/exehash`) — SHA-256 of the live `/proc/PID/exe` inode, diffed per process identity, no new BPF. See `docs/process-metadata.md`. The optional fail-open lease map (enforcement) remains a later, separate step — no lease/deny map exists for this anywhere yet |
 | Namespace-change watch | Shipped as `internal/nsdrift` (`GET /api/v1/ebpf/nsdrift`). Same identity/diff/pruning shape as `internal/capdrift`, no new BPF — `procmeta.Meta.NetNS` from `/proc/PID/ns/net`. See `docs/process-metadata.md` |
 
 ## Skipped

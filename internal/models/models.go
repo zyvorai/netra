@@ -394,6 +394,32 @@ type NamespaceDriftResponse struct {
 	Events    []NamespaceChangeEvent `json:"events"`
 }
 
+// ExeHashChangeEvent is an observe-only notice that a live process's
+// on-disk executable content changed while it was running — the
+// exe-hash half of docs/exporter-tetragon-borrow-backlog.md's
+// "Exe-hash leased deny" item ("Observe exe first"). Same
+// identity/shape as CapChangeEvent and NamespaceChangeEvent.
+type ExeHashChangeEvent struct {
+	PID              uint32 `json:"pid"`
+	StartTimeJiffies uint64 `json:"startTimeJiffies,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	Exe              string `json:"exe,omitempty"`
+	PreviousExeHash  string `json:"previousExeHash"`
+	CurrentExeHash   string `json:"currentExeHash"`
+	CgroupID         uint64 `json:"cgroupId,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+	WorkloadKind     string `json:"workloadKind,omitempty"`
+	WorkloadName     string `json:"workloadName,omitempty"`
+}
+
+// ExeHashDriftResponse is internal/exehash.Build's output, mirroring
+// CapDriftResponse/NamespaceDriftResponse's shape.
+type ExeHashDriftResponse struct {
+	Anomalies []NetworkHealthAnomaly `json:"anomalies"`
+	Events    []ExeHashChangeEvent   `json:"events"`
+}
+
 // CapabilityBit maps the capability names capability-gated socket deny
 // accepts (see EBPFFastPathConfig.DeniedCapabilities) to their Linux
 // capability bit position (<linux/capability.h>). Deliberately a small,
@@ -953,6 +979,10 @@ type AgentReport struct {
 	// diffing state (watchNamespaceChanges' prevNetNS) resets on restart
 	// the same way.
 	NamespaceChanges []NamespaceChangeEvent `json:"namespaceChanges,omitempty"`
+	// ExeHashChanges mirrors NamespaceChanges' reset-on-restart caveat —
+	// its diffing state (watchExeHashChanges' prevExeHash) resets on
+	// restart the same way.
+	ExeHashChanges []ExeHashChangeEvent `json:"exeHashChanges,omitempty"`
 	// AgentStartedAt is set once at agent process boot (New()), not per
 	// report. Used to detect a recent restart, which resets in-memory
 	// diffing state like watchCapChanges' prevCaps — a real blind-spot
@@ -981,6 +1011,7 @@ type ProcessMetaStat struct {
 	SeccompMode      int      `json:"seccompMode,omitempty"`
 	LSMLabel         string   `json:"lsmLabel,omitempty"`
 	Exe              string   `json:"exe,omitempty"`
+	ExeHash          string   `json:"exeHash,omitempty"`
 	NetNS            uint64   `json:"netNs,omitempty"`
 	CapEff           uint64   `json:"capEff,omitempty"`
 	CapNames         []string `json:"capNames,omitempty"`

@@ -4,13 +4,26 @@ package procmeta
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// maxExeHashBytes caps how much of an executable Read will hash. A
+// process being observed here already has a live TCP socket (the
+// caller-provided PID set is scoped that way), so this is a bounded,
+// small set of processes per cycle — the cap exists only to bound a
+// single pathological case (an unusually large binary), not to sample
+// hash content, so drift on the untouched remainder of a huge binary
+// would go undetected. No known Netra-adjacent binary approaches this
+// size.
+const maxExeHashBytes = 64 << 20 // 64MiB
 
 // ErrNoProcess is returned when /proc/PID does not exist. This covers both
 // a PID that was never valid and a process that has exited since the
@@ -91,6 +104,18 @@ type Meta struct {
 	// Exe is the target of /proc/PID/exe. Empty for kernel threads or when
 	// permission is denied.
 	Exe string `json:"exe,omitempty"`
+
+	// ExeHash is the SHA-256 of Exe's target file contents (hex-encoded),
+	// read at the same instant as everything else in Meta. Empty when
+	// unreadable (permission, kernel thread with no Exe, deleted
+	// executable — a common and benign case after a package upgrade
+	// replaces a running binary on disk, "(deleted)" appended to the
+	// Exe target) or larger than maxExeHashBytes. Comparing this across
+	// syncs for the same process identity detects the on-disk binary
+	// backing a *running* process changing underneath it — a stronger
+	// tamper signal than the target path alone, which a symlink swap
+	// could spoof without this.
+	ExeHash string `json:"exeHash,omitempty"`
 
 	// NetNS is the inode number of /proc/PID/ns/net — the kernel's own
 	// stable identifier for a network namespace, parsed from the symlink
@@ -219,6 +244,11 @@ func readFromStat(pid int, statB []byte) (*Meta, error) {
 	exePath, exeErr := os.Readlink(root + "/exe")
 	if exeErr == nil {
 		m.Exe = exePath
+		// Open the magic symlink itself, not exePath's string target: the
+		// kernel resolves /proc/PID/exe to the live backing inode even
+		// after the on-disk file was unlinked (readlink then appends
+		// " (deleted)" to the target string, which is not a real path).
+		m.ExeHash = hashExe(root + "/exe")
 	}
 
 	if ns, err := os.Readlink(root + "/ns/net"); err == nil {
@@ -336,6 +366,27 @@ func parseUint32(s string) uint32 {
 
 // parseUint64Hex parses the hex masks printed in /proc/PID/status. The
 // kernel prints them without an 0x prefix, but tolerate one.
+// hashExe returns the hex SHA-256 of exePath's contents, or "" on any
+// read error (permission, race with process exit, over maxExeHashBytes).
+// A read error here is exactly as tolerable as every other best-effort
+// field in Meta — the rest of the struct is still useful without it.
+func hashExe(exePath string) string {
+	f, err := os.Open(exePath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() > maxExeHashBytes {
+		return ""
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // parseNSInode extracts the inode number from a /proc/PID/ns/* symlink
 // target of the form "net:[4026531840]". Returns 0 for any other shape
 // rather than erroring — a namespace inode of 0 is not a valid kernel
