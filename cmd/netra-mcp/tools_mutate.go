@@ -30,6 +30,27 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			bodyFields:  true,
 		},
 		{
+			name: "netra_capture_start", method: "PUT", path: "/api/v1/vms/{node}/capture",
+			description: "Start a packet-capture session on one node. Captures full packet bytes by default (not just headers) — captured traffic can contain cleartext application secrets (auth headers, tokens, cookies), so only use this when you specifically need to inspect wire traffic, and prefer narrowing protocol/host/port over an unfiltered capture (at least one filter field is required). Duration is capped at 5 minutes and auto-expires; live packets stream to the Capture dashboard page, not through this tool.",
+			schema: objSchema(map[string]any{
+				"node":            strProp("Kubernetes node name to capture on."),
+				"protocol":        enumProp("Filter to one L4 protocol. Omit for any.", "tcp", "udp", "icmp", "icmpv6"),
+				"host":            strProp("Filter to packets with this IPv4/IPv6 address as either source or destination. Omit for any host."),
+				"port":            intProp("Filter to packets with this port as either source or destination. Omit for any port."),
+				"snapLen":         intProp("Bytes captured per packet. Omit for a full-frame capture."),
+				"maxPps":          intProp("In-kernel per-second capture cap. Omit for the default (2000)."),
+				"durationSeconds": intProp("How long the capture runs before auto-stopping, 1-300. Default 60."),
+			}, "node"),
+			pathParams: []string{"node"},
+			bodyFields: true,
+		},
+		{
+			name: "netra_capture_stop", method: "DELETE", path: "/api/v1/vms/{node}/capture",
+			description: "Stop an active packet-capture session on one node before its duration expires.",
+			schema:      objSchema(map[string]any{"node": strProp("Kubernetes node name to stop capturing on.")}, "node"),
+			pathParams:  []string{"node"},
+		},
+		{
 			name: "netra_ebpf_scope_set", method: "PUT", path: "/api/v1/ebpf/scope",
 			description: "Set which workloads the eBPF fast path applies to: \"all\" (cluster-wide) or \"selected\" (only the given scopes). Preview matches first with netra_ebpf_scope_preview.",
 			schema: objSchema(map[string]any{
@@ -571,7 +592,7 @@ func registerPolicyApply(srv *mcpserver.Server, c *client) error {
 // JSON field.
 func registerPolicyGitOpsResync(srv *mcpserver.Server, c *client) error {
 	return srv.Register(mcpserver.Tool{
-		Name: "netra_policy_gitops_resync",
+		Name:        "netra_policy_gitops_resync",
 		Description: "Explicitly apply a candidate manifest via the GitOps pipeline, bypassing the reconciler's own auto-apply gating (drift or high/critical risk) — the human override for a manifest netra_policy_gitops_status shows as pending. If the computed risk is \"high\" or \"critical\", confirm_risk must be passed and must equal that risk level, or the call is rejected. 409 if GitOps is not enabled.",
 		InputSchema: objSchema(map[string]any{
 			"manifest":     strProp("Full CiliumNetworkPolicy manifest (YAML or JSON) to resync."),

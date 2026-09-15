@@ -61,6 +61,7 @@ type Server struct {
 	ciliumEnabled       bool
 	consoleEnabled      bool
 	metricsData         *telemetry
+	captureHub          *captureHub
 }
 
 func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *Server {
@@ -73,7 +74,7 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
 	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
 	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
-	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}}
+	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub()}
 
 	// ChatOps outbound trust is shared across every provider: every command
 	// is a thin HTTP client of this same process's own /api/v1/* endpoints
@@ -122,13 +123,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.69"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.70"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.69"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.70"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.69"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.70"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -171,6 +172,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
 	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.explainDrops)))
 	mux.Handle("GET /api/v1/ebpf/config", s.authOrAgent(http.HandlerFunc(s.ebpfConfig)))
+	mux.Handle("PUT /api/v1/vms/{node}/capture", s.auth(http.HandlerFunc(s.captureStart)))
+	mux.Handle("DELETE /api/v1/vms/{node}/capture", s.auth(http.HandlerFunc(s.captureStop)))
+	mux.Handle("GET /api/v1/vms/{node}/capture/ws", s.auth(http.HandlerFunc(s.proxyCaptureStream)))
+	mux.Handle("GET /api/v1/capture/status", s.auth(http.HandlerFunc(s.captureStatus)))
+	mux.Handle("GET /api/v1/agents/capture/stream", s.agentAuth(http.HandlerFunc(s.agentCaptureStream)))
 	mux.Handle("GET /api/v1/ebpf/workloads", s.auth(http.HandlerFunc(s.ebpfWorkloads)))
 	mux.Handle("PUT /api/v1/ebpf/scope", s.auth(http.HandlerFunc(s.ebpfScope)))
 	mux.Handle("POST /api/v1/ebpf/scope/preview", s.auth(http.HandlerFunc(s.ebpfScopePreview)))
@@ -385,7 +391,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.69", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.70", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -919,6 +925,9 @@ func enrichExplanation(x map[string]any) {
 func (s *Server) ebpfConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.store.Config()
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
+	if node != "" {
+		cfg.DesiredCapture = s.store.Capture(node)
+	}
 	if node != "" && s.kube != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()

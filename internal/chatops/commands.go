@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,6 +57,7 @@ func helpText(allowMutations bool) string {
 	b.WriteString("`/netra forget` – clear this channel's Ask Netra conversation memory and start fresh\n")
 	if allowMutations {
 		b.WriteString("`/netra mode observe` / `/netra mode enforce [lease]` – switch fast-path mode (requires confirmation)\n")
+		b.WriteString("`/netra capture start NODE [protocol=tcp host=IP port=N duration=60s]` / `/netra capture stop NODE` – packet capture (requires confirmation; captures full packet bytes by default)\n")
 	} else {
 		b.WriteString("_Mutating commands are disabled on this integration (NETRA_CHATOPS_ALLOW_MUTATIONS is not set)._\n")
 	}
@@ -112,6 +114,11 @@ func Dispatch(ctx context.Context, c *Client, allowMutations bool, text, convers
 			return "`/netra mode` is disabled on this integration (NETRA_CHATOPS_ALLOW_MUTATIONS is not set).", nil
 		}
 		return modeCommand(fields[1:])
+	case "capture":
+		if !allowMutations {
+			return "`/netra capture` is disabled on this integration (NETRA_CHATOPS_ALLOW_MUTATIONS is not set).", nil
+		}
+		return captureCommand(fields[1:])
 	default:
 		return fmt.Sprintf("Unknown command %q.\n%s", fields[0], helpText(allowMutations)), nil
 	}
@@ -138,6 +145,56 @@ func modeCommand(args []string) (reply string, pending *pendingAction) {
 	body, _ := json.Marshal(map[string]string{"mode": mode})
 	p := pendingAction{Method: "PUT", Path: path, Body: string(body), Summary: summary}
 	return "Confirm: " + summary + "?", &p
+}
+
+// captureCommand mirrors modeCommand's confirm-button shape for packet
+// capture start/stop — see internal/api/capture.go's captureStart/
+// captureStop for the endpoints this drives. Start requires at least one
+// filter field (key=value pairs after the node name), matching the REST
+// API's own "no unfiltered captures" rule, checked here too so a bad
+// command gets an immediate reply instead of a confirmation button for a
+// request the controller will just reject.
+func captureCommand(args []string) (reply string, pending *pendingAction) {
+	usage := "Usage: `/netra capture start NODE [protocol=tcp host=1.2.3.4 port=443 duration=60s]` or `/netra capture stop NODE`."
+	if len(args) < 2 {
+		return usage, nil
+	}
+	node := args[1]
+	switch args[0] {
+	case "stop":
+		summary := "stop the packet capture on *" + node + "*"
+		p := pendingAction{Method: "DELETE", Path: "/api/v1/vms/" + node + "/capture", Summary: summary}
+		return "Confirm: " + summary + "?", &p
+	case "start":
+		body := map[string]any{}
+		for _, kv := range args[2:] {
+			k, v, ok := strings.Cut(kv, "=")
+			if !ok {
+				continue
+			}
+			switch k {
+			case "protocol", "host":
+				body[k] = v
+			case "port", "snapLen", "maxPps":
+				if n, err := strconv.Atoi(v); err == nil {
+					body[k] = n
+				}
+			case "duration":
+				if d, err := time.ParseDuration(v); err == nil {
+					body["durationSeconds"] = int(d.Seconds())
+				}
+			}
+		}
+		if body["protocol"] == nil && body["host"] == nil && body["port"] == nil {
+			return "At least one of `protocol=`, `host=`, or `port=` is required — unfiltered captures are not allowed.", nil
+		}
+		b, _ := json.Marshal(body)
+		summary := "start a packet capture on *" + node + "* (captures full packet bytes by default — may include sensitive data)"
+		p := pendingAction{Method: "PUT", Path: "/api/v1/vms/" + node + "/capture", Body: string(b), Summary: summary}
+		return "Confirm: " + summary + "?", &p
+	default:
+		return usage, nil
+	}
 }
 
 // chatAskResponse mirrors only the internal/ai.Brief fields askCommand

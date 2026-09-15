@@ -42,6 +42,8 @@ Or directly via environment variables on `netrad`:
 | `/netra forget` | Clear this channel's Ask Netra conversation memory and start fresh. Read-only, no confirmation. |
 | `/netra mode observe` | Switch the fast-path to observe mode. **Requires confirmation.** |
 | `/netra mode enforce [lease]` | Switch to enforce mode for `lease` (default `15m`, auto-reverts to observe on expiry). **Requires confirmation.** |
+| `/netra capture start NODE [protocol=tcp host=IP port=N duration=60s]` | Start a packet-capture session on one node; at least one of `protocol=`/`host=`/`port=` is required. Captures full packet bytes by default. **Requires confirmation.** |
+| `/netra capture stop NODE` | Stop an active capture before its duration expires. **Requires confirmation.** |
 
 Read commands (`status`/`health`/`audit`) reply with a compact, indented-JSON summary of the underlying API response (capped well under Slack's per-block size limit) rather than a hand-parsed field-by-field rendering, so replies stay correct as those endpoints' response shapes evolve — they are not reformatted into custom prose. `/netra ask` is the one exception: it renders the AI brief's headline/severity/summary/findings/next-steps as formatted chat text, matching the web card's presentation rather than a JSON dump.
 

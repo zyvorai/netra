@@ -21,6 +21,7 @@ import Scorecard from './pages/Scorecard';
 import Talkers from './pages/Talkers';
 import Fleet from './pages/Fleet';
 import Traffic from './pages/Traffic';
+import Capture from './pages/Capture';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -148,6 +149,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Namespace, protocol, port, and DNS breakdowns from current agent destination stats. No payloads.',
     tint: 'purple',
   },
+  capture: {
+    eyebrow: 'Capture',
+    title: 'Watch the wire, live.',
+    lede: 'Filtered, time-bounded packet capture per node — full packet bytes by default. A standalone, fail-open eBPF observer; never affects the datapath verdict.',
+    tint: 'red',
+  },
 };
 
 export default function App() {
@@ -204,6 +211,7 @@ export default function App() {
     talkers: <Talkers />,
     fleet: <Fleet />,
     traffic: <Traffic />,
+    capture: <Capture />,
   }[page];
 
   const hero = pageHero[page];

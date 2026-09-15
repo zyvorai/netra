@@ -23,7 +23,8 @@ export type Page =
   | 'scorecard'
   | 'talkers'
   | 'fleet'
-  | 'traffic';
+  | 'traffic'
+  | 'capture';
 
 const items: [Page, string][] = [
   ['overview', 'Overview'],
@@ -48,6 +49,7 @@ const items: [Page, string][] = [
   ['talkers', 'Talkers'],
   ['fleet', 'Fleet'],
   ['traffic', 'Traffic'],
+  ['capture', 'Capture'],
 ];
 
 export default function Nav({

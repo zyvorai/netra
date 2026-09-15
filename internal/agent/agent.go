@@ -26,6 +26,10 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/gorilla/websocket"
+	"golang.org/x/sys/unix"
+
+	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
 	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/models"
@@ -59,22 +63,33 @@ type Agent struct {
 	// programs" rule. Its TCX links are appended to the shared a.links
 	// slice (Close() already closes those); only the collection itself
 	// needs its own Close() call.
-	edgeObject       string
-	edgeCollection   *ebpf.Collection
-	events           chan models.FastPathEvent
-	hooks            []string
-	lastRevision     uint64
-	lastSync         time.Time
-	failsafeAfter    time.Duration
-	enforceUntil     time.Time
-	cgroupEnabled    bool
-	workloadMu       sync.RWMutex
-	workloadByCgroup map[uint64]models.WorkloadIdentity
-	cgroupCache      map[uint64]cgroupmeta.Identity
-	lastCgroupScan   time.Time
-	cgroupScanEvery  time.Duration
-	scopeMode        string
-	selectedCgroups  int
+	edgeObject     string
+	edgeCollection *ebpf.Collection
+	// captureObject/captureCollection mirror edgeObject/edgeCollection for
+	// bpf/netra_capture.c — a third, independent standalone object with its
+	// own collection, per the same "new sensors stay separate programs"
+	// rule. activeCapture/captureCancel track the one reconciled capture
+	// session (nil/nil when none): activeCapture lets applyCapture no-op on
+	// an unchanged desired spec instead of restarting the stream every
+	// tick, and captureCancel stops the streaming goroutine on change/stop.
+	captureObject     string
+	captureCollection *ebpf.Collection
+	activeCapture     *models.CaptureSpec
+	captureCancel     context.CancelFunc
+	events            chan models.FastPathEvent
+	hooks             []string
+	lastRevision      uint64
+	lastSync          time.Time
+	failsafeAfter     time.Duration
+	enforceUntil      time.Time
+	cgroupEnabled     bool
+	workloadMu        sync.RWMutex
+	workloadByCgroup  map[uint64]models.WorkloadIdentity
+	cgroupCache       map[uint64]cgroupmeta.Identity
+	lastCgroupScan    time.Time
+	cgroupScanEvery   time.Duration
+	scopeMode         string
+	selectedCgroups   int
 
 	// procMetaEnabled gates /proc-derived process metadata enrichment
 	// (internal/procmeta). Off by default: resolving a host PID's /proc
@@ -112,8 +127,9 @@ func New(log *slog.Logger) *Agent {
 	return &Agent{
 		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
-		edgeObject: env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
-		cgroupPath: env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
+		edgeObject:    env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
+		captureObject: env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
+		cgroupPath:    env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
@@ -362,6 +378,9 @@ func (a *Agent) loadAndAttach() error {
 	if err := a.attachEdgeIntel(ifs); err != nil {
 		return err
 	}
+	if err := a.attachCapture(ifs); err != nil {
+		return err
+	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
 	if err != nil {
 		return err
@@ -532,6 +551,93 @@ func (a *Agent) attachEdgeIntel(ifs []string) error {
 	return nil
 }
 
+var captureMapNames = []string{"capture_spec", "capture_rate", "capture_events"}
+
+// attachCapture loads and attaches the standalone packet-capture BPF object
+// (bpf/netra_capture.c) as a fourth TCX program pair, mirroring
+// attachEdgeIntel above exactly (same auto|off|required convention via
+// NETRA_CAPTURE, same tolerance for a missing object file in auto mode —
+// this is an optional, newer sensor, not load-bearing). See that function's
+// doc comment and bpf/netra_capture.c's own header comment for why this
+// stays a separate object rather than a branch inside bpf/netra_tc.c: a bug
+// here can never affect a packet's verdict, only whether it gets captured.
+func (a *Agent) attachCapture(ifs []string) error {
+	mode := strings.ToLower(env("NETRA_CAPTURE", "auto")) // auto|off|required
+	if mode == "off" {
+		a.log.Info("packet capture skipped by NETRA_CAPTURE=off")
+		return nil
+	}
+	spec, err := ebpf.LoadCollectionSpec(a.captureObject)
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load BPF ELF %s (NETRA_CAPTURE=required): %w", a.captureObject, err)
+		}
+		a.log.Warn("packet capture object unavailable; continuing without it", "object", a.captureObject, "error", err)
+		return nil
+	}
+	repl := map[string]*ebpf.Map{}
+	for _, name := range captureMapNames {
+		if m, err := ebpf.LoadPinnedMap(filepath.Join(a.pinPath, name), nil); err == nil {
+			repl[name] = m
+			defer m.Close()
+		}
+	}
+	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load packet capture BPF collection (NETRA_CAPTURE=required): %w", err)
+		}
+		a.log.Warn("packet capture BPF collection failed to load; continuing without it", "error", err)
+		return nil
+	}
+	a.captureCollection = coll
+	for _, name := range captureMapNames {
+		if m := coll.Maps[name]; m != nil {
+			p := filepath.Join(a.pinPath, name)
+			if _, err := os.Stat(p); os.IsNotExist(err) {
+				if err := m.Pin(p); err != nil {
+					a.log.Warn("pin map", "map", name, "error", err)
+				}
+			}
+		}
+	}
+	for _, name := range ifs {
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			if mode == "required" {
+				return fmt.Errorf("interface %s (NETRA_CAPTURE=required): %w", name, err)
+			}
+			a.log.Warn("packet capture interface lookup failed; skipping", "iface", name, "error", err)
+			continue
+		}
+		for _, h := range []struct {
+			name   string
+			attach ebpf.AttachType
+			prog   string
+		}{{"capture-tcx-ingress", ebpf.AttachTCXIngress, "netra_capture_ingress"}, {"capture-tcx-egress", ebpf.AttachTCXEgress, "netra_capture_egress"}} {
+			p := coll.Programs[h.prog]
+			if p == nil {
+				if mode == "required" {
+					return fmt.Errorf("BPF program %s missing (NETRA_CAPTURE=required)", h.prog)
+				}
+				a.log.Warn("packet capture program missing; skipping", "program", h.prog)
+				continue
+			}
+			lnk, err := link.AttachTCX(link.TCXOptions{Interface: iface.Index, Program: p, Attach: h.attach, Anchor: link.Head()})
+			if err != nil {
+				if mode == "required" {
+					return fmt.Errorf("attach %s to %s (NETRA_CAPTURE=required): %w", h.name, name, err)
+				}
+				a.log.Warn("packet capture TCX attach failed; continuing without this hook", "hook", h.name, "iface", name, "error", err)
+				continue
+			}
+			a.links = append(a.links, lnk)
+			a.hooks = append(a.hooks, h.name+":"+name)
+		}
+	}
+	return nil
+}
+
 // edgeHistKey/edgeHistValue/edgeCountKey mirror bpf/netra_edge_intel.c's
 // struct edge_hist_key/edge_hist_value/edge_count_key byte-for-byte —
 // cilium/ebpf decodes map entries directly into these via reflection, the
@@ -618,6 +724,7 @@ func (a *Agent) resolveInterfaces(in []string) ([]string, error) {
 }
 
 func (a *Agent) Close() {
+	a.stopCaptureStream()
 	for _, l := range a.links {
 		_ = l.Close()
 	}
@@ -630,6 +737,9 @@ func (a *Agent) Close() {
 	}
 	if a.edgeCollection != nil {
 		a.edgeCollection.Close()
+	}
+	if a.captureCollection != nil {
+		a.captureCollection.Close()
 	}
 }
 
@@ -652,6 +762,15 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	if err := a.applyConnRateLimits(cfg); err != nil {
 		return err
+	}
+	// Capture is reconciled unconditionally on every tick, not gated by
+	// cfg.Revision — a capture session is per-node operator state, not
+	// part of the cluster-wide firewall config revision, and needs to
+	// start/stop within one 3s tick regardless of whether anything else
+	// changed. Failure here is logged, not fatal: a broken capture session
+	// must never take down the rest of the report/sync cycle.
+	if err := a.applyCapture(ctx, cfg.DesiredCapture); err != nil {
+		a.log.Warn("apply capture", "error", err)
 	}
 	a.lastSync = time.Now()
 	stats, err := a.readStats()
@@ -2968,6 +3087,187 @@ func (a *Agent) readNodeStack() models.NodeStackStat {
 	}
 	sort.Slice(out.Interfaces, func(i, j int) bool { return out.Interfaces[i].Name < out.Interfaces[j].Name })
 	return out
+}
+
+// monotonicNowNS reads CLOCK_MONOTONIC — the same clock source
+// bpf_ktime_get_ns() reads in the kernel (see bpf/netra_capture.c) — so a
+// desired capture's wall-clock ExpiresAt can be translated into a deadline
+// the kernel-side belt-and-suspenders check can compare itself against.
+// This is deliberately not derived from time.Now() (wall clock), which can
+// jump on NTP correction; CLOCK_MONOTONIC cannot.
+func monotonicNowNS() (uint64, error) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return 0, err
+	}
+	return uint64(ts.Sec)*1e9 + uint64(ts.Nsec), nil
+}
+
+// buildCaptureSpecValue translates an operator-facing models.CaptureSpec
+// into capture.SpecValue for writing into the capture_spec BPF map — the
+// same "local raw struct mirrors the map ABI" pattern applyShield already
+// uses for shield_cfg.
+func buildCaptureSpecValue(spec models.CaptureSpec) (capture.SpecValue, error) {
+	v := capture.SpecValue{Enabled: 1, Port: spec.Port, SnapLen: spec.SnapLen, MaxPPS: spec.MaxPPS}
+	switch strings.ToLower(strings.TrimSpace(spec.Protocol)) {
+	case "", "any":
+	case "tcp":
+		v.Protocol = 6
+	case "udp":
+		v.Protocol = 17
+	case "icmp":
+		v.Protocol = 1
+	case "icmpv6":
+		v.Protocol = 58
+	default:
+		return v, fmt.Errorf("unsupported capture protocol %q", spec.Protocol)
+	}
+	if spec.Host != "" {
+		ip := net.ParseIP(spec.Host)
+		if ip == nil {
+			return v, fmt.Errorf("invalid capture host %q", spec.Host)
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			v.Family = 4
+			copy(v.Host[:4], ip4)
+		} else {
+			v.Family = 6
+			copy(v.Host[:], ip.To16())
+		}
+	}
+	until := time.Until(spec.ExpiresAt)
+	if until <= 0 {
+		until = time.Second // already at/past deadline; let the userspace reconcile on the next tick actually clear it
+	}
+	if now, err := monotonicNowNS(); err == nil {
+		v.ExpiresNS = now + uint64(until.Nanoseconds())
+	}
+	return v, nil
+}
+
+// applyCapture reconciles the one desired capture session (nil = none) for
+// this node into the capture_spec BPF map and the agent→controller
+// streaming connection. Called unconditionally on every syncAndReport tick
+// (see there for why). A no-op when desired is unchanged from
+// a.activeCapture, so a steady-state capture doesn't restart its stream
+// every 3 seconds.
+func (a *Agent) applyCapture(ctx context.Context, desired *models.CaptureSpec) error {
+	if desired == nil {
+		if a.activeCapture == nil {
+			return nil
+		}
+		a.stopCaptureStream()
+		a.activeCapture = nil
+		if m := a.captureMap("capture_spec"); m != nil {
+			return m.Put(uint32(0), capture.SpecValue{})
+		}
+		return nil
+	}
+	if a.activeCapture != nil && *a.activeCapture == *desired {
+		return nil
+	}
+	m := a.captureMap("capture_spec")
+	if m == nil {
+		return fmt.Errorf("capture_spec map unavailable (packet-capture engine not attached on this node)")
+	}
+	value, err := buildCaptureSpecValue(*desired)
+	if err != nil {
+		return err
+	}
+	if err := m.Put(uint32(0), value); err != nil {
+		return err
+	}
+	if rate := a.captureMap("capture_rate"); rate != nil {
+		_ = rate.Put(uint32(0), capture.RateValue{}) // fresh counters for the new session
+	}
+	a.stopCaptureStream() // in case this is a mid-flight filter change, not a fresh start
+	d := *desired
+	a.activeCapture = &d
+	a.startCaptureStream(ctx)
+	return nil
+}
+
+func (a *Agent) captureMap(name string) *ebpf.Map {
+	if a.captureCollection == nil {
+		return nil
+	}
+	return a.captureCollection.Maps[name]
+}
+
+func (a *Agent) startCaptureStream(parentCtx context.Context) {
+	if a.captureMap("capture_events") == nil {
+		a.log.Warn("capture requested but capture_events map unavailable")
+		return
+	}
+	ctx, cancel := context.WithCancel(parentCtx)
+	a.captureCancel = cancel
+	go a.runCaptureStream(ctx)
+}
+
+func (a *Agent) stopCaptureStream() {
+	if a.captureCancel != nil {
+		a.captureCancel()
+		a.captureCancel = nil
+	}
+}
+
+// runCaptureStream drains bpf/netra_capture.c's ringbuf and forwards each
+// record, reframed as a capture.Frame, over an agent-initiated WebSocket to
+// the controller (internal/api/capture.go's agentCaptureStream handler),
+// which relays frames byte-for-byte to any browser watching this node —
+// see docs/... the design note in internal/api/capture.go for why the
+// controller never decodes these frames itself. Exits when ctx is
+// cancelled (a.stopCaptureStream, called on config change or agent
+// shutdown) or the connection/ringbuf fails.
+func (a *Agent) runCaptureStream(ctx context.Context) {
+	reader, err := ringbuf.NewReader(a.captureMap("capture_events"))
+	if err != nil {
+		a.log.Error("open capture ring buffer", "error", err)
+		return
+	}
+	defer reader.Close()
+	go func() { <-ctx.Done(); _ = reader.Close() }()
+
+	wsURL := strings.NewReplacer("https://", "wss://", "http://", "ws://").Replace(a.server) +
+		"/api/v1/agents/capture/stream?node=" + url.QueryEscape(a.node)
+	header := http.Header{}
+	if a.key != "" {
+		header.Set("X-Netra-Agent-Key", a.key)
+	}
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
+	if err != nil {
+		a.log.Error("dial capture stream", "error", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if ctx.Err() == nil {
+				a.log.Warn("read capture ring buffer", "error", err)
+			}
+			return
+		}
+		ev, err := capture.DecodeRingbufRecord(record.RawSample)
+		if err != nil {
+			continue
+		}
+		frame := capture.EncodeFrame(capture.Frame{
+			ObservedAtUnixNano: time.Now().UnixNano(),
+			OrigLen:            ev.OrigLen,
+			Direction:          ev.Direction,
+			Family:             ev.Family,
+			Protocol:           ev.Protocol,
+			Data:               ev.Data,
+		})
+		if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			if ctx.Err() == nil {
+				a.log.Warn("write capture frame", "error", err)
+			}
+			return
+		}
+	}
 }
 
 func (a *Agent) report(ctx context.Context, r models.AgentReport) error {

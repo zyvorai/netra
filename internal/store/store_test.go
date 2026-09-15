@@ -1083,3 +1083,49 @@ func TestBehaviorBaselinePersists(t *testing.T) {
 		t.Fatalf("baseline=%#v", got)
 	}
 }
+
+func TestCaptureLifecycle(t *testing.T) {
+	s := New()
+	if got := s.Capture("node-a"); got != nil {
+		t.Fatalf("expected no active capture, got %#v", got)
+	}
+	spec := s.SetCapture(models.CaptureSpec{Node: "node-a", Protocol: "tcp", Port: 443, ExpiresAt: time.Now().Add(time.Hour)}, "alice")
+	if spec.Requestor != "alice" || spec.StartedAt.IsZero() {
+		t.Fatalf("SetCapture did not stamp requestor/startedAt: %#v", spec)
+	}
+	got := s.Capture("node-a")
+	if got == nil || got.Protocol != "tcp" || got.Port != 443 {
+		t.Fatalf("Capture(node-a) = %#v", got)
+	}
+	if all := s.Captures(); len(all) != 1 || all[0].Node != "node-a" {
+		t.Fatalf("Captures() = %#v", all)
+	}
+	if s.Capture("node-b") != nil {
+		t.Fatal("expected node-b to have no active capture")
+	}
+	auditBefore := len(s.audit)
+	if !s.ClearCapture("node-a", "alice", "manual") {
+		t.Fatal("ClearCapture on an active session should return true")
+	}
+	if s.ClearCapture("node-a", "alice", "manual") {
+		t.Fatal("ClearCapture on an already-stopped session should return false")
+	}
+	if len(s.audit) != auditBefore+1 {
+		t.Fatalf("expected exactly one new audit event for the real stop, got %d new", len(s.audit)-auditBefore)
+	}
+	if s.Capture("node-a") != nil {
+		t.Fatal("expected no active capture after ClearCapture")
+	}
+}
+
+func TestCaptureExpiry(t *testing.T) {
+	s := New()
+	s.SetCapture(models.CaptureSpec{Node: "node-a", Host: "10.0.0.1", ExpiresAt: time.Now().Add(20 * time.Millisecond)}, "bob")
+	time.Sleep(40 * time.Millisecond)
+	if got := s.Capture("node-a"); got != nil {
+		t.Fatalf("expected expired capture to read back as nil, got %#v", got)
+	}
+	if all := s.Captures(); len(all) != 0 {
+		t.Fatalf("expected Captures() to have expired the entry, got %#v", all)
+	}
+}

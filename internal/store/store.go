@@ -76,6 +76,13 @@ type Store struct {
 	nextNetPolRuleSeq     uint64
 	nextConnRateLimitSeq  uint64
 	backend               *fileBackend
+	// captures holds at most one desired CaptureSpec per node — deliberately
+	// not part of config (which is a single cluster-wide struct) since a
+	// capture session always targets one specific node. Ephemeral only
+	// (never persisted): a capture session is capped at a few minutes, so
+	// losing it across a controller restart is an acceptable, self-healing
+	// tradeoff, unlike firewall policy or mode.
+	captures map[string]models.CaptureSpec
 }
 
 func New() *Store {
@@ -83,6 +90,7 @@ func New() *Store {
 		config:         models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
 		agents:         map[string]models.AgentReport{},
 		preflights:     map[string]preflight{},
+		captures:       map[string]models.CaptureSpec{},
 		rateSamples:    map[string][]rateSample{},
 		ruleIndex:      map[string]firewallRuleIndex{},
 		ruleIndexByKey: map[string]string{},
@@ -247,6 +255,72 @@ func (s *Store) SetMode(mode string, lease time.Duration, actor string) (models.
 		return cloneConfig(s.config), fmt.Errorf("%w: %v", ErrPersistence, err)
 	}
 	return cloneConfig(s.config), nil
+}
+
+// SetCapture starts (or replaces) the one active capture session for node.
+// One concurrent capture per node, enforced by simply overwriting any prior
+// entry — the agent-side reconcile in internal/agent's applyCapture treats
+// this the same as a fresh start either way.
+func (s *Store) SetCapture(spec models.CaptureSpec, actor string) models.CaptureSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	spec.Requestor = actor
+	spec.StartedAt = time.Now().UTC()
+	s.captures[spec.Node] = spec
+	s.appendAuditLocked(models.AuditEvent{At: spec.StartedAt, Actor: actor, Action: "capture.start", Target: spec.Node, Details: map[string]any{
+		"protocol": spec.Protocol, "host": spec.Host, "port": spec.Port, "snapLen": spec.SnapLen, "expiresAt": spec.ExpiresAt,
+	}})
+	return spec
+}
+
+// ClearCapture stops node's active capture, if any, and returns whether one
+// was actually active (so callers can tell a real stop from a no-op).
+func (s *Store) ClearCapture(node, actor, reason string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.captures[node]; !ok {
+		return false
+	}
+	delete(s.captures, node)
+	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "capture.stop", Target: node, Details: map[string]any{"reason": reason}})
+	return true
+}
+
+// Capture returns node's active capture spec, expiring it in place (and
+// audit-logging the expiry) if its deadline has already passed — the same
+// lazy-expiry style normalizeLocked already applies to EnforceUntil.
+func (s *Store) Capture(node string) *models.CaptureSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	spec, ok := s.captures[node]
+	if !ok {
+		return nil
+	}
+	if !spec.ExpiresAt.IsZero() && time.Now().After(spec.ExpiresAt) {
+		delete(s.captures, node)
+		s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: "system", Action: "capture.stop", Target: node, Details: map[string]any{"reason": "expired"}})
+		return nil
+	}
+	out := spec
+	return &out
+}
+
+// Captures lists every currently active capture session, expiring any that
+// have passed their deadline first — backs GET /api/v1/capture/status.
+func (s *Store) Captures() []models.CaptureSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	out := make([]models.CaptureSpec, 0, len(s.captures))
+	for node, spec := range s.captures {
+		if !spec.ExpiresAt.IsZero() && now.After(spec.ExpiresAt) {
+			delete(s.captures, node)
+			s.appendAuditLocked(models.AuditEvent{At: now.UTC(), Actor: "system", Action: "capture.stop", Target: node, Details: map[string]any{"reason": "expired"}})
+			continue
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 func (s *Store) AddBlocked(ip, actor string) (models.EBPFFastPathConfig, error) {

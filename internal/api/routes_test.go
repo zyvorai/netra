@@ -121,6 +121,10 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/ebpf/capabilities"},
 		{"GET", "/api/v1/ebpf/workloads"},
 		{"GET", "/api/v1/ebpf/topology"},
+		{"PUT", "/api/v1/vms/node-1/capture"},
+		{"DELETE", "/api/v1/vms/node-1/capture"},
+		{"GET", "/api/v1/vms/node-1/capture/ws"},
+		{"GET", "/api/v1/capture/status"},
 		{"GET", "/livez"},
 	}
 	for _, tc := range paths {

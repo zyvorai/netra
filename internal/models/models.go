@@ -140,6 +140,40 @@ type EBPFFastPathConfig struct {
 	Revision           uint64     `json:"revision"`
 	EnforceUntil       *time.Time `json:"enforceUntil,omitempty"`
 	LeaseSeconds       int64      `json:"leaseSeconds,omitempty"`
+	// DesiredCapture is the one active packet-capture session for the
+	// specific node that requested this config (see internal/api's
+	// ebpfConfig handler, which injects it the same way it already injects
+	// per-node Workloads above) — unlike every other field here it is
+	// deliberately per-node, not cluster-wide, since a capture session only
+	// ever targets one node at a time in v1. Nil means no capture is
+	// desired for this node right now.
+	DesiredCapture *CaptureSpec `json:"desiredCapture,omitempty"`
+}
+
+// CaptureSpec is an operator-requested packet-capture session for one node,
+// reconciled into that node's capture_spec BPF map by internal/agent's
+// applyCapture — see bpf/netra_capture.c's own header comment for the
+// capture engine this drives: a standalone, fail-open TCX observer that
+// never gates packet delivery. An empty Protocol/Host/Port means "any" for
+// that field; SnapLen 0 means a full-frame capture (capped at the kernel
+// side's fixed NETRA_CAP_MAX_LEN).
+type CaptureSpec struct {
+	Node      string    `json:"node"`
+	Protocol  string    `json:"protocol,omitempty"`
+	Host      string    `json:"host,omitempty"`
+	Port      uint16    `json:"port,omitempty"`
+	SnapLen   uint16    `json:"snapLen,omitempty"`
+	MaxPPS    uint32    `json:"maxPps,omitempty"`
+	Requestor string    `json:"requestor,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// CaptureStatusResponse lists every node with an active capture session —
+// the controller-side view backing GET /api/v1/capture/status and the
+// Capture dashboard page's per-node state.
+type CaptureStatusResponse struct {
+	Active []CaptureSpec `json:"active"`
 }
 
 type DestinationStat struct {

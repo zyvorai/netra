@@ -173,6 +173,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_capture_status", method: "GET", path: "/api/v1/capture/status",
+			description: "Every node with an active packet-capture session: filter, snap length, requestor, start/expiry time. Does not return captured packets themselves.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),

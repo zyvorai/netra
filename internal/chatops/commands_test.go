@@ -95,6 +95,61 @@ func TestDispatchModeRejectsInvalidMode(t *testing.T) {
 	}
 }
 
+func TestDispatchCaptureDisabledWithoutMutations(t *testing.T) {
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not call the controller when mutations are disabled")
+	})
+	reply, pending := Dispatch(context.Background(), c, false, "capture start node-1 protocol=tcp", "")
+	if pending != nil || !strings.Contains(reply, "disabled") {
+		t.Fatalf("reply=%q pending=%v", reply, pending)
+	}
+}
+
+func TestDispatchCaptureStartRequiresConfirmationNotImmediateExecution(t *testing.T) {
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("capture must never call the controller before confirmation")
+	})
+	reply, pending := Dispatch(context.Background(), c, true, "capture start node-1 protocol=tcp port=443 duration=30s", "")
+	if pending == nil {
+		t.Fatal("expected a pending confirmation, not immediate execution")
+	}
+	if pending.Method != "PUT" || pending.Path != "/api/v1/vms/node-1/capture" {
+		t.Fatalf("pending=%#v", pending)
+	}
+	if !strings.Contains(pending.Body, `"protocol":"tcp"`) || !strings.Contains(pending.Body, `"port":443`) || !strings.Contains(pending.Body, `"durationSeconds":30`) {
+		t.Fatalf("body=%q", pending.Body)
+	}
+	if !strings.Contains(reply, "Confirm") {
+		t.Fatalf("reply=%q", reply)
+	}
+}
+
+func TestDispatchCaptureStartRejectsUnfiltered(t *testing.T) {
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("must not call the controller for an unfiltered capture request")
+	})
+	reply, pending := Dispatch(context.Background(), c, true, "capture start node-1", "")
+	if pending != nil || !strings.Contains(reply, "required") {
+		t.Fatalf("reply=%q pending=%v", reply, pending)
+	}
+}
+
+func TestDispatchCaptureStopRequiresConfirmation(t *testing.T) {
+	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("capture stop must never call the controller before confirmation")
+	})
+	reply, pending := Dispatch(context.Background(), c, true, "capture stop node-1", "")
+	if pending == nil {
+		t.Fatal("expected a pending confirmation, not immediate execution")
+	}
+	if pending.Method != "DELETE" || pending.Path != "/api/v1/vms/node-1/capture" {
+		t.Fatalf("pending=%#v", pending)
+	}
+	if !strings.Contains(reply, "Confirm") {
+		t.Fatalf("reply=%q", reply)
+	}
+}
+
 func TestEncodeDecodePendingRoundTrip(t *testing.T) {
 	p := pendingAction{Method: "PUT", Path: "/api/v1/ebpf/mode?lease=15m", Body: `{"mode":"enforce"}`, Summary: "switch to enforce"}
 	got, err := decodePending(encodePending(p))

@@ -74,6 +74,8 @@ func main() {
 		err = request("GET", "/api/v1/dns/board", nil)
 	case "lease":
 		err = request("GET", "/api/v1/lease", nil)
+	case "capture":
+		err = captureCmd(os.Args[2:])
 	case "policy":
 		err = policy()
 	case "flows":
@@ -107,6 +109,8 @@ func usage() {
   watchlist match FILE
   fleet | handoff [--format markdown|json] | scorecard | talkers
   namespaces | protocols | baselines | ports | dnsboard | lease
+  capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]
+  capture stop NODE | capture status
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE
