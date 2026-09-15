@@ -135,6 +135,44 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_namespace_heat", method: "GET", path: "/api/v1/namespaces/heat",
+			description: "Packets/bytes/blocked rolled up by Kubernetes namespace from agent destination stats.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max rows, 1-200. Default 30.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_protocols", method: "GET", path: "/api/v1/protocols",
+			description: "L4 protocol mix (TCP/UDP/…) across current destination stats.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_census", method: "GET", path: "/api/v1/ebpf/census",
+			description: "Counts of deny/allow list entries. Does not return the entries themselves.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_baselines", method: "GET", path: "/api/v1/baselines",
+			description: "Whether behavior and rate baselines exist and how old they are.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ports", method: "GET", path: "/api/v1/ports",
+			description: "Top destination ports by packet count (protocol/port).",
+			schema:      objSchema(map[string]any{"limit": intProp("Max rows, 1-200. Default 30.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_dns", method: "GET", path: "/api/v1/dns",
+			description: "DNS names ranked by failure count from agent DNS health stats.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max rows, 1-200. Default 30.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_lease", method: "GET", path: "/api/v1/lease",
+			description: "Enforce-mode lease clock: remaining seconds, expired, or none. Observe-only.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),

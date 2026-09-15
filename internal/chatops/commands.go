@@ -45,6 +45,13 @@ func helpText(allowMutations bool) string {
 	b.WriteString("`/netra status` – controller status\n")
 	b.WriteString("`/netra health` – top network-health anomalies\n")
 	b.WriteString("`/netra audit` – recent audit events\n")
+	b.WriteString("`/netra scorecard` – 0-100 cluster board\n")
+	b.WriteString("`/netra fleet` – agent inventory\n")
+	b.WriteString("`/netra talkers` – top destinations\n")
+	b.WriteString("`/netra handoff` – on-call pack\n")
+	b.WriteString("`/netra baselines` – baseline age\n")
+	b.WriteString("`/netra lease` – enforce lease clock\n")
+	b.WriteString("`/netra dns` – DNS failures\n")
 	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same engine as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set). Remembers the last few turns in this channel, per user.\n")
 	b.WriteString("`/netra forget` – clear this channel's Ask Netra conversation memory and start fresh\n")
 	if allowMutations {
@@ -82,6 +89,20 @@ func Dispatch(ctx context.Context, c *Client, allowMutations bool, text, convers
 		return summarize(ctx, c, "GET", "/api/v1/ebpf/health?limit=5", nil), nil
 	case "audit":
 		return summarize(ctx, c, "GET", "/api/v1/audit?limit=5", nil), nil
+	case "scorecard":
+		return summarize(ctx, c, "GET", "/api/v1/scorecard", nil), nil
+	case "fleet":
+		return summarize(ctx, c, "GET", "/api/v1/fleet", nil), nil
+	case "talkers":
+		return summarize(ctx, c, "GET", "/api/v1/talkers", nil), nil
+	case "handoff":
+		return summarize(ctx, c, "GET", "/api/v1/handoff?format=markdown", nil), nil
+	case "baselines":
+		return summarize(ctx, c, "GET", "/api/v1/baselines", nil), nil
+	case "lease":
+		return summarize(ctx, c, "GET", "/api/v1/lease", nil), nil
+	case "dns":
+		return summarize(ctx, c, "GET", "/api/v1/dns", nil), nil
 	case "ask":
 		return askCommand(ctx, c, strings.Join(fields[1:], " "), conversationKey), nil
 	case "forget":

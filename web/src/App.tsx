@@ -17,6 +17,8 @@ import EBPF from './pages/EBPF';
 import Health from './pages/Health';
 import Audit from './pages/Audit';
 import Report from './pages/Report';
+import Scorecard from './pages/Scorecard';
+import Talkers from './pages/Talkers';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -120,6 +122,18 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'A point-in-time health, drift, and incident briefing plus review-only playbook steps. Nothing on this page applies policy.',
     tint: 'amber',
   },
+  scorecard: {
+    eyebrow: 'Scorecard',
+    title: 'One number for the shift.',
+    lede: 'Health, stale agents, detached programs, and blocked events folded into a 0–100 board. Observe-only.',
+    tint: 'green',
+  },
+  talkers: {
+    eyebrow: 'Talkers',
+    title: 'Who is talking the most.',
+    lede: 'Top destination IPs by packet count from current agent reports. No payloads.',
+    tint: 'amber',
+  },
 };
 
 export default function App() {
@@ -172,6 +186,8 @@ export default function App() {
     ebpf: <EBPF />,
     audit: <Audit />,
     report: <Report />,
+    scorecard: <Scorecard />,
+    talkers: <Talkers />,
   }[page];
 
   const hero = pageHero[page];

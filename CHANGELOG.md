@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.66 — 2026-09-15
+
+- **Namespace heat, protocol mix, deny-list census, baseline age, ports/DNS/lease reads, ChatOps reads, Scorecard + Talkers dashboard pages.** Observe-only, sixth wave on top of top talkers.
+  - `GET /api/v1/namespaces/heat` (`internal/nsheat`), `GET /api/v1/protocols` (`internal/protomix`), `GET /api/v1/ebpf/census` (`internal/denycensus`, counts only — never echoes list contents), `GET /api/v1/baselines` (`internal/baselineage`).
+  - `GET /api/v1/ports`, `GET /api/v1/dns`, `GET /api/v1/lease`.
+  - ChatOps read commands: `/netra scorecard|fleet|talkers|handoff|baselines|lease|dns`.
+  - CLI: `netractl namespaces|protocols|baselines|ports|dns|lease|ebpf census`.
+  - MCP: `netra_namespace_heat`, `netra_protocols`, `netra_ebpf_census`, `netra_baselines`, `netra_ports`, `netra_dns`, `netra_lease` (82 read / 50 mutate / 132 total).
+  - Dashboard **Scorecard** and **Talkers** pages.
+- Version bumped to 0.27.66 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.65 — 2026-09-15
 
 - **Exe-hash change watch (`internal/exehash`) — observe-only half of `docs/exporter-tetragon-borrow-backlog.md`'s "Exe-hash leased deny" item.** "Observe `exe` first; optional fail-open lease map later" — this ships the observe half only; no lease map, deny list, or enforcement exists anywhere for this yet. No new BPF: agent/Go-side only, mirroring `internal/capdrift`/`internal/nsdrift`'s identity/diff/pruning shape.

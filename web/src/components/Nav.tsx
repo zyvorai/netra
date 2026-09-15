@@ -19,7 +19,9 @@ export type Page =
   | 'flows'
   | 'ebpf'
   | 'audit'
-  | 'report';
+  | 'report'
+  | 'scorecard'
+  | 'talkers';
 
 const items: [Page, string][] = [
   ['overview', 'Overview'],
@@ -40,6 +42,8 @@ const items: [Page, string][] = [
   ['policies', 'Policies'],
   ['audit', 'Audit'],
   ['report', 'Report'],
+  ['scorecard', 'Scorecard'],
+  ['talkers', 'Talkers'],
 ];
 
 export default function Nav({

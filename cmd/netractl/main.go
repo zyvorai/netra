@@ -62,6 +62,18 @@ func main() {
 		err = request("GET", "/api/v1/scorecard", nil)
 	case "talkers":
 		err = request("GET", "/api/v1/talkers", nil)
+	case "namespaces", "heat":
+		err = request("GET", "/api/v1/namespaces/heat", nil)
+	case "protocols":
+		err = request("GET", "/api/v1/protocols", nil)
+	case "baselines":
+		err = request("GET", "/api/v1/baselines", nil)
+	case "ports":
+		err = request("GET", "/api/v1/ports", nil)
+	case "dns":
+		err = request("GET", "/api/v1/dns", nil)
+	case "lease":
+		err = request("GET", "/api/v1/lease", nil)
 	case "policy":
 		err = policy()
 	case "flows":
@@ -94,6 +106,7 @@ func usage() {
   intel preview FILE
   watchlist match FILE
   fleet | handoff [--format markdown|json] | scorecard | talkers
+  namespaces | protocols | baselines | ports | dns | lease
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE
@@ -107,7 +120,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | coverage | reasons | health | capdrift | nsdrift | exehash | path | drops | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
@@ -640,6 +653,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/coverage", nil)
 	case "reasons":
 		return request("GET", "/api/v1/ebpf/reasons", nil)
+	case "census":
+		return request("GET", "/api/v1/ebpf/census", nil)
 	case "health":
 		return request("GET", "/api/v1/ebpf/health", nil)
 	case "capdrift":

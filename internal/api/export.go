@@ -183,7 +183,7 @@ func (s *Server) buildOperatorReport(r *http.Request, now time.Time) report.Snap
 	}
 	in := report.Input{
 		GeneratedAt:     now,
-		Version:         "0.27.65",
+		Version:         "0.27.66",
 		Mode:            cfg.Mode,
 		ScopeMode:       cfg.ScopeMode,
 		LeaseExpiresAt:  lease,

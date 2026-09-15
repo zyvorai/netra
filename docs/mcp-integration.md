@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 75 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 82 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -184,6 +184,14 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_audit_summary` | `GET /api/v1/audit/summary` | `limit`, `since`, `until` | Actor/action/hour rollup of the audit log |
 | `netra_export_flows` | `GET /api/v1/export/flows` | `format`, `limit` | Destination-flow counters as SIEM records. No payloads |
 | `netra_export_blocks` | `GET /api/v1/export/blocks` | `format` (adds `otlp-trace`), `limit` | Blocked/dropped events as SIEM records; `otlp-trace` renders each as one OTLP span. No payloads |
+| `netra_talkers` | `GET /api/v1/talkers` | `limit` (1-200, default 20) | Top destination IPs by packet count across current agent reports |
+| `netra_namespace_heat` | `GET /api/v1/namespaces/heat` | `limit` (1-200, default 30) | Packets/bytes/blocked rolled up by Kubernetes namespace |
+| `netra_protocols` | `GET /api/v1/protocols` | — | L4 protocol mix (TCP/UDP/…) across current destination stats |
+| `netra_ebpf_census` | `GET /api/v1/ebpf/census` | — | Counts of deny/allow list entries. Never returns the entries themselves |
+| `netra_baselines` | `GET /api/v1/baselines` | — | Whether behavior and rate baselines exist and how old they are |
+| `netra_ports` | `GET /api/v1/ports` | `limit` (1-200, default 30) | Top destination ports by packet count |
+| `netra_dns` | `GET /api/v1/dns` | `limit` (1-200, default 30) | DNS names ranked by failure count |
+| `netra_lease` | `GET /api/v1/lease` | — | Enforce-mode lease clock: remaining seconds, expired, or none |
 | `netra_export_status` | `GET /api/v1/export/status` | — | Whether syslog push is configured |
 | `netra_ebpf_coverage` | `GET /api/v1/ebpf/coverage` | — | Per-node hook/program coverage matrix |
 | `netra_intel_preview` | `POST /api/v1/intel/preview` | `text` (raw feed body) | Parse JSON/CSV/bare IPs into deny-import entries. Applies nothing |
