@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import Reveal from '../components/Reveal';
+import DenyCensus from '../components/DenyCensus';
+import LeaseClock from '../components/LeaseClock';
+import WatchlistMatch from '../components/WatchlistMatch';
 
 type UnifiedRule = { id?: string; type: string; value: string; detail: string; extra: string; created?: string; raw?: any; del?: () => void };
 
@@ -567,5 +570,8 @@ export default function EBPF() {
       </div>}
     </section>
     <section className="card span3"><p className="eyebrow">NODE COVERAGE</p><h3>Attached hooks</h3>{agents.map(a => <div className="agent wide" key={a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : a.mode}</span><span>{(a.hooks || []).join(', ') || '—'}</span><small>{(a.workloads || []).length} workload cgroups · {a.scopeMode || 'all'} scope ({a.selectedCgroups || 0} selected) · {a.cgroupPath || 'no cgroup'} · interfaces: {(a.interfaces || []).join(', ') || 'cgroup-only'} · XDP: {(a.xdpInterfaces || []).join(', ') || 'off'}</small></div>)}</section>
+    <DenyCensus />
+    <LeaseClock />
+    <WatchlistMatch />
   </div>;
 }

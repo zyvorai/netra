@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
 import Reveal from '../components/Reveal';
+import BaselineAge from '../components/BaselineAge';
 
 type Summary = {
   dependencyEdges: number; externalEdges: number; baselineEntries: number; driftFindings: number; recommendations: number;
@@ -230,5 +231,6 @@ export default function Insights() {
         </details>;
       })}{!recommendations.length && <p className="empty-state">No policy recommendation drafts currently meet the thresholds.</p>}</div>
     </Reveal>
+    <BaselineAge />
   </div>;
 }

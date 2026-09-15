@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import BlockedEvents from '../components/BlockedEvents';
 
 export default function Audit() {
   const [items, setItems] = useState<any[]>([]);
@@ -50,6 +51,7 @@ export default function Audit() {
           </div>
         )}
       </section>
+      <BlockedEvents />
     </div>
   );
 }

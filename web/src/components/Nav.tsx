@@ -21,7 +21,9 @@ export type Page =
   | 'audit'
   | 'report'
   | 'scorecard'
-  | 'talkers';
+  | 'talkers'
+  | 'fleet'
+  | 'traffic';
 
 const items: [Page, string][] = [
   ['overview', 'Overview'],
@@ -44,6 +46,8 @@ const items: [Page, string][] = [
   ['report', 'Report'],
   ['scorecard', 'Scorecard'],
   ['talkers', 'Talkers'],
+  ['fleet', 'Fleet'],
+  ['traffic', 'Traffic'],
 ];
 
 export default function Nav({

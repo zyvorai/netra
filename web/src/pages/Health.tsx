@@ -3,6 +3,8 @@ import { api } from '../api';
 import DNSDiagnostics from '../components/DNSDiagnostics';
 import ICMPDiagnostics from '../components/ICMPDiagnostics';
 import ExplainFinding from '../components/ExplainFinding';
+import NamespaceDrift from '../components/NamespaceDrift';
+import ExeHashDrift from '../components/ExeHashDrift';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
 const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
@@ -151,6 +153,8 @@ export default function Health() {
         ))}
       </div>
     </section>
+    <NamespaceDrift />
+    <ExeHashDrift />
     <section className="card span3">
       <p className="eyebrow">ICMP PULSE</p>
       <h3>Type histogram from the packet path</h3>

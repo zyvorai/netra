@@ -19,6 +19,8 @@ import Audit from './pages/Audit';
 import Report from './pages/Report';
 import Scorecard from './pages/Scorecard';
 import Talkers from './pages/Talkers';
+import Fleet from './pages/Fleet';
+import Traffic from './pages/Traffic';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -134,6 +136,18 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'Top destination IPs by packet count from current agent reports. No payloads.',
     tint: 'amber',
   },
+  fleet: {
+    eyebrow: 'Fleet',
+    title: 'Every node, one glance.',
+    lede: 'Compact per-node agent inventory plus the eBPF hook/program coverage matrix — attached vs detached, missing maps.',
+    tint: 'green',
+  },
+  traffic: {
+    eyebrow: 'Traffic',
+    title: 'What the network is carrying.',
+    lede: 'Namespace, protocol, port, and DNS breakdowns from current agent destination stats. No payloads.',
+    tint: 'purple',
+  },
 };
 
 export default function App() {
@@ -188,6 +202,8 @@ export default function App() {
     report: <Report />,
     scorecard: <Scorecard />,
     talkers: <Talkers />,
+    fleet: <Fleet />,
+    traffic: <Traffic />,
   }[page];
 
   const hero = pageHero[page];

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.27.67 — 2026-09-15
+
+- **Dashboard UI for every backend-only feature shipped in the SIEM/observability run (0.27.57–0.27.66).** Until now, only Report/Scorecard/Talkers had real pages; everything else (coverage, fleet, handoff, drop reasons, watchlist, capability/namespace/exe-hash drift, OTEL export, namespace/protocol/port/DNS heat, deny census, baseline age, lease clock) was API/CLI/MCP-only, invisible in the browser.
+  - **Health page**: two new cards, `NAMESPACE DRIFT` and `EXE-HASH DRIFT` (`web/src/components/NamespaceDrift.tsx`, `ExeHashDrift.tsx`), mirroring the existing `CAPABILITY DRIFT` card exactly — same layout, same severity-badge convention, same empty-state text style.
+  - **New Fleet page** (`web/src/pages/Fleet.tsx`): per-node agent inventory plus the eBPF program coverage matrix (attached/detached programs, missing maps) in one page.
+  - **New Traffic page** (`web/src/pages/Traffic.tsx`): namespace heat, protocol mix, port heat, and DNS failure board as four cards.
+  - **Firewall (eBPF) page**: three new cards — `DENY CENSUS` (list-size counts only, never the entries), `LEASE CLOCK` (enforce-lease remaining time), and `WATCHLIST MATCH` (a textarea to paste an IP/CIDR/DNS/SNI list and check it against current agent state via `POST /api/v1/watchlist/match` — the only interactive, non-read-only addition here; it still applies nothing).
+  - **Insights page**: `BASELINE AGE` card (whether behavior/rate baselines exist and how old they are).
+  - **Audit page**: `BLOCKED / DROPPED EVENTS` card pulling `GET /api/v1/export/blocks`, with the CLI/API one-liner for the other encodings (CEF, syslog, OTLP logs, and the OTLP-trace/span format from 0.27.63) noted inline rather than building bespoke download-link plumbing for formats the existing dashboard has no other precedent for downloading.
+  - Two new nav entries (Fleet, Traffic); everything else attaches to an existing page rather than growing the already-crowded top nav further.
+  - Verified: `tsc -b` and `vite build` both clean. No Go code changed — this is a frontend-only release.
+- Version bumped to 0.27.67 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.66 — 2026-09-15
 
 - **Namespace heat, protocol mix, deny-list census, baseline age, ports/DNS/lease reads, ChatOps reads, Scorecard + Talkers dashboard pages.** Observe-only, sixth wave on top of top talkers.
