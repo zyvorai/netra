@@ -60,6 +60,8 @@ func main() {
 		err = handoffCmd(os.Args[2:])
 	case "scorecard":
 		err = request("GET", "/api/v1/scorecard", nil)
+	case "talkers":
+		err = request("GET", "/api/v1/talkers", nil)
 	case "policy":
 		err = policy()
 	case "flows":
@@ -91,7 +93,7 @@ func usage() {
   playbooks [--format markdown|json]
   intel preview FILE
   watchlist match FILE
-  fleet | handoff [--format markdown|json] | scorecard
+  fleet | handoff [--format markdown|json] | scorecard | talkers
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE

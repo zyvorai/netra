@@ -120,6 +120,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_talkers", method: "GET", path: "/api/v1/talkers",
+			description: "Top destination IPs by packet count across current agent reports.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max rows, 1-200. Default 20.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),

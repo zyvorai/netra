@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.61 — 2026-09-15
+
+- **Top talkers (observe-only).** Fifth wave on top of the fleet/handoff/scorecard/watchlist surface.
+  - `GET /api/v1/talkers` (`internal/talkers`) ranks destination IPs by packet count across current agent reports.
+  - CLI: `netractl talkers`. MCP: `netra_talkers` (72 read / 50 mutate / 122 total).
+- Version bumped to 0.27.61 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.60 — 2026-09-15
 
 - **Fleet inventory, on-call handoff pack, scorecard, drop-reason histogram, watchlist match (observe-only).** Fourth wave on top of the coverage matrix.
