@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 56 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 59 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -177,6 +177,9 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |
 | `netra_agents` | `GET /api/v1/agents` | — | One entry per reporting node agent |
 | `netra_audit` | `GET /api/v1/audit` | `limit` (1-500, default 100) | Every mutating action recorded by the controller, including this MCP server's own |
+| `netra_export_audit` | `GET /api/v1/export/audit` | `format` (`json`/`jsonl`/`cef`/`syslog`/`otlp`), `limit` (1-500, default 100) | SIEM encodings of the same audit log. Observe-only. See `docs/siem-export.md` |
+| `netra_export_events` | `GET /api/v1/export/events` | `format`, `include` (`anomaly,incident,audit`), `limit` | Current anomalies/incidents (optional audit) in the same encodings |
+| `netra_report` | `GET /api/v1/report` | `format` (`markdown`/`json`) | Point-in-time operator briefing. Never applies policy or extends a lease |
 | `netra_pods` | `GET /api/v1/pods` | `namespace` | Lockdown status included per pod |
 | `netra_vms` | `GET /api/v1/vms` | `namespace` | Result's `available` field indicates whether KubeVirt is installed |
 | `netra_workload_detail` | `GET /api/v1/workloads/{kind}/{namespace}/{name}` | `kind` **(path, required, `pod`\|`vm`)**, `namespace` **(path, required)**, `name` **(path, required)** | Phase, node, IP, labels, recommended selector, matching policies |

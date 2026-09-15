@@ -39,6 +39,31 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_export_audit", method: "GET", path: "/api/v1/export/audit",
+			description: "Export recent audit events for a SIEM or log pipeline. Formats: json (default), jsonl, cef, syslog (RFC5424), otlp (OTLP/HTTP JSON Logs). Observe-only; no payloads.",
+			schema: objSchema(map[string]any{
+				"format": enumProp("Export encoding.", "json", "jsonl", "cef", "syslog", "otlp"),
+				"limit":  intProp("Max events, 1-500. Default 100."),
+			}),
+			queryParams: []string{"format", "limit"},
+		},
+		{
+			name: "netra_export_events", method: "GET", path: "/api/v1/export/events",
+			description: "Export current health anomalies and incident clusters (optionally audit) in the same SIEM encodings as netra_export_audit. include is a comma list of anomaly,incident,audit.",
+			schema: objSchema(map[string]any{
+				"format":  enumProp("Export encoding.", "json", "jsonl", "cef", "syslog", "otlp"),
+				"include": strProp("Comma list of anomaly, incident, audit. Default anomaly,incident."),
+				"limit":   intProp("Audit cap when include lists audit, 1-500. Default 100."),
+			}),
+			queryParams: []string{"format", "include", "limit"},
+		},
+		{
+			name: "netra_report", method: "GET", path: "/api/v1/report",
+			description: "Point-in-time operator briefing (health, drift, exposure, incidents, recent audit). format=markdown (default) or json. Observe-only; never applies policy or extends a lease.",
+			schema:      objSchema(map[string]any{"format": enumProp("Briefing encoding.", "markdown", "json")}),
+			queryParams: []string{"format"},
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),

@@ -85,8 +85,11 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Kernel skb drop-reason counters through an optional raw `kfree_skb` tracepoint, plus Linux softnet and interface drop/error counters.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
 - Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). Each poll also builds an AI on-call digest (`source=ai`) — quiet clusters emit nothing; a non-info severity or a changed incident fingerprint notifies through the same dedup/delivery path as every other finding. See `docs/alerting.md`.
+- Pull-based SIEM export of audit events, health anomalies, and incident clusters as JSON, JSONL, ArcSight CEF, RFC5424 syslog, or OTLP/HTTP JSON Logs (`GET /api/v1/export/audit`, `GET /api/v1/export/events`). Observe-only, stdlib-only, no payloads. See `docs/siem-export.md`.
+- Point-in-time operator briefing (`GET /api/v1/report`, `netractl report`) combining health, drift, exposure, incidents, and recent audit into markdown or JSON for a ticket/handoff.
+- Importable Grafana dashboard over the existing `/metrics` gauges (`deploy/grafana/netra-dashboard.json`).
 - Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
-- `netra-mcp`, a Model Context Protocol server exposing the controller API as 106 stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. 56 read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, AI brief/ask/draft/digest/suggestions/explain, policy list/history/build/lockdown-preview) are always available; 50 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Also advertises six MCP prompt templates and six read-only resources (`prompts/list`/`get`, `resources/list`/`read`) for canned triage/drops/rule-draft/on-call-digest/policy-review/incident-timeline workflows. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as 109 stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. 59 read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics, insights, AI brief/ask/draft/digest/suggestions/explain, SIEM export, operator report, policy list/history/build/lockdown-preview) are always available; 50 mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Also advertises six MCP prompt templates and six read-only resources (`prompts/list`/`get`, `resources/list`/`read`) for canned triage/drops/rule-draft/on-call-digest/policy-review/incident-timeline workflows. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`.
 - Built-in AI briefs: `GET /api/v1/ai/brief`, `POST /api/v1/ai/ask` (with optional short-lived, bounded multi-turn `conversationId` memory on web/ChatOps, cleared via `POST /api/v1/ai/forget`), an on-call `GET /api/v1/ai/digest` (severity, incident fingerprint, copy-paste card, and — when the fingerprint changed — a deterministic `whyChanged` breakdown of exactly what moved plus an optional one-sentence LLM `whyChangedProse`), live `GET /api/v1/ai/suggestions`, a natural-language `POST /api/v1/ai/draft` rule previewer (never applies), and `POST /api/v1/ai/explain` for narrating one page finding — all turning live agent/health/insights aggregates into operator-facing text, heuristic by default (no vendor SDK, no extra process) with an optional OpenAI-compatible rewrite when `NETRA_AI_API_KEY` is set on the controller. Read-only — never flips enforce mode or applies policy; the snapshot it can see contains only aggregates and short findings, never payloads, argv, or secrets. The Overview dashboard page hosts a read-only **Ask Netra** card (now a real multi-turn thread) wired to all of this, the nav bar carries a live severity/fingerprint digest chip, and the Health/Drops/Path/Insights/Explain pages each get a per-finding **Explain** button (with an optional "draft a rule from this" preview when the finding names an IP/CIDR/DNS name) that narrates that one finding via `/api/v1/ai/explain`. See `docs/ai.md`.
 - Optional ChatOps integration for Slack (slash commands + interactive confirmation buttons) and Microsoft Teams (bot messages): `/netra status|health|audit|ask|forget|mode`. Read commands reply immediately; the one mutating command (`mode`) always requires a second confirmation step, mirroring the web UI's own confirm dialogs. `/netra ask` shares the same AI layer as the web Ask Netra card, including per-channel-per-user conversation memory. Off by default; each provider needs its own signing secret/App ID to register its route at all. See `docs/chatops.md` and `docs/chatops-teams.md`.
 - Cgroup-side TLS SNI / cleartext HTTP / DNS query-name observability runs in its own dedicated eBPF program (`NETRA_L7=auto|off|required`, attach-with-fallback), isolated from the conntrack/NetworkPolicy-deny program's verifier budget so the two can evolve independently. See `docs/l7-metadata.md`.
@@ -250,6 +253,8 @@ internal/cgroupmeta/     cgroup-v2 Kubernetes path/inode discovery
 internal/workload/       workload selector matching and cgroup joins
 internal/api/            REST/SSE API
 internal/store/          durable state, audit and preflight receipts
+internal/siem/           CEF/syslog/JSONL/OTLP formatters for audit and anomalies
+internal/report/         point-in-time operator briefing builder
 internal/ha/             active/passive controller leader election
 internal/kube/           direct Kubernetes REST client
 internal/hubble/         optional native Hubble gRPC client
@@ -270,6 +275,8 @@ docs/tcx-and-shield.md    TCX modes + XDP Shield
 docs/native-netpol.md     optional native NetPol maps: v1 deny-list + v2 allow-list/default-deny
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
 docs/alerting.md          webhook alert dispatcher + poller runbook
+docs/siem-export.md       pull-based SIEM encodings + operator report
+deploy/grafana/           Prometheus dashboard JSON for the existing /metrics gauges
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
 docs/mcp-integration.md   MCP server runbook: tool reference, security, plan/apply flow, troubleshooting
 docs/ai.md                heuristic briefs + optional LLM rewrite: HTTP/CLI/MCP surface, safety boundaries
@@ -303,8 +310,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.27.56 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.56 .
+docker build -t ghcr.io/zyvorai/netra:0.27.57 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.57 .
 ```
 
 ## Standalone Helm install

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.57 — 2026-09-15
+
+- **SIEM export and operator report (observe-only).** Controllers already retain audit events, health anomalies, and incident clusters; there was no first-class way to hand those records to a SIEM or paste a briefing into a ticket without screen-scraping JSON.
+  - New `internal/siem` formatters (stdlib-only): JSON, JSONL, ArcSight CEF 0 (`Zyvor`/`Netra`), RFC5424 syslog (facility 13, SD-ID `netra@zyvor`), and a minimal OTLP/HTTP JSON **Logs** document. No OTEL SDK, no traces, no payloads.
+  - `GET /api/v1/export/audit?format=&limit=` and `GET /api/v1/export/events?format=&include=` sit behind the existing bearer token. Unknown formats return 400.
+  - `GET /api/v1/report?format=markdown|json` plus `internal/report` join health, drift, exposure, incidents, and recent audit into a deterministic handoff briefing. Enforce leases are described, never extended. Missing baselines are called out rather than silently empty.
+  - `netractl export audit|events` and `netractl report`. MCP read tools `netra_export_audit`, `netra_export_events`, `netra_report` (59 read / 50 mutate / 109 total).
+  - Importable Grafana dashboard at `deploy/grafana/netra-dashboard.json` over the existing `/metrics` gauges. Example pull script: `examples/siem-export.sh`.
+  - Docs: `docs/siem-export.md`. Backlog: OTLP *logs* marked shipped; OTEL *spans* for block/deny remain deferred.
+  - Tests: `internal/siem`, `internal/report`, `internal/api/export_test.go`, `cmd/netractl/export_test.go`, plus the existing mux registration gate.
+- Version bumped to 0.27.57 across all six tracked locations plus the README Docker build example and `internal/api/export.go`'s controller-version literal; `web/package-lock.json` regenerated.
+
 ## 0.27.56 — 2026-09-14
 
 - **Incident digest root-cause narration: `GET /api/v1/ai/digest` now says *why* the fingerprint changed, not just that it did.** The 12-hex incident fingerprint is a one-way SHA-256 hash over mode/severity/health-bucket/stale-agents/exposure/drift and finding-kind lists (`internal/ai/digest.go`), and by design cannot be decomposed after the fact — `internal/timeline`'s `digestTransitions` doc comment already documented this constraint. The MCP `netra_oncall_digest` prompt was actually telling the calling agent to *guess* at the cause because the tool gave it nothing concrete to quote.

@@ -18,7 +18,7 @@ GET/POST read-only.
 ## Why this is separate from `netra-mcp`
 
 `netra-mcp` is a translation layer: one MCP tool per controller HTTP
-endpoint. It still leaves the model to decide *which* of the 56 read
+endpoint. It still leaves the model to decide *which* of the 59 read
 tools to call and how to narrate the JSON.
 
 The AI endpoints give the model (or a human) a single, bounded snapshot
