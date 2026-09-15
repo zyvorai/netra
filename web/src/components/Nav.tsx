@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Theme } from '../theme';
 import DigestChip from './DigestChip';
 
@@ -26,31 +27,59 @@ export type Page =
   | 'traffic'
   | 'capture';
 
-const items: [Page, string][] = [
-  ['overview', 'Overview'],
-  ['connections', 'Connections'],
-  ['workloads', 'Workloads'],
-  ['explain', 'Explain'],
-  ['pods', 'Pods'],
-  ['vms', 'VMs'],
-  ['health', 'Health'],
-  ['path', 'Path'],
-  ['drops', 'Drops'],
-  ['l7', 'L7'],
-  ['insights', 'Insights'],
-  ['topology', 'Topology'],
-  ['incidents', 'Incidents'],
-  ['ebpf', 'Firewall'],
-  ['flows', 'Hubble'],
-  ['policies', 'Policies'],
-  ['audit', 'Audit'],
-  ['report', 'Report'],
-  ['scorecard', 'Scorecard'],
-  ['talkers', 'Talkers'],
-  ['fleet', 'Fleet'],
-  ['traffic', 'Traffic'],
-  ['capture', 'Capture'],
+type NavLink = { page: Page; label: string; blurb: string };
+type NavGroup = { label: string; page?: Page; children?: NavLink[] };
+
+// Blurbs are the same copy as each page's own pageHero lede in App.tsx,
+// kept in sync by hand since there's no shared source for the two today.
+const groups: NavGroup[] = [
+  { label: 'Overview', page: 'overview' },
+  {
+    label: 'Investigate',
+    children: [
+      { page: 'connections', label: 'Connections', blurb: 'Native eBPF events, workload context, and honest explanations of observed outcomes.' },
+      { page: 'workloads', label: 'Workloads', blurb: 'Explore identities and network evidence reported by Netra agents.' },
+      { page: 'pods', label: 'Pods', blurb: 'Kubernetes workloads resolved from Netra’s cgroup map.' },
+      { page: 'vms', label: 'VMs', blurb: 'KubeVirt and host VMM processes Netra can attribute.' },
+      { page: 'explain', label: 'Explain', blurb: 'Passive, read-only evidence from agent reports, one selector away.' },
+      { page: 'traffic', label: 'Traffic', blurb: 'Namespace, protocol, port, and DNS breakdowns. No payloads.' },
+      { page: 'capture', label: 'Capture', blurb: 'Filtered, time-bounded packet capture per node, live.' },
+    ],
+  },
+  {
+    label: 'Diagnostics',
+    children: [
+      { page: 'health', label: 'Health', blurb: 'RTT, retransmits, RTOs, resets, and cleartext DNS latency from the kernel.' },
+      { page: 'path', label: 'Path', blurb: 'Measured active TCP establishment and cwnd/packets-out pressure.' },
+      { page: 'drops', label: 'Drops', blurb: 'Kernel skb reasons, softnet pressure, and policy-drop findings.' },
+      { page: 'l7', label: 'L7', blurb: 'Best-effort SNI and HTTP Host from the datapath.' },
+      { page: 'insights', label: 'Insights', blurb: 'Baselines, drift, and review-only remediation proposals.' },
+      { page: 'topology', label: 'Topology', blurb: 'The observed-traffic dependency graph, live and force-directed.' },
+    ],
+  },
+  {
+    label: 'Security',
+    children: [
+      { page: 'incidents', label: 'Incidents', blurb: 'Health, drift, exposure, drops, and audit signals joined by shared source.' },
+      { page: 'ebpf', label: 'Firewall', blurb: 'Deny lists, DDoS shield, NetPol, and emergency controls in one place.' },
+      { page: 'policies', label: 'Policies', blurb: 'Plan and apply CiliumNetworkPolicy when CRDs are present.' },
+      { page: 'audit', label: 'Audit', blurb: 'Controller audit trail for policy and datapath actions.' },
+    ],
+  },
+  {
+    label: 'Reports',
+    children: [
+      { page: 'flows', label: 'Hubble', blurb: 'Optional Cilium enrichment when Hubble Relay is available.' },
+      { page: 'report', label: 'Report', blurb: 'A point-in-time health, drift, and incident briefing.' },
+      { page: 'scorecard', label: 'Scorecard', blurb: 'Health, stale agents, and blocked events folded into a 0–100 board.' },
+      { page: 'talkers', label: 'Talkers', blurb: 'Top destination IPs by packet count. No payloads.' },
+    ],
+  },
+  { label: 'Fleet', page: 'fleet' },
 ];
+
+const OPEN_DELAY_MS = 120;
+const CLOSE_DELAY_MS = 200;
 
 export default function Nav({
   page,
@@ -65,25 +94,121 @@ export default function Nav({
   onToggleTheme: () => void;
   onLogout: () => void;
 }) {
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = null;
+    closeTimer.current = null;
+  };
+
+  const scheduleOpen = (label: string) => {
+    clearTimers();
+    openTimer.current = setTimeout(() => setOpenGroup(label), OPEN_DELAY_MS);
+  };
+
+  const scheduleClose = () => {
+    clearTimers();
+    closeTimer.current = setTimeout(() => setOpenGroup(null), CLOSE_DELAY_MS);
+  };
+
+  const toggleGroup = (label: string) => {
+    clearTimers();
+    setOpenGroup((cur) => (cur === label ? null : label));
+  };
+
+  useEffect(() => () => clearTimers(), []);
+
+  useEffect(() => {
+    if (!openGroup) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const label = openGroup;
+      setOpenGroup(null);
+      triggerRefs.current[label]?.focus();
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setOpenGroup(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [openGroup]);
+
   return (
-    <nav className="nav" aria-label="Global">
+    <nav className="nav" aria-label="Global" ref={navRef}>
       <div className="nav-inner">
         <button type="button" className="brand" onClick={() => setPage('overview')} aria-label="Netra home">
           <img src="/zyvor-logomark.svg" alt="" className="brand-mark" aria-hidden />
           Netra
         </button>
         <div className="navlinks">
-          {items.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={page === id ? 'active' : ''}
-              aria-current={page === id ? 'page' : undefined}
-              onClick={() => setPage(id)}
-            >
-              {label}
-            </button>
-          ))}
+          {groups.map((g) =>
+            g.children ? (
+              <div
+                key={g.label}
+                className="navgroup"
+                onMouseEnter={() => scheduleOpen(g.label)}
+                onMouseLeave={scheduleClose}
+              >
+                <button
+                  type="button"
+                  ref={(el) => {
+                    triggerRefs.current[g.label] = el;
+                  }}
+                  className={g.children.some((c) => c.page === page) ? 'active' : ''}
+                  aria-haspopup="true"
+                  aria-expanded={openGroup === g.label}
+                  onClick={() => toggleGroup(g.label)}
+                >
+                  {g.label}
+                </button>
+                <div
+                  className={`mega-panel${openGroup === g.label ? ' open' : ''}`}
+                  role="region"
+                  aria-label={g.label}
+                  onMouseEnter={() => scheduleOpen(g.label)}
+                  onMouseLeave={scheduleClose}
+                >
+                  <div className="mega-grid">
+                    {g.children.map((c) => (
+                      <button
+                        key={c.page}
+                        type="button"
+                        className={page === c.page ? 'active' : ''}
+                        aria-current={page === c.page ? 'page' : undefined}
+                        onClick={() => {
+                          setPage(c.page);
+                          setOpenGroup(null);
+                        }}
+                      >
+                        <span className="mega-link-label">{c.label}</span>
+                        <span className="mega-link-blurb">{c.blurb}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                key={g.page}
+                type="button"
+                className={page === g.page ? 'active' : ''}
+                aria-current={page === g.page ? 'page' : undefined}
+                onClick={() => setPage(g.page as Page)}
+              >
+                {g.label}
+              </button>
+            )
+          )}
         </div>
         <div className="nav-actions">
           <DigestChip onOpen={() => setPage('overview')} />

@@ -464,6 +464,73 @@ button:disabled,
 .navlinks button.active::after {
   transform: scaleX(1);
 }
+.navgroup {
+  position: relative;
+  display: inline-flex;
+}
+.mega-panel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  min-width: 480px;
+  max-width: 720px;
+  background: var(--nav-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md, 12px) var(--radius-md, 12px);
+  padding: 28px 32px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s var(--ease-apple), transform 0.22s var(--ease-apple), visibility 0.22s;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.mega-panel.open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.mega-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px 28px;
+}
+.mega-grid button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  padding: 8px;
+  border-radius: var(--radius-xs, 6px);
+  text-align: left;
+  white-space: normal;
+  opacity: 1;
+}
+.mega-grid button:hover {
+  background: var(--hover-fill);
+}
+.mega-grid button::after {
+  content: none;
+}
+.mega-link-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--nav-link-active);
+}
+.mega-link-blurb {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.mega-grid button.active .mega-link-label {
+  color: var(--apple-blue);
+}
 .nav-actions {
   flex: 0 0 auto;
   display: flex;
@@ -1506,6 +1573,7 @@ code {
   button,
   .nav button,
   .navlinks button::after,
+  .mega-panel,
   .card,
   [data-theme="dark"] .card {
     transition: none !important;
@@ -1535,6 +1603,19 @@ code {
   .nav .navlinks > button {
     padding: 0 8px;
   }
+  .mega-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 48px;
+    transform: translateY(-6px);
+    min-width: 0;
+    max-width: none;
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
+  .mega-panel.open { transform: translateY(0); }
+  .mega-grid { grid-template-columns: 1fr; }
   .brand small { display: none; }
   .hero { display: block; padding-top: 24px; }
   .tokenbox { display: block; margin-top: 20px; }
