@@ -115,3 +115,35 @@ func intelCmd(args []string) error {
 	}
 	return request("POST", "/api/v1/intel/preview", body)
 }
+
+func watchlistCmd(args []string) error {
+	if len(args) < 2 || args[0] != "match" {
+		return fmt.Errorf("watchlist match FILE")
+	}
+	body, err := os.ReadFile(args[1])
+	if err != nil {
+		return err
+	}
+	return request("POST", "/api/v1/watchlist/match", body)
+}
+
+func handoffCmd(args []string) error {
+	format := "markdown"
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--format":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--format needs a value")
+			}
+			format = args[i]
+		default:
+			return fmt.Errorf("unknown flag %s", args[i])
+		}
+	}
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "md" {
+		format = "markdown"
+	}
+	return request("GET", "/api/v1/handoff?format="+url.QueryEscape(format), nil)
+}

@@ -315,8 +315,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.27.59 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.59 .
+docker build -t ghcr.io/zyvorai/netra:0.27.60 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.60 .
 ```
 
 ## Standalone Helm install

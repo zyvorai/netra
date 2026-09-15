@@ -99,6 +99,27 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_fleet", method: "GET", path: "/api/v1/fleet",
+			description: "Compact per-node agent inventory. Observe-only.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_handoff", method: "GET", path: "/api/v1/handoff",
+			description: "On-call pack: report + playbook + coverage + fleet + audit + drop reasons.",
+			schema:      objSchema(map[string]any{"format": enumProp("Pack encoding.", "markdown", "json")}),
+			queryParams: []string{"format"},
+		},
+		{
+			name: "netra_scorecard", method: "GET", path: "/api/v1/scorecard",
+			description: "Single 0-100 board from health, stale agents, detached programs, missing maps, blocked events.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_reasons", method: "GET", path: "/api/v1/ebpf/reasons",
+			description: "Histogram of FastPathEvent action/reason pairs. No payloads.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_pods", method: "GET", path: "/api/v1/pods",
 			description: "List pods known to the cluster, with lockdown status.",
 			schema:      objSchema(map[string]any{"namespace": strProp("Restrict to this namespace. Omit for all namespaces.")}),
@@ -483,7 +504,10 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 	if err := registerPolicySimulate(srv, c); err != nil {
 		return err
 	}
-	return registerIntelPreview(srv, c)
+	if err := registerIntelPreview(srv, c); err != nil {
+		return err
+	}
+	return registerWatchlistMatch(srv, c)
 }
 
 // registerPolicySimulate is bespoke (not table-driven) for the same reason
@@ -535,6 +559,27 @@ func registerIntelPreview(srv *mcpserver.Server, c *client) error {
 				return fmt.Sprintf("invalid arguments: %v", err), true, nil
 			}
 			out, status, err := c.do(ctx, "POST", "/api/v1/intel/preview", []byte(x.Text), nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerWatchlistMatch(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_watchlist_match",
+		Description: "Match an intel-grammar list against current flows/events/DNS/SNI. Applies nothing.",
+		InputSchema: objSchema(map[string]any{"text": strProp("Feed body.")}, "text"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			out, status, err := c.do(ctx, "POST", "/api/v1/watchlist/match", []byte(x.Text), nil)
 			if err != nil {
 				return nil, true, err
 			}

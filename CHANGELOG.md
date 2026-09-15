@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.60 — 2026-09-15
+
+- **Fleet inventory, on-call handoff pack, scorecard, drop-reason histogram, watchlist match (observe-only).** Fourth wave on top of the coverage matrix.
+  - `GET /api/v1/fleet` (`internal/fleet`) is a compact per-node agent inventory.
+  - `GET /api/v1/handoff` (`internal/handoff`) bundles report + playbook + coverage + fleet + audit + drop reasons into one on-call pack, markdown or JSON.
+  - `GET /api/v1/scorecard` (`internal/scorecard`) rolls health, stale agents, detached programs, missing maps, and blocked events into a single 0-100 board.
+  - `GET /api/v1/ebpf/reasons` (`internal/reasons`) histograms FastPathEvent action/reason pairs. No payloads.
+  - `POST /api/v1/watchlist/match` (`internal/watchlist`) checks a pasted IP/CIDR/DNS list against current agent state; applies nothing.
+  - CLI: `netractl fleet|handoff|scorecard|watchlist match FILE|ebpf reasons`.
+  - MCP: `netra_fleet`, `netra_handoff`, `netra_scorecard`, `netra_ebpf_reasons`, `netra_watchlist_match` (71 read / 50 mutate / 121 total).
+- Version bumped to 0.27.60 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.59 — 2026-09-15
 
 - **Per-node eBPF hook/program coverage matrix (observe-only).** Third wave on top of the playbooks/intel/flows/audit-rollup surface.
