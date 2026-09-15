@@ -9,7 +9,7 @@ Teams bots run on Azure Bot Service, which requires an app registration before N
 1. In the Azure Portal, create an **Azure Bot** resource (or reuse an existing multi-tenant app registration). This gives you a **Microsoft App ID** (a GUID) and an app password/secret — Netra's side only ever needs the App ID, never the secret, since it verifies inbound JWTs rather than authenticating outbound Connector API calls in this version.
 2. Set the bot's **Messaging endpoint** to `https://<your-netra-host>/chatops/teams`.
 3. Add the **Microsoft Teams** channel to the bot resource, and install/sideload the resulting Teams app into the workspace you want it in.
-4. Configure `netrad` via environment variables. `helm/netra/values.yaml`'s `chatops:` block currently only wires the Slack env vars below it — `NETRA_CHATOPS_TEAMS_APP_ID` isn't yet plumbed through the Helm chart, so until that's added, set it directly on the `netrad` container (a `kubectl set env`, a chart patch, or your own deployment overlay).
+4. Configure `netrad` via environment variables. `helm/netra/values.yaml`'s `chatops:` block wires `NETRA_CHATOPS_TEAMS_APP_ID` alongside the Slack env vars — set `chatops.enabled: true` and `chatops.teamsAppId: "<your app ID>"` (plus `chatops.targetURL`/`chatops.apiKey`, needed by Teams too since they're shared across providers). A Slack signing secret is not required to enable Teams alone.
 
 | Var | Default | Notes |
 |---|---|---|

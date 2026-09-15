@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.61"
+  tag: "0.27.62"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.61"
+  tag: "0.27.62"
 replicaCount: 1
 ha:
   enabled: false
@@ -69,6 +69,11 @@ chatops:
   existingSecret: ""
   signingSecret: ""
   apiKey: ""
+  # Microsoft Teams: the Azure Bot Service app registration's Microsoft App
+  # ID. Unset disables Teams ChatOps entirely (POST /chatops/teams is never
+  # registered), independent of the Slack signing secret above. See
+  # docs/chatops-teams.md.
+  teamsAppId: ""
 service:
   type: ClusterIP
   port: 30870

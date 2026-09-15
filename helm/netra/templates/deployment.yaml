@@ -153,6 +153,10 @@ spec:
           value: {{ .Values.chatops.allowMutations | quote }}
         - name: NETRA_CHATOPS_TARGET_URL
           value: {{ .Values.chatops.targetURL | quote }}
+        {{- if .Values.chatops.teamsAppId }}
+        - name: NETRA_CHATOPS_TEAMS_APP_ID
+          value: {{ .Values.chatops.teamsAppId | quote }}
+        {{- end }}
         {{- if .Values.chatops.existingSecret }}
         - name: NETRA_CHATOPS_SIGNING_SECRET
           valueFrom:

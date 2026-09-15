@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.62 — 2026-09-15
+
+- **Microsoft Teams ChatOps: Helm wiring closed.** `docs/chatops-teams.md` flagged that `NETRA_CHATOPS_TEAMS_APP_ID` wasn't plumbed through the chart, requiring a manual `kubectl set env`/overlay to enable Teams.
+  - New `chatops.teamsAppId` Helm value, wired into `deployment.yaml` alongside the existing shared `chatops.*` env vars (`targetURL`, `apiKey`, `allowMutations`). Only rendered when set — default behavior (Teams route unregistered) is unchanged.
+  - Enabling Teams no longer requires a Slack signing secret; `chatops.enabled: true` plus `chatops.teamsAppId`/`chatops.apiKey` is sufficient.
+  - Verified: `helm lint`, and `helm template` with/without `chatops.teamsAppId` set, confirming the env var renders only when configured.
+- Version bumped to 0.27.62 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.61 — 2026-09-15
 
 - **Top talkers (observe-only).** Fifth wave on top of the fleet/handoff/scorecard/watchlist surface.
