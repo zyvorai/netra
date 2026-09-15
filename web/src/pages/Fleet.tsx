@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
-type FleetNode = { node?: string; stale?: boolean; mode?: string; ageSeconds?: number; hooks?: string[]; workloads?: number };
+type FleetNode = { node?: string; stale?: boolean; mode?: string; ageSeconds?: number; hooks?: number; programs?: number; attached?: number; workloads?: number; destinations?: number; events?: number };
 type Inventory = { nodes?: FleetNode[]; agentCount?: number; staleAgents?: number };
 
 type CoverageProgram = { name: string; type?: string; attached: boolean; runCount?: number };
@@ -31,7 +31,7 @@ export default function Fleet() {
             <div className="agent wide" key={n.node || i}>
               <b>{n.node}</b>
               <span className={n.stale ? 'severity-badge warning' : 'severity-badge info'}>{n.stale ? 'stale' : n.mode || 'observe'}</span>
-              <small>{(n.hooks || []).length} hooks · {n.workloads ?? 0} workload cgroups · {n.ageSeconds ?? 0}s since last report</small>
+              <small>{n.hooks ?? 0} hooks · {n.attached ?? 0}/{n.programs ?? 0} programs attached · {n.workloads ?? 0} workload cgroups · {n.destinations ?? 0} destinations · {n.ageSeconds ?? 0}s since last report</small>
             </div>
           ))}
         </div>

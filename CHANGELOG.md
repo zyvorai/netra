@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.68 — 2026-09-15
+
+- **Fix: Fleet page showed a blank hook count.** `internal/fleet.Node.Hooks` is a plain count (`int`), not a list — `web/src/pages/Fleet.tsx` was typed as `hooks?: string[]` and rendered `(n.hooks || []).length`, which silently evaluated to `undefined` (numbers have no `.length`) instead of the real count, rendering as nothing rather than even a wrong "0". Found via a real Chrome check against the live 0.27.67 deploy — every other new card/page from that release matched its live API response exactly on inspection; this was the one field I'd typed from memory instead of the actual Go struct.
+  - Corrected `FleetNode`'s type to match `internal/fleet.Node` exactly (`hooks`, `programs`, `attached`, `workloads`, `destinations`, `events` all plain counts) and reworked the card's summary line to surface the extra fields that were already available but unused.
+  - Verified: `tsc -b` and `vite build` clean; re-confirmed live against `212.8.248.187` — Fleet now shows the real hook/program/destination counts.
+- Version bumped to 0.27.68 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.67 — 2026-09-15
 
 - **Dashboard UI for every backend-only feature shipped in the SIEM/observability run (0.27.57–0.27.66).** Until now, only Report/Scorecard/Talkers had real pages; everything else (coverage, fleet, handoff, drop reasons, watchlist, capability/namespace/exe-hash drift, OTEL export, namespace/protocol/port/DNS heat, deny census, baseline age, lease clock) was API/CLI/MCP-only, invisible in the browser.
