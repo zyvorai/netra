@@ -16,7 +16,7 @@ export default function Traffic() {
     api<{ rows?: NSRow[] }>('/api/v1/namespaces/heat'),
     api<{ rows?: ProtoRow[] }>('/api/v1/protocols'),
     api<{ rows?: PortRow[] }>('/api/v1/ports'),
-    api<{ rows?: DNSRow[]; queries?: number; failures?: number }>('/api/v1/dns'),
+    api<{ rows?: DNSRow[]; queries?: number; failures?: number }>('/api/v1/dns/board'),
   ]).then(([n, p, po, d]) => { setNs(n); setProto(p); setPorts(po); setDns(d); setErr(''); }).catch((e) => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
 

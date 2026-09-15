@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.69 — 2026-09-15
+
+- **Rename `GET /api/v1/dns` to `GET /api/v1/dns/board`, from a re-sent copy of the 0.27.66 wave.** `netra-wave9.patch` turned out to be a later revision of the same fleet/heat/census/baseline/lease wave already merged as 0.27.66 (its `internal/*` package files were byte-identical to what's already merged; its true base, confirmed by testing against every recent commit, was `f2b339d`, the namespace-drift commit — after 0.27.66 but before this session's own dashboard-UI and exe-hash work). The only real difference was this path rename, which this session's own copy hadn't picked up.
+  - `netra_dns` MCP tool renamed to `netra_dns_board`; `netractl dns` renamed to `netractl dnsboard`.
+  - Updated every caller: the Traffic dashboard page, the `/netra dns` ChatOps command (kept its own chat-facing name — only the underlying API call changed), and the MCP reference table.
+  - Verified: `go build/vet/test ./...`, `tsc -b` + `vite build` clean.
+- Version bumped to 0.27.69 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.68 — 2026-09-15
 
 - **Fix: Fleet page showed a blank hook count.** `internal/fleet.Node.Hooks` is a plain count (`int`), not a list — `web/src/pages/Fleet.tsx` was typed as `hooks?: string[]` and rendered `(n.hooks || []).length`, which silently evaluated to `undefined` (numbers have no `.length`) instead of the real count, rendering as nothing rather than even a wrong "0". Found via a real Chrome check against the live 0.27.67 deploy — every other new card/page from that release matched its live API response exactly on inspection; this was the one field I'd typed from memory instead of the actual Go struct.

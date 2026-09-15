@@ -162,7 +162,7 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
-			name: "netra_dns", method: "GET", path: "/api/v1/dns",
+			name: "netra_dns_board", method: "GET", path: "/api/v1/dns/board",
 			description: "DNS names ranked by failure count from agent DNS health stats.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max rows, 1-200. Default 30.")}),
 			queryParams: []string{"limit"},

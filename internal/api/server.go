@@ -122,13 +122,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.68"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.69"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.68"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.69"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.68"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.69"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -279,7 +279,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/census", s.auth(http.HandlerFunc(s.denyCensus)))
 	mux.Handle("GET /api/v1/baselines", s.auth(http.HandlerFunc(s.baselineStatus)))
 	mux.Handle("GET /api/v1/ports", s.auth(http.HandlerFunc(s.portHeat)))
-	mux.Handle("GET /api/v1/dns", s.auth(http.HandlerFunc(s.dnsBoard)))
+	mux.Handle("GET /api/v1/dns/board", s.auth(http.HandlerFunc(s.dnsBoard)))
 	mux.Handle("GET /api/v1/lease", s.auth(http.HandlerFunc(s.leaseStatus)))
 	mux.Handle("GET /api/v1/incidents", s.auth(http.HandlerFunc(s.incidents)))
 	mux.Handle("GET /api/v1/incidents/timeline", s.auth(http.HandlerFunc(s.incidentsTimeline)))
@@ -385,7 +385,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.68", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.69", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}

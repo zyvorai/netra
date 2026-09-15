@@ -70,8 +70,8 @@ func main() {
 		err = request("GET", "/api/v1/baselines", nil)
 	case "ports":
 		err = request("GET", "/api/v1/ports", nil)
-	case "dns":
-		err = request("GET", "/api/v1/dns", nil)
+	case "dnsboard":
+		err = request("GET", "/api/v1/dns/board", nil)
 	case "lease":
 		err = request("GET", "/api/v1/lease", nil)
 	case "policy":
@@ -106,7 +106,7 @@ func usage() {
   intel preview FILE
   watchlist match FILE
   fleet | handoff [--format markdown|json] | scorecard | talkers
-  namespaces | protocols | baselines | ports | dns | lease
+  namespaces | protocols | baselines | ports | dnsboard | lease
   policy list [namespace] | policy list --namespace NAMESPACE
   policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
   policy plan <file> | policy plan --file FILE

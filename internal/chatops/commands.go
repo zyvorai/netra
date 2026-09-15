@@ -102,7 +102,7 @@ func Dispatch(ctx context.Context, c *Client, allowMutations bool, text, convers
 	case "lease":
 		return summarize(ctx, c, "GET", "/api/v1/lease", nil), nil
 	case "dns":
-		return summarize(ctx, c, "GET", "/api/v1/dns", nil), nil
+		return summarize(ctx, c, "GET", "/api/v1/dns/board", nil), nil
 	case "ask":
 		return askCommand(ctx, c, strings.Join(fields[1:], " "), conversationKey), nil
 	case "forget":

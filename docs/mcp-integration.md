@@ -190,7 +190,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ebpf_census` | `GET /api/v1/ebpf/census` | — | Counts of deny/allow list entries. Never returns the entries themselves |
 | `netra_baselines` | `GET /api/v1/baselines` | — | Whether behavior and rate baselines exist and how old they are |
 | `netra_ports` | `GET /api/v1/ports` | `limit` (1-200, default 30) | Top destination ports by packet count |
-| `netra_dns` | `GET /api/v1/dns` | `limit` (1-200, default 30) | DNS names ranked by failure count |
+| `netra_dns_board` | `GET /api/v1/dns/board` | `limit` (1-200, default 30) | DNS names ranked by failure count |
 | `netra_lease` | `GET /api/v1/lease` | — | Enforce-mode lease clock: remaining seconds, expired, or none |
 | `netra_export_status` | `GET /api/v1/export/status` | — | Whether syslog push is configured |
 | `netra_ebpf_coverage` | `GET /api/v1/ebpf/coverage` | — | Per-node hook/program coverage matrix |
