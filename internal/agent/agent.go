@@ -54,8 +54,15 @@ type Agent struct {
 	cgroupPath                         string
 	interfaces, xdpInterfaces          []string
 	http                               *http.Client
-	collection                         *ebpf.Collection
-	links                              []link.Link
+	// wsDialer mirrors http's TLS trust settings (NETRA_TLS_INSECURE) for
+	// the capture-stream WebSocket in runCaptureStream — a bug found via
+	// live Chrome verification: websocket.DefaultDialer does not skip
+	// certificate verification, so against this chart's self-signed
+	// controller cert the dial failed silently (logged, never surfaced to
+	// the dashboard) and no capture frame ever left this node.
+	wsDialer   *websocket.Dialer
+	collection *ebpf.Collection
+	links      []link.Link
 	// edgeObject/edgeCollection are the standalone edge-TCP-intel BPF
 	// object (bpf/netra_edge_intel.c) and its loaded collection — a
 	// separate object/collection from the main one, per
@@ -121,11 +128,14 @@ type Agent struct {
 func New(log *slog.Logger) *Agent {
 	server := strings.TrimRight(env("NETRA_SERVER", "http://netra.netra-system.svc:30870"), "/")
 	client := &http.Client{Timeout: 10 * time.Second}
+	wsDialer := *websocket.DefaultDialer
 	if envBool("NETRA_TLS_INSECURE", false) {
 		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit opt-in for chart-generated self-signed cert
+		wsDialer.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
 	}
 	return &Agent{
-		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
+		wsDialer: &wsDialer,
+		log:      log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
 		edgeObject:    env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
 		captureObject: env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
@@ -3234,7 +3244,7 @@ func (a *Agent) runCaptureStream(ctx context.Context) {
 	if a.key != "" {
 		header.Set("X-Netra-Agent-Key", a.key)
 	}
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
+	conn, _, err := a.wsDialer.DialContext(ctx, wsURL, header)
 	if err != nil {
 		a.log.Error("dial capture stream", "error", err)
 		return

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.71 — 2026-09-15
+
+- **Fix: packet capture never streamed any packets.** Found via live Chrome verification of 0.27.70 right after deploy: starting a capture showed "1 active" and the browser's live-view WebSocket connected, but zero packets ever arrived even against a busy node. `internal/agent`'s `runCaptureStream` dialed the agent→controller capture WebSocket with `websocket.DefaultDialer`, which does not skip TLS certificate verification — this chart's controller uses a self-signed cert (`NETRA_TLS_INSECURE=true`, same as the agent's ordinary `http.Client`), so the dial failed every time with a TLS error, logged locally on the agent and never surfaced to the dashboard, silently killing the stream before any frame could leave the node.
+  - `internal/agent/agent.go`: added `Agent.wsDialer`, built once in `New()` from the exact same `NETRA_TLS_INSECURE` check that already configures `http.Client`'s `Transport`, and used it in `runCaptureStream` instead of `websocket.DefaultDialer`.
+  - Verified: `go build/vet/test ./...` clean. Live: redeploying and re-running the same capture session that showed 0 packets before this fix is the actual verification step (see the rest of this session's live check).
+- Version bumped to 0.27.71 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.70 — 2026-09-15
 
 - **Add packet capture streaming, per node (cluster-wide merge is a planned fast-follow).** An operator can now start a filtered, time-bounded (max 5 minutes) capture on one node and watch full packet bytes stream live in the dashboard, or download the session as a standard `.pcap` for Wireshark — the first feature in this repo that surfaces raw wire bytes rather than flow metadata.
