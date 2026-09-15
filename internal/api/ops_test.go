@@ -94,6 +94,76 @@ func TestExportFlowsFromAgentStats(t *testing.T) {
 	}
 }
 
+func TestExportBlocksFromAgentEvents(t *testing.T) {
+	s := testExportServer(t)
+	s.store.Report(models.AgentReport{
+		Node:       "n1",
+		ObservedAt: time.Now(),
+		Events: []models.FastPathEvent{
+			{Action: "blocked", Reason: "deny-cidr", SourceIP: "10.0.0.5", DestinationIP: "203.0.113.20", DestinationPort: 443, Protocol: "TCP", ObservedAt: time.Now()},
+			{Action: "allowed", SourceIP: "10.0.0.6", DestinationIP: "203.0.113.21", DestinationPort: 80, Protocol: "TCP", ObservedAt: time.Now()},
+		},
+	})
+	for _, format := range []string{"json", "jsonl", "cef", "syslog", "otlp", "otlp-trace"} {
+		r := httptest.NewRequest("GET", "/api/v1/export/blocks?format="+format, nil)
+		rec := httptest.NewRecorder()
+		s.exportBlocks(rec, r)
+		if rec.Code != 200 {
+			t.Fatalf("%s: status=%d body=%s", format, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "deny-cidr") {
+			t.Fatalf("%s: expected the blocked event, not the allowed one: %s", format, body)
+		}
+		if strings.Contains(body, "203.0.113.21") {
+			t.Fatalf("%s: allowed event leaked into blocks export: %s", format, body)
+		}
+	}
+}
+
+func TestExportBlocksOTLPTraceShape(t *testing.T) {
+	s := testExportServer(t)
+	s.store.Report(models.AgentReport{
+		Node:       "n1",
+		ObservedAt: time.Now(),
+		Events: []models.FastPathEvent{
+			{Action: "dropped", Reason: "syn-drop", SourceIP: "10.0.0.5", DestinationIP: "203.0.113.20", DestinationPort: 443, Protocol: "TCP", ObservedAt: time.Now()},
+		},
+	})
+	r := httptest.NewRequest("GET", "/api/v1/export/blocks?format=otlp-trace", nil)
+	rec := httptest.NewRecorder()
+	s.exportBlocks(rec, r)
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var doc struct {
+		ResourceSpans []struct {
+			ScopeSpans []struct {
+				Spans []struct {
+					TraceID string `json:"traceId"`
+					SpanID  string `json:"spanId"`
+					Status  struct {
+						Code int `json:"code"`
+					} `json:"status"`
+				} `json:"spans"`
+			} `json:"scopeSpans"`
+		} `json:"resourceSpans"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, rec.Body.String())
+	}
+	spans := doc.ResourceSpans[0].ScopeSpans[0].Spans
+	if len(spans) != 1 {
+		t.Fatalf("want 1 span, got %d", len(spans))
+	}
+	if len(spans[0].TraceID) != 32 || len(spans[0].SpanID) != 16 {
+		t.Fatalf("bad id lengths: traceId=%q spanId=%q", spans[0].TraceID, spans[0].SpanID)
+	}
+	if spans[0].Status.Code != 2 {
+		t.Fatalf("want STATUS_CODE_ERROR(2), got %d", spans[0].Status.Code)
+	}
+}
+
 func TestIntelPreviewRequiresAuth(t *testing.T) {
 	s := testExportServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/intel/preview", strings.NewReader("1.1.1.1"))

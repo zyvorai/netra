@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.63 — 2026-09-15
+
+- **OTEL spans for block/deny — closes the last "adapted later" item in `docs/exporter-tetragon-borrow-backlog.md`'s OTEL row.** The logs exporter shipped in 0.27.57 explicitly deferred traces to "a later, separate program."
+  - `GET /api/v1/export/blocks?format=otlp-trace` (`internal/siem.FromBlockEvent` + `otlpTraces`) turns each already-captured blocked/dropped `FastPathEvent` into one zero-parent OTLP span — a fresh random trace/span ID per record, no causal chain, no OTEL SDK in `netrad`. Also accepts every existing SIEM encoding (json/jsonl/cef/syslog/otlp), same as `/export/flows`.
+  - `otlp-trace` is a new format value on the shared `siem.Encode`, so it also works on `/export/audit`, `/export/events`, and `/export/flows` — span status is derived from record severity (`ERROR` for warning/high/critical, `UNSET` otherwise) rather than hardcoded, since the encoder isn't block-specific.
+  - CLI: `netractl export blocks`. MCP: `netra_export_blocks` (73 read / 50 mutate / 123 total).
+  - **Also fixed stale MCP tool-count docs**: README.md, docs/ai.md, and docs/mcp-integration.md were still showing wave3's "66 read / 116 total" — the fleet/handoff/scorecard/reasons/watchlist wave (0.27.60) and the talkers wave (0.27.61) both updated CHANGELOG.md's own count correctly but never touched these three doc files, since neither of those patches' diffs included them. Caught while updating counts for this feature; now consistent everywhere.
+  - Verified: `go build/vet/test ./...`, plus new unit tests for `IsBlocked`/`FromBlockEvent`/`Encode(otlp-trace)` and handler tests exercising every format including the OTLP trace document shape (span ID lengths, status code).
+- Version bumped to 0.27.63 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.62 — 2026-09-15
 
 - **Microsoft Teams ChatOps: Helm wiring closed.** `docs/chatops-teams.md` flagged that `NETRA_CHATOPS_TEAMS_APP_ID` wasn't plumbed through the chart, requiring a manual `kubectl set env`/overlay to enable Teams.

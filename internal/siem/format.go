@@ -4,6 +4,8 @@ package siem
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -63,6 +65,8 @@ func Encode(format string, records []Record) ([]byte, error) {
 		return b.Bytes(), nil
 	case FormatOTLP:
 		return json.MarshalIndent(otlpLogs(records), "", "  ")
+	case FormatOTLPTrace:
+		return json.MarshalIndent(otlpTraces(records), "", "  ")
 	default:
 		return nil, fmt.Errorf("unhandled format %q", f)
 	}
@@ -257,6 +261,79 @@ func otlpLogs(records []Record) map[string]any {
 	}
 }
 
+// otlpTraces renders each record as one zero-parent, zero-child OTLP
+// span — not a real distributed trace, but the smallest shape a
+// trace-based backend (Tempo, Jaeger via OTLP) will accept and display
+// on its own timeline. Each record gets a fresh random trace/span ID;
+// there is no causal linkage between records, matching the backlog
+// item's own framing ("export of existing ringbuf events as traces").
+// This encoder is shared across every export endpoint, not just
+// /export/blocks, so span status is derived from Severity rather than
+// hardcoded — a block/deny record (always "warning") reads as ERROR,
+// but a plain info-level audit/flow record exported this way doesn't
+// falsely look like a failure.
+func otlpTraces(records []Record) map[string]any {
+	spans := make([]map[string]any, 0, len(records))
+	for _, r := range records {
+		start := r.At
+		if start.IsZero() {
+			start = time.Now().UTC()
+		}
+		attrs := []map[string]any{
+			otlpStr("netra.class", r.Class),
+		}
+		if r.Node != "" {
+			attrs = append(attrs, otlpStr("netra.node", r.Node))
+		}
+		if r.Kind != "" {
+			attrs = append(attrs, otlpStr("netra.reason", r.Kind))
+		}
+		if r.Subject != "" {
+			attrs = append(attrs, otlpStr("netra.subject", r.Subject))
+		}
+		if r.Target != "" {
+			attrs = append(attrs, otlpStr("netra.target", r.Target))
+		}
+		spans = append(spans, map[string]any{
+			"traceId":           randomHexID(16),
+			"spanId":            randomHexID(8),
+			"name":              firstNonEmpty(r.Action, "netra.block"),
+			"kind":              1, // SPAN_KIND_INTERNAL
+			"startTimeUnixNano": formatNano(start),
+			"endTimeUnixNano":   formatNano(start.Add(time.Microsecond)),
+			"attributes":        attrs,
+			"status":            map[string]any{"code": otlpSpanStatusCode(r.Severity), "message": firstNonEmpty(r.Message, r.Action)},
+		})
+	}
+	return map[string]any{
+		"resourceSpans": []map[string]any{{
+			"resource": map[string]any{
+				"attributes": []map[string]any{
+					otlpStr("service.name", "netra"),
+					otlpStr("service.namespace", "zyvor"),
+					otlpStr("telemetry.sdk.language", "go"),
+					otlpStr("telemetry.sdk.name", "netra-siem"),
+				},
+			},
+			"scopeSpans": []map[string]any{{
+				"scope": map[string]any{"name": "github.com/zyvorai/netra/internal/siem", "version": cefVersion},
+				"spans": spans,
+			}},
+		}},
+	}
+}
+
+// randomHexID returns n random bytes as a lowercase hex string (falls
+// back to an all-zero ID, per the OTLP spec's own invalid-but-parseable
+// convention, on the practically-impossible crypto/rand failure case).
+func randomHexID(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return hex.EncodeToString(make([]byte, n))
+	}
+	return hex.EncodeToString(b)
+}
+
 func otlpStr(key, value string) map[string]any {
 	return map[string]any{
 		"key":   key,
@@ -269,6 +346,19 @@ func formatNano(t time.Time) string {
 		t = time.Now().UTC()
 	}
 	return strconv.FormatInt(t.UTC().UnixNano(), 10)
+}
+
+// otlpSpanStatusCode maps Netra's 3-level severity onto the OTLP Span
+// Status codes: https://opentelemetry.io/docs/specs/otel/trace/api/#set-status
+// UNSET(0) for info-level records, ERROR(2) for anything Netra already
+// treats as elevated. OTLP has no separate "warning" span status.
+func otlpSpanStatusCode(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical", "high", "warning", "medium":
+		return 2 // STATUS_CODE_ERROR
+	default:
+		return 0 // STATUS_CODE_UNSET
+	}
 }
 
 func otlpSeverityNumber(s string) int {

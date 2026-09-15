@@ -20,11 +20,12 @@ import (
 
 // Format names accepted by Encode and the HTTP export handlers.
 const (
-	FormatJSON   = "json"
-	FormatJSONL  = "jsonl"
-	FormatCEF    = "cef"
-	FormatSyslog = "syslog"
-	FormatOTLP   = "otlp"
+	FormatJSON      = "json"
+	FormatJSONL     = "jsonl"
+	FormatCEF       = "cef"
+	FormatSyslog    = "syslog"
+	FormatOTLP      = "otlp"
+	FormatOTLPTrace = "otlp-trace"
 )
 
 // Record is the common envelope every formatter consumes. Fields are
@@ -147,6 +148,60 @@ func FromFlow(node string, st models.DestinationStat, at time.Time) Record {
 	}
 }
 
+// IsBlocked reports whether a FastPathEvent's Action names a block/deny
+// outcome (drop reason histograms and the OTEL span exporter both filter
+// on this).
+func IsBlocked(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "blocked", "drop", "dropped", "denied", "deny":
+		return true
+	default:
+		return false
+	}
+}
+
+// FromBlockEvent maps one blocked/dropped FastPathEvent. Class is
+// "block". Always warning severity — these are enforcement outcomes,
+// not passive observations. No payloads: 5-tuple, process identity
+// already captured on the event, and the block reason only.
+func FromBlockEvent(node string, ev models.FastPathEvent) Record {
+	at := ev.ObservedAt
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	subj := ev.DestinationIP
+	if ev.Namespace != "" && ev.Pod != "" {
+		subj = ev.Namespace + "/" + ev.Pod + " → " + ev.DestinationIP
+	}
+	return Record{
+		At:       at.UTC(),
+		Class:    "block",
+		Severity: "warning",
+		Node:     node,
+		Subject:  subj,
+		Action:   ev.Action,
+		Target:   ev.DestinationIP,
+		Kind:     firstNonEmpty(ev.Reason, "unknown"),
+		Message:  fmt.Sprintf("%s %s %s:%d → %s:%d (%s)", ev.Action, ev.Protocol, ev.SourceIP, ev.SourcePort, ev.DestinationIP, ev.DestinationPort, firstNonEmpty(ev.Reason, "unknown")),
+		Details: map[string]any{
+			"sourceIp":        ev.SourceIP,
+			"sourcePort":      ev.SourcePort,
+			"destinationPort": ev.DestinationPort,
+			"protocol":        ev.Protocol,
+			"direction":       ev.Direction,
+			"hook":            ev.Hook,
+			"reason":          ev.Reason,
+			"pid":             ev.PID,
+			"uid":             ev.UID,
+			"comm":            ev.Comm,
+			"namespace":       ev.Namespace,
+			"pod":             ev.Pod,
+			"workloadKind":    ev.WorkloadKind,
+			"workloadName":    ev.WorkloadName,
+		},
+	}
+}
+
 func auditMessage(e models.AuditEvent) string {
 	if e.Target == "" {
 		return e.Action
@@ -187,15 +242,17 @@ func NormalizeFormat(raw string) (string, error) {
 		return FormatSyslog, nil
 	case FormatOTLP, "otlp-logs", "otel":
 		return FormatOTLP, nil
+	case FormatOTLPTrace, "otlptrace", "otlp-traces", "trace", "traces":
+		return FormatOTLPTrace, nil
 	default:
-		return "", fmt.Errorf("unknown export format %q (want json, jsonl, cef, syslog, otlp)", raw)
+		return "", fmt.Errorf("unknown export format %q (want json, jsonl, cef, syslog, otlp, otlp-trace)", raw)
 	}
 }
 
 // ContentType is the HTTP Content-Type for a normalized format.
 func ContentType(format string) string {
 	switch format {
-	case FormatJSON, FormatOTLP:
+	case FormatJSON, FormatOTLP, FormatOTLPTrace:
 		return "application/json"
 	case FormatJSONL:
 		return "application/x-ndjson"

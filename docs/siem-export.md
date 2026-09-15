@@ -15,6 +15,7 @@ existing HMAC-signed webhook path (`docs/alerting.md`).
 | `GET` | `/api/v1/export/audit` | Last *N* `store.Audit` events |
 | `GET` | `/api/v1/export/events` | Current health anomalies and/or incident clusters (optional audit) |
 | `GET` | `/api/v1/export/flows` | Current destination-flow counters from fresh agents |
+| `GET` | `/api/v1/export/blocks` | Current blocked/dropped events from fresh agents, including `otlp-trace` |
 | `GET` | `/api/v1/export/status` | Configured encodings + whether syslog push is on |
 | `GET` | `/api/v1/report` | Point-in-time operator briefing |
 | `GET` | `/api/v1/playbooks` | Review-only next-step playbook from that briefing |
@@ -47,19 +48,29 @@ Unknown formats return `400`.
 | `cef` | `text/plain` | ArcSight CEF 0, vendor `Zyvor`, product `Netra` |
 | `syslog` | `text/plain` | RFC5424, facility 13 (log audit), SD-ID `netra@zyvor` |
 | `otlp` | `application/json` | OTLP/HTTP **Logs** JSON (`resourceLogs`). No traces, no SDK |
+| `otlp-trace` | `application/json` | OTLP/HTTP **Traces** JSON (`resourceSpans`) — one zero-parent, zero-child span per record, `/api/v1/export/blocks`' primary use case |
 
-`Record` fields: `at`, `class` (`audit`/`anomaly`/`incident`), `severity`,
+`Record` fields: `at`, `class` (`audit`/`anomaly`/`incident`/`flow`/`block`), `severity`,
 `actor`, `action`, `target`, `subject`, `message`, `sourceKey`, `kind`,
 `node`, `value`, `details`. Audit `details` are the same map the store
 already persists — mutators in this repo do not put payloads there.
 
 CEF severity is 1/5/8 for info/warning/critical. Syslog PRI uses
 facility 13 plus RFC5424 severity 6/4/2. OTLP `severityNumber` uses 9/13/21.
+`otlp-trace` span status is `ERROR` for warning/high/critical severity,
+`UNSET` otherwise — every `/api/v1/export/blocks` record is `warning`.
 
-This is the logs half of the “OTEL spans for block/deny” backlog item in
-`docs/exporter-tetragon-borrow-backlog.md`. A traces exporter would be a
-later, separate program; this payload is intentionally logs-only so a
-collector can ingest it today without an OTEL SDK in `netrad`.
+**OTEL spans for block/deny, shipped.** `docs/exporter-tetragon-borrow-backlog.md`
+tracked this as a deferred item: the logs exporter above shipped first,
+with traces explicitly deferred to "a later, separate program." That
+program is `format=otlp-trace` on `/api/v1/export/blocks` — each already-
+captured blocked/dropped `FastPathEvent` becomes one span with a fresh
+random trace/span ID (there is no real causal chain between records, so
+this is a display convenience for a trace-based backend's timeline, not
+distributed tracing). No OTEL SDK in `netrad`; the JSON is built by hand,
+same as the logs exporter. `format=otlp-trace` also works on
+`/api/v1/export/audit`/`events`/`flows` (shared encoder), though
+`/export/blocks` is the endpoint this feature was built for.
 
 ## CLI
 
@@ -67,6 +78,7 @@ collector can ingest it today without an OTEL SDK in `netrad`.
 netractl export audit --format cef --limit 200
 netractl export events --format syslog --include anomaly,incident,audit
 netractl export flows --format jsonl --limit 500
+netractl export blocks --format otlp-trace --limit 200
 netractl report
 netractl report --format json
 netractl playbooks
@@ -86,7 +98,10 @@ Read tools (always available, no mutation gate):
 
 - `netra_export_audit`
 - `netra_export_events`
+- `netra_export_blocks`
 - `netra_report`
+
+(See `docs/mcp-integration.md`'s full reference table for the rest of the export-family tools added in later waves — `netra_export_flows`, `netra_export_status`, `netra_playbooks`, `netra_audit_summary`.)
 
 ## Cron / collector sketch
 

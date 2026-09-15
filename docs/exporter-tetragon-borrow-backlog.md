@@ -23,7 +23,7 @@ Netra stays a Cilium-independent network observability + leased emergency contai
 | Softirq *latency* histograms | Needs optional separate kprobe/tracepoint program — not grown into TC `handle_v4`/`handle_v6` |
 | SYN backlog depth histogram | Needs optional sensor; counters only for now |
 | OTEL *logs* for audit/anomaly/incident | Shipped as pull-based `GET /api/v1/export/*?format=otlp` (`internal/siem`). Stdlib JSON Logs body only — no OTEL SDK, does not replace the JSON API. See `docs/siem-export.md` |
-| OTEL *spans* for block/deny | Still later: optional export of existing ringbuf events as traces; do not replace JSON API |
+| OTEL *spans* for block/deny | Shipped as pull-based `GET /api/v1/export/blocks?format=otlp-trace` (`internal/siem`). One zero-parent span per already-captured blocked/dropped `FastPathEvent`; no OTEL SDK, does not replace the JSON API. See `docs/siem-export.md` |
 | Exe-hash leased deny | Observe `exe` first; optional fail-open lease map later |
 | Namespace-change watch | Cap watch ships first; ns change can follow the same socket-owner scope |
 

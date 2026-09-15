@@ -11,7 +11,7 @@ import (
 
 func exportCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("export audit|events|flows|status [--format json|jsonl|cef|syslog|otlp] [--limit N] [--include LIST]")
+		return fmt.Errorf("export audit|events|flows|blocks|status [--format json|jsonl|cef|syslog|otlp|otlp-trace] [--limit N] [--include LIST]")
 	}
 	kind := args[0]
 	format := "json"
@@ -55,10 +55,12 @@ func exportCmd(args []string) error {
 		path = "/api/v1/export/events?" + q.Encode()
 	case "flows":
 		path = "/api/v1/export/flows?" + q.Encode()
+	case "blocks":
+		path = "/api/v1/export/blocks?" + q.Encode()
 	case "status":
 		path = "/api/v1/export/status"
 	default:
-		return fmt.Errorf("export audit|events|flows|status")
+		return fmt.Errorf("export audit|events|flows|blocks|status")
 	}
 	return request("GET", path, nil)
 }

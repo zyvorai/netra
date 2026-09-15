@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 66 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 73 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -183,6 +183,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_playbooks` | `GET /api/v1/playbooks` | `format` (`json`/`markdown`) | Review-only operator steps. `autoApply` is always false |
 | `netra_audit_summary` | `GET /api/v1/audit/summary` | `limit`, `since`, `until` | Actor/action/hour rollup of the audit log |
 | `netra_export_flows` | `GET /api/v1/export/flows` | `format`, `limit` | Destination-flow counters as SIEM records. No payloads |
+| `netra_export_blocks` | `GET /api/v1/export/blocks` | `format` (adds `otlp-trace`), `limit` | Blocked/dropped events as SIEM records; `otlp-trace` renders each as one OTLP span. No payloads |
 | `netra_export_status` | `GET /api/v1/export/status` | — | Whether syslog push is configured |
 | `netra_ebpf_coverage` | `GET /api/v1/ebpf/coverage` | — | Per-node hook/program coverage matrix |
 | `netra_intel_preview` | `POST /api/v1/intel/preview` | `text` (raw feed body) | Parse JSON/CSV/bare IPs into deny-import entries. Applies nothing |

@@ -56,6 +56,7 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/export/audit"},
 		{"GET", "/api/v1/export/events"},
 		{"GET", "/api/v1/export/flows"},
+		{"GET", "/api/v1/export/blocks"},
 		{"GET", "/api/v1/export/status"},
 		{"GET", "/api/v1/report"},
 		{"GET", "/api/v1/playbooks"},

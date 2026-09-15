@@ -100,11 +100,12 @@ func (s *Server) ebpfCoverage(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) exportStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"formats": []string{siem.FormatJSON, siem.FormatJSONL, siem.FormatCEF, siem.FormatSyslog, siem.FormatOTLP},
+		"formats": []string{siem.FormatJSON, siem.FormatJSONL, siem.FormatCEF, siem.FormatSyslog, siem.FormatOTLP, siem.FormatOTLPTrace},
 		"pull": []string{
 			"GET /api/v1/export/audit",
 			"GET /api/v1/export/events",
 			"GET /api/v1/export/flows",
+			"GET /api/v1/export/blocks",
 			"GET /api/v1/report",
 			"GET /api/v1/playbooks",
 		},

@@ -96,6 +96,38 @@ func (s *Server) exportEvents(w http.ResponseWriter, r *http.Request) {
 	writeExport(w, format, records)
 }
 
+// exportBlocks emits current blocked/dropped FastPathEvents across
+// fresh agents as SIEM records — the same encodings exportFlows uses,
+// plus otlp-trace (each blocked event becomes one OTLP span; see
+// docs/exporter-tetragon-borrow-backlog.md's "OTEL spans for
+// block/deny" item). Observe-only: reads already-captured events,
+// applies nothing.
+func (s *Server) exportBlocks(w http.ResponseWriter, r *http.Request) {
+	format, ok := parseExportFormat(w, r)
+	if !ok {
+		return
+	}
+	limit := parseExportLimit(r, 200, 2000)
+	now := time.Now().UTC()
+	agents := s.store.AgentStatuses(now, s.agentStaleAfter)
+	records := make([]siem.Record, 0, limit)
+	for _, a := range agents {
+		for _, ev := range a.Events {
+			if !siem.IsBlocked(ev.Action) {
+				continue
+			}
+			if len(records) >= limit {
+				break
+			}
+			records = append(records, siem.FromBlockEvent(a.Node, ev))
+		}
+		if len(records) >= limit {
+			break
+		}
+	}
+	writeExport(w, format, records)
+}
+
 func (s *Server) operatorReport(w http.ResponseWriter, r *http.Request) {
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	if format == "" {
@@ -151,7 +183,7 @@ func (s *Server) buildOperatorReport(r *http.Request, now time.Time) report.Snap
 	}
 	in := report.Input{
 		GeneratedAt:     now,
-		Version:         "0.27.62",
+		Version:         "0.27.63",
 		Mode:            cfg.Mode,
 		ScopeMode:       cfg.ScopeMode,
 		LeaseExpiresAt:  lease,

@@ -229,3 +229,65 @@ func TestForwarderUDP(t *testing.T) {
 		t.Fatal("no udp payload")
 	}
 }
+
+func TestIsBlocked(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		want   bool
+	}{
+		{"blocked", true}, {"drop", true}, {"dropped", true}, {"denied", true}, {"deny", true},
+		{"BLOCKED", true}, {" dropped ", true},
+		{"allowed", false}, {"", false}, {"observed", false},
+	} {
+		if got := IsBlocked(tc.action); got != tc.want {
+			t.Fatalf("IsBlocked(%q) = %v, want %v", tc.action, got, tc.want)
+		}
+	}
+}
+
+func TestFromBlockEventShape(t *testing.T) {
+	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	rec := FromBlockEvent("n1", models.FastPathEvent{
+		Action:          "blocked",
+		Reason:          "deny-cidr",
+		SourceIP:        "10.0.0.5",
+		SourcePort:      54321,
+		DestinationIP:   "203.0.113.20",
+		DestinationPort: 443,
+		Protocol:        "TCP",
+		Namespace:       "prod",
+		Pod:             "api-1",
+		ObservedAt:      at,
+	})
+	if rec.Class != "block" || rec.Severity != "warning" {
+		t.Fatalf("%#v", rec)
+	}
+	if rec.Subject != "prod/api-1 → 203.0.113.20" {
+		t.Fatalf("subject=%s", rec.Subject)
+	}
+	if rec.Kind != "deny-cidr" {
+		t.Fatalf("kind=%s", rec.Kind)
+	}
+	if !rec.At.Equal(at) {
+		t.Fatalf("at=%v want %v", rec.At, at)
+	}
+}
+
+func TestEncodeOTLPTraceRoundTrip(t *testing.T) {
+	body, err := Encode(FormatOTLPTrace, []Record{
+		FromBlockEvent("n1", models.FastPathEvent{Action: "blocked", Reason: "syn-drop", DestinationIP: "203.0.113.20"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, body)
+	}
+	if _, ok := doc["resourceSpans"]; !ok {
+		t.Fatalf("missing resourceSpans: %s", body)
+	}
+	if strings.Contains(string(body), `"resourceLogs"`) {
+		t.Fatalf("otlp-trace must not use the logs shape: %s", body)
+	}
+}

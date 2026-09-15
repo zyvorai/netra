@@ -89,6 +89,15 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"format", "limit"},
 		},
 		{
+			name: "netra_export_blocks", method: "GET", path: "/api/v1/export/blocks",
+			description: "Export current blocked/dropped FastPathEvents (5-tuple + reason + process identity) in the SIEM encodings, including otlp-trace — each blocked event becomes one OTLP span for a trace-based backend. No payloads.",
+			schema: objSchema(map[string]any{
+				"format": enumProp("Export encoding.", "json", "jsonl", "cef", "syslog", "otlp", "otlp-trace"),
+				"limit":  intProp("Max blocked events, 1-2000. Default 200."),
+			}),
+			queryParams: []string{"format", "limit"},
+		},
+		{
 			name: "netra_export_status", method: "GET", path: "/api/v1/export/status",
 			description: "Whether optional syslog push is configured, plus the pull-export endpoints and encodings this controller supports.",
 			schema:      emptySchema(),

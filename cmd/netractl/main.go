@@ -88,7 +88,7 @@ func main() {
 func usage() {
 	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
   status | audit | audit summary
-  export audit|events|flows|status [--format json|jsonl|cef|syslog|otlp] [--limit N] [--include anomaly,incident,audit]
+  export audit|events|flows|blocks|status [--format json|jsonl|cef|syslog|otlp|otlp-trace] [--limit N] [--include anomaly,incident,audit]
   report [--format markdown|json]
   playbooks [--format markdown|json]
   intel preview FILE
