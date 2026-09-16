@@ -74,6 +74,61 @@ func TestKernelNetworkWindowsClampsMinimumWindow(t *testing.T) {
 	}
 }
 
+func TestKernelNetworkSparklineReturnsConsecutiveDeltas(t *testing.T) {
+	s := New()
+	t0 := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	boot := t0.Add(-time.Hour)
+	s.Report(kernelReport("n1", t0, boot, 10, 0, 0, 0))
+	s.Report(kernelReport("n1", t0.Add(time.Minute), boot, 40, 0, 0, 0))
+	s.Report(kernelReport("n1", t0.Add(2*time.Minute), boot, 90, 0, 0, 0))
+
+	got := s.KernelNetworkSparkline("n1", 30)
+	if len(got) != 2 {
+		t.Fatalf("want 2 windows from 3 samples (one per adjacent pair): %#v", got)
+	}
+	if got[0].Counters[0].Delta != 30 || got[1].Counters[0].Delta != 50 {
+		t.Fatalf("unexpected per-pair deltas: %#v", got)
+	}
+	if got[0].Warming || got[1].Warming {
+		t.Fatalf("both pairs have a full second sample and should not be warming: %#v", got)
+	}
+}
+
+func TestKernelNetworkSparklineReturnsNilForFewerThanTwoSamples(t *testing.T) {
+	s := New()
+	if got := s.KernelNetworkSparkline("n1", 30); got != nil {
+		t.Fatalf("got=%#v, want nil for an unknown node", got)
+	}
+	s.Report(kernelReport("n1", time.Now(), time.Now(), 1, 0, 0, 0))
+	if got := s.KernelNetworkSparkline("n1", 30); got != nil {
+		t.Fatalf("got=%#v, want nil with only one stored sample", got)
+	}
+}
+
+func TestKernelNetworkSparklineCapsAtMaxPoints(t *testing.T) {
+	s := New()
+	t0 := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	boot := t0.Add(-time.Hour)
+	for i := 0; i < 10; i++ {
+		s.Report(kernelReport("n1", t0.Add(time.Duration(i)*time.Minute), boot, uint64(i), 0, 0, 0))
+	}
+	got := s.KernelNetworkSparkline("n1", 3)
+	if len(got) != 3 {
+		t.Fatalf("want exactly 3 points when maxPoints=3 and 10 samples exist: %#v", got)
+	}
+}
+
+func TestKernelNetworkSparklineDetectsRestartBetweenAdjacentSamples(t *testing.T) {
+	s := New()
+	t0 := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	s.Report(kernelReport("n1", t0, t0.Add(-time.Hour), 100, 0, 0, 0))
+	s.Report(kernelReport("n1", t0.Add(time.Minute), t0.Add(30*time.Second), 2, 0, 0, 0))
+	got := s.KernelNetworkSparkline("n1", 30)
+	if len(got) != 1 || !got[0].Warming || !got[0].ResetDetected {
+		t.Fatalf("a restart between the two adjacent samples must warm up, not fabricate a delta: %#v", got)
+	}
+}
+
 func kernelReport(node string, at, boot time.Time, counter, softnet, rx, qdisc uint64) models.AgentReport {
 	return models.AgentReport{
 		Node: node, ObservedAt: at, AgentStartedAt: boot,

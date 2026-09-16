@@ -1236,6 +1236,25 @@ code {
   border: 1px solid var(--border);
 }
 
+/* Process/workload identity for an attributed policy-drop finding
+   (Drops.tsx) — shares .severity-badge's pill shape/sizing but a neutral
+   background, since this identifies a process, not a severity level. */
+.identity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-secondary);
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+}
+
 /* Congestion Map: a deterministic ingress/shared/egress x 7-row layout of
    network-stack stage cards, placed via inline gridColumn/gridRow — plain
    CSS grid, not reagraph (the wrong tool for a fixed top-to-bottom layout,
@@ -1255,7 +1274,12 @@ code {
   text-transform: uppercase;
   color: var(--text-tertiary);
 }
+/* .stage-cell is a plain div (not a button) since it hosts two independent
+   click targets — the glossary "?" trigger and the select/drill-down body
+   — nesting a button in a button is invalid HTML and would double-fire
+   both click handlers. */
 .stage-cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1263,10 +1287,6 @@ code {
   border-radius: var(--radius-base);
   border: 1px solid var(--border);
   background: var(--bg-elevated-2);
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
   transition: border-color 0.2s var(--ease-apple), transform 0.2s var(--ease-apple);
 }
 .stage-cell:hover {
@@ -1281,6 +1301,45 @@ code {
 .stage-cell.warning {
   border-color: var(--warning-border);
 }
+.stage-cell-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  padding-right: 20px; /* clear the glossary trigger */
+  margin: 0;
+  border: none;
+  min-height: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stage-glossary-trigger {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated-2);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.stage-glossary-trigger:hover {
+  background: var(--hover-fill);
+  color: var(--text-primary);
+}
+.stage-glossary-pop p {
+  margin: 0 0 6px;
+}
 .stage-cell-title {
   font-size: 13px;
   font-weight: 600;
@@ -1288,6 +1347,20 @@ code {
 .stage-cell-rate {
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
+}
+.stage-cell-gloss {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+.sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+.sparkline {
+  color: var(--accent-cyan);
+  flex: 0 0 auto;
 }
 .stage-cell-warming {
   font-size: 11px;

@@ -23,6 +23,7 @@ import (
 	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/insights"
+	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
@@ -60,6 +61,11 @@ type Config struct {
 	// before a drop-rate spike can fire — keeps a near-zero baseline from
 	// turning a handful of drops into an alert. Default 50.
 	DropSpikeMinAbsolute uint64
+	// KernelWindow is the fixed interval kernelNetworkEvents evaluates
+	// kerneldiag.BuildWindow over. Unlike the Congestion Map UI's
+	// user-adjustable dropdown, alerting needs one stable choice — defaults
+	// to 5m, matching GET /api/v1/ebpf/kernel-network's own default.
+	KernelWindow time.Duration
 }
 
 func (c *Config) applyDefaults() {
@@ -84,6 +90,9 @@ func (c *Config) applyDefaults() {
 	if c.DropSpikeMinAbsolute <= 0 {
 		c.DropSpikeMinAbsolute = 50
 	}
+	if c.KernelWindow <= 0 {
+		c.KernelWindow = 5 * time.Minute
+	}
 }
 
 // Poller periodically evaluates anomaly sources and publishes new/escalated
@@ -91,14 +100,15 @@ func (c *Config) applyDefaults() {
 // Poller directly with fixture-backed fetch/publish/now functions instead of
 // a real store or HTTP server.
 type Poller struct {
-	log       *slog.Logger
-	fetch     func(now time.Time, staleAfter time.Duration) []models.AgentStatus
-	publish   func(webhook.Event) bool
-	record    func(models.ClusterHealthSample, time.Time)
-	baseline  func() models.BehaviorBaseline
-	fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)
-	now       func() time.Time
-	cfg       Config
+	log                *slog.Logger
+	fetch              func(now time.Time, staleAfter time.Duration) []models.AgentStatus
+	publish            func(webhook.Event) bool
+	record             func(models.ClusterHealthSample, time.Time)
+	baseline           func() models.BehaviorBaseline
+	fetchPods          func(ctx context.Context, ns string) ([]models.PodInfo, error)
+	fetchKernelWindows func(window time.Duration) []models.KernelNetworkWindow
+	now                func() time.Time
+	cfg                Config
 
 	dedup        *dedupState
 	restarts     *restartTracker
@@ -114,17 +124,18 @@ type Poller struct {
 func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config, fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *Poller {
 	cfg.applyDefaults()
 	return &Poller{
-		log:          log,
-		fetch:        st.AgentStatuses,
-		publish:      publish,
-		record:       st.RecordHealthSample,
-		baseline:     st.Baseline,
-		fetchPods:    fetchPods,
-		now:          time.Now,
-		cfg:          cfg,
-		dedup:        newDedupState(),
-		restarts:     newRestartTracker(),
-		dropBaseline: newDropBaselineTracker(),
+		log:                log,
+		fetch:              st.AgentStatuses,
+		publish:            publish,
+		record:             st.RecordHealthSample,
+		baseline:           st.Baseline,
+		fetchPods:          fetchPods,
+		fetchKernelWindows: st.KernelNetworkWindows,
+		now:                time.Now,
+		cfg:                cfg,
+		dedup:              newDedupState(),
+		restarts:           newRestartTracker(),
+		dropBaseline:       newDropBaselineTracker(),
 	}
 }
 
@@ -154,6 +165,7 @@ func (p *Poller) tick() {
 	}
 	events = append(events, p.newSinceStartEvents(now, agents)...)
 	events = append(events, p.dropSpikeEvents(now, agents)...)
+	events = append(events, p.kernelNetworkEvents(now, agents)...)
 	for _, ev := range events {
 		if !p.publish(ev) {
 			p.log.Warn("alert dropped: dispatcher queue full", "source", ev.Source, "kind", ev.Kind, "subject", ev.Subject)
@@ -257,6 +269,43 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []w
 		}
 	}
 	p.dropBaseline.sweep(now, p.cfg.Cooldown*8)
+	return out
+}
+
+// kernelNetworkEvents pushes Congestion Map findings (internal/kerneldiag)
+// through the same dedup/webhook path as every other source here.
+//
+// This deliberately does NOT reuse dropBaselineTracker's rolling-average
+// shape. dropBaselineTracker exists because KernelDrops/PolicyDrops are raw
+// cumulative counters compared against a fixed threshold with no rate
+// awareness at all (see dropSpikeEvents' doc comment) — that's the actual
+// gap it fills. kerneldiag.classify() is already window/rate-aware: it
+// scales its warning/critical threshold by window.Seconds/300 before
+// comparing, so a real rate spike already surfaces as a severity change
+// through kerneldiag.BuildWindow itself. Layering a second rolling-average
+// baseline on top would recompute a signal classify() already provides.
+// The correct, minimal wiring is therefore the same "new/escalated finding
+// + dedupState" pattern evaluate() already uses for health/pathdiag/
+// dropdiag/capdrift below — reused, not duplicated.
+func (p *Poller) kernelNetworkEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+	if p.fetchKernelWindows == nil {
+		return nil
+	}
+	diag := kerneldiag.BuildWindow(agents, p.fetchKernelWindows(p.cfg.KernelWindow))
+	var out []webhook.Event
+	for _, n := range diag.Nodes {
+		for _, f := range n.Findings {
+			ev := webhook.Event{
+				Source: "kerneldiag", Kind: f.Layer, Severity: f.Severity,
+				Subject:   n.Node + "/" + f.Layer,
+				Message:   fmt.Sprintf("%s on %s: %s", f.Signal, n.Node, f.Explanation),
+				Timestamp: now,
+			}
+			if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+				out = append(out, ev)
+			}
+		}
+	}
 	return out
 }
 

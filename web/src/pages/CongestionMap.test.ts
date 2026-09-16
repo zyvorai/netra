@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { BLANK_CELLS, STAGES, conntrackCeiling, formatStageRate, nodeStageSeverity, stageForLayer, stageLiveRate, stageSummaries, worstSeverity } from './CongestionMap';
+import { BLANK_CELLS, SEVERITY_GLOSS, STAGES, STAGE_GLOSSARY, conntrackCeiling, formatStageRate, nodeStageSeverity, stageForLayer, stageLiveRate, stageRateForWindow, stageSummaries, worstSeverity } from './CongestionMap';
 
-// The 11 layers below are grepped directly from internal/kerneldiag/analyze.go's
-// `Layer: "..."` literals. If a 12th is ever added there without a matching
+// The 12 layers below are grepped directly from internal/kerneldiag/analyze.go's
+// `Layer: "..."` literals. If a 13th is ever added there without a matching
 // STAGES entry in CongestionMap.tsx, this test starts failing — that's the point.
 const REAL_LAYERS = [
   'softnet-backlog',
@@ -16,6 +16,7 @@ const REAL_LAYERS = [
   'conntrack',
   'nic-driver',
   'ip',
+  'tcp-connection-quality',
 ];
 
 describe('stageForLayer', () => {
@@ -42,6 +43,25 @@ describe('STAGES + BLANK_CELLS grid placement', () => {
     for (const cell of cells) {
       expect(seen.has(cell), `duplicate grid position ${cell}`).toBe(false);
       seen.add(cell);
+    }
+  });
+});
+
+describe('STAGE_GLOSSARY', () => {
+  it('has a non-empty what/why entry for every declared stage', () => {
+    for (const stage of STAGES) {
+      const g = STAGE_GLOSSARY[stage.key];
+      expect(g, `missing glossary entry for ${stage.key}`).toBeDefined();
+      expect(g.what.length, `${stage.key} glossary "what" is empty`).toBeGreaterThan(0);
+      expect(g.why.length, `${stage.key} glossary "why" is empty`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('SEVERITY_GLOSS', () => {
+  it('has a friendly word for every StageSeverity value', () => {
+    for (const sev of ['critical', 'warning', 'ok', 'warming'] as const) {
+      expect(SEVERITY_GLOSS[sev], `missing gloss for ${sev}`).toBeTruthy();
     }
   });
 });
@@ -175,6 +195,13 @@ describe('stageLiveRate', () => {
   it('returns null when no node has a settled window', () => {
     expect(stageLiveRate([{ node: 'n1', window: { warming: true } }], 'qdisc')).toBeNull();
     expect(stageLiveRate([], 'qdisc')).toBeNull();
+  });
+});
+
+describe('stageRateForWindow', () => {
+  it('matches what stageLiveRate computes for a single-node array — regression guard for the extraction', () => {
+    const window = { warming: false, qdiscDropsPerSecond: 4, qdiscDrops: 40 };
+    expect(stageRateForWindow(window, 'qdisc')).toEqual(stageLiveRate([{ node: 'n1', window }], 'qdisc'));
   });
 });
 

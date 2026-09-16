@@ -13,6 +13,41 @@ import (
 	"testing"
 )
 
+func TestCongestionBriefNoFindings(t *testing.T) {
+	b := CongestionBrief(Snapshot{AgentsTotal: 1, HealthScore: 100})
+	if b.Headline != "Kernel network stack pressure" {
+		t.Fatalf("headline=%q", b.Headline)
+	}
+	if !strings.Contains(b.Summary, "No kernel-network congestion findings") {
+		t.Fatalf("summary=%q, want the no-findings sentence", b.Summary)
+	}
+	if b.Severity != "info" {
+		t.Fatalf("severity=%q, want info when no anomalies were added", b.Severity)
+	}
+}
+
+func TestCongestionBriefWithFindingsReflectsCountsAndSeverity(t *testing.T) {
+	snap := Snapshot{
+		AgentsTotal:    1,
+		KernelCritical: 1,
+		KernelWarnings: 2,
+		Anomalies: []Finding{
+			{Severity: "critical", Kind: "kernel-network/qdisc", Subject: "n1", Message: "egress queue drops"},
+			{Severity: "warning", Kind: "kernel-network/tcp-memory", Subject: "n1", Message: "TCP memory pressure"},
+		},
+	}
+	b := CongestionBrief(snap)
+	if !strings.Contains(b.Summary, "1 critical and 2 warning kernel-network finding(s)") {
+		t.Fatalf("summary=%q", b.Summary)
+	}
+	// Severity rolls up through BuildBrief's own collectFindings/rollupSeverity
+	// (brief.go) from snap.Anomalies — CongestionBrief must not compute its
+	// own separate severity, or the two could disagree.
+	if b.Severity != "critical" {
+		t.Fatalf("severity=%q, want critical (rolled up from snap.Anomalies)", b.Severity)
+	}
+}
+
 func TestAnswerEchoesConversationIDAndRecordsTurnsHeuristicOnly(t *testing.T) {
 	resetConversations(t)
 	snap := Snapshot{AgentsTotal: 1, HealthScore: 80}

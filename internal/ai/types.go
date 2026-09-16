@@ -35,6 +35,14 @@ type Snapshot struct {
 	HighExposure    int `json:"highExposure"`
 	Recommendations int `json:"recommendations"`
 
+	// KernelCritical/KernelWarnings are the current kernel-network
+	// (Congestion Map) finding counts, set only by the congestion-brief
+	// path (internal/api/ai.go's aiCongestionBrief) — every other Snapshot
+	// builder leaves these at zero, so IntentCongestion's summary text is
+	// the only thing that reads them.
+	KernelCritical int `json:"kernelCritical,omitempty"`
+	KernelWarnings int `json:"kernelWarnings,omitempty"`
+
 	TopDestinations []NamedCount `json:"topDestinations,omitempty"`
 	TopDNS          []NamedCount `json:"topDns,omitempty"`
 	TopProcesses    []NamedCount `json:"topProcesses,omitempty"`

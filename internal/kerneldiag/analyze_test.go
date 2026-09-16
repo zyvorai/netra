@@ -41,6 +41,45 @@ func TestBuildDoesNotRecommendFromTunablesAlone(t *testing.T) {
 	}
 }
 
+func TestBuildFindsTCPConnectionQualityFromRetransmitsAndResets(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node: "node-a",
+		KernelNetwork: models.KernelNetworkSnapshot{
+			Counters: []models.KernelNetworkCounter{
+				{Name: "Tcp.RetransSegs", Value: 200},
+				{Name: "Tcp.OutRsts", Value: 300},
+				{Name: "Tcp.EstabResets", Value: 100},
+			},
+		},
+	}}
+	r := Build([]models.AgentStatus{a})
+	var found *models.KernelNetworkFinding
+	for i := range r.Nodes[0].Findings {
+		if r.Nodes[0].Findings[i].Layer == "tcp-connection-quality" {
+			found = &r.Nodes[0].Findings[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected a tcp-connection-quality finding: %#v", r.Nodes[0].Findings)
+	}
+	if found.Tunable != "" || found.ApplyCommand != "" {
+		t.Fatalf("tcp-connection-quality must never suggest a tunable — there is no safe buffer fix: %#v", found)
+	}
+	if !strings.Contains(strings.Join(found.Evidence, " "), "Tcp.RetransSegs=200") {
+		t.Fatalf("evidence missing expected counter: %#v", found.Evidence)
+	}
+}
+
+func TestBuildOmitsTCPConnectionQualityWhenCountersAreZero(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{Node: "quiet"}}
+	r := Build([]models.AgentStatus{a})
+	for _, f := range r.Nodes[0].Findings {
+		if f.Layer == "tcp-connection-quality" {
+			t.Fatalf("did not expect a finding with zero counters: %#v", f)
+		}
+	}
+}
+
 func TestBuildSkipsStaleAgent(t *testing.T) {
 	r := Build([]models.AgentStatus{{Stale: true, AgentReport: models.AgentReport{Node: "old", Stack: models.NodeStackStat{SoftnetDropped: 99}}}})
 	if r.Summary.Nodes != 0 {

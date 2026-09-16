@@ -4,12 +4,52 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/zyvorai/netra/internal/ai"
 	"github.com/zyvorai/netra/internal/store"
 )
+
+func TestAICongestionBriefIncludesKernelNetworkFindings(t *testing.T) {
+	st := store.New()
+	now := time.Now().UTC()
+	boot := now.Add(-time.Hour)
+	st.Report(apiKernelReport(now.Add(-time.Minute), boot, 100))
+	st.Report(apiKernelReport(now, boot, 106))
+	s := &Server{store: st, agentStaleAfter: 2 * time.Minute}
+
+	rec := httptest.NewRecorder()
+	s.aiCongestionBrief(rec, httptest.NewRequest("GET", "/api/v1/ai/congestion-brief?window=5m", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var b ai.Brief
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Headline != "Kernel network stack pressure" {
+		t.Fatalf("headline=%q", b.Headline)
+	}
+	if !strings.Contains(b.Summary, "warning kernel-network finding(s)") {
+		t.Fatalf("summary=%q, want it to mention the kernel-network finding from apiKernelReport's Udp.RcvbufErrors delta", b.Summary)
+	}
+	if len(b.Findings) == 0 {
+		t.Fatalf("findings=%#v, want at least the kernel-network finding rolled into snap.Anomalies", b.Findings)
+	}
+}
+
+func TestAICongestionBriefRejectsInvalidWindow(t *testing.T) {
+	s := &Server{store: store.New()}
+	rec := httptest.NewRecorder()
+	s.aiCongestionBrief(rec, httptest.NewRequest("GET", "/api/v1/ai/congestion-brief?window=forever", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
 
 func TestAIAskRoundTripsConversationID(t *testing.T) {
 	s := &Server{store: store.New()}

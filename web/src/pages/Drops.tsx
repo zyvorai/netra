@@ -213,6 +213,13 @@ export default function Drops() {
               <small>
                 {f.explanation} {f.suggestion}
               </small>
+              {f.attributionState === 'attributed' && (
+                <span className="identity-badge">
+                  {f.comm || 'unknown process'}
+                  {f.pid ? ` (pid ${f.pid})` : ''}
+                  {f.pod ? ` · ${f.namespace ? f.namespace + '/' : ''}${f.pod}` : ''}
+                </span>
+              )}
               {f.attributionState === 'unattributable-ingress' && (
                 <span style={{ color: 'var(--text-tertiary)' }}>not attributable (ingress)</span>
               )}

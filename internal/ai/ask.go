@@ -13,12 +13,13 @@ import (
 type Intent string
 
 const (
-	IntentBrief    Intent = "brief"
-	IntentDrops    Intent = "drops"
-	IntentHealth   Intent = "health"
-	IntentPolicy   Intent = "policy"
-	IntentExposure Intent = "exposure"
-	IntentMode     Intent = "mode"
+	IntentBrief      Intent = "brief"
+	IntentDrops      Intent = "drops"
+	IntentHealth     Intent = "health"
+	IntentPolicy     Intent = "policy"
+	IntentExposure   Intent = "exposure"
+	IntentMode       Intent = "mode"
+	IntentCongestion Intent = "congestion"
 )
 
 // Classify maps a free-text question onto one Intent. Unknown or empty
@@ -94,8 +95,23 @@ func specialize(b Brief, snap Snapshot, intent Intent) Brief {
 	case IntentMode:
 		b.Headline = "Fast-path mode"
 		b.Summary = "Current mode is " + orDefault(snap.Mode, "observe") + ". Enforce is always lease-bounded and fails open. " + b.Summary
+	case IntentCongestion:
+		b.Headline = "Kernel network stack pressure"
+		if snap.KernelCritical == 0 && snap.KernelWarnings == 0 {
+			b.Summary = "No kernel-network congestion findings right now. " + b.Summary
+		} else {
+			b.Summary = itoa(snap.KernelCritical) + " critical and " + itoa(snap.KernelWarnings) + " warning kernel-network finding(s) across the stack. " + b.Summary
+		}
 	}
 	return b
+}
+
+// CongestionBrief builds a plain-English brief scoped to kernel-network
+// congestion findings (the Congestion Map page), reusing BuildBrief's
+// engine and specialize's existing intent-headline convention — see
+// IntentDrops/IntentHealth above — rather than a bespoke prose path.
+func CongestionBrief(snap Snapshot) Brief {
+	return specialize(BuildBrief(snap), snap, IntentCongestion)
 }
 
 func containsAny(q string, needles ...string) bool {

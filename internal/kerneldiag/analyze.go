@@ -189,6 +189,23 @@ func analyzeNode(a models.AgentStatus, window *models.KernelNetworkWindow) []mod
 			Tunable:        "net.ipv4.tcp_mem", Risk: "Blindly increasing tcp_mem can cause host-wide memory pressure or OOM events.",
 		})
 	}
+	if v := counters["Tcp.RetransSegs"] + counters["Tcp.OutRsts"] + counters["Tcp.EstabResets"]; v > 0 {
+		// fiveMinuteCritical=5000 is a first-pass placeholder, not a tuned
+		// threshold — unlike the other counters this file already reads,
+		// retransmits/resets are naturally noisy (a TCP slow-start alone
+		// produces some) and need live-fleet baseline data before this
+		// number is trustworthy. Deliberately no Tunable/ApplyCommand: there
+		// is no safe buffer fix for retransmits or resets caused by real
+		// packet loss, peer overload, or an application issuing its own
+		// reset — same reasoning as the qdisc/ip branches below.
+		add(models.KernelNetworkFinding{
+			Severity: classify(v, 5000), Layer: "tcp-connection-quality", Signal: "TCP retransmits and resets",
+			Evidence:       compactEvidence(fmtCount("Tcp.RetransSegs", counters["Tcp.RetransSegs"]), fmtCount("Tcp.OutRsts", counters["Tcp.OutRsts"]), fmtCount("Tcp.EstabResets", counters["Tcp.EstabResets"])),
+			Explanation:    "TCP is retransmitting segments and/or resetting established connections more than expected. This can mean packet loss on the path, an overloaded or unresponsive peer, or an application-level abort pattern — not necessarily a kernel buffer limit.",
+			Recommendation: "Correlate with ss -ti per-socket retransmit counts and Health/pathdiag RTT findings before treating this as a tunable problem — there is no dedicated buffer knob for retransmits or resets caused by real loss.",
+			Risk:           "There is no safe buffer/tunable fix for retransmits or resets caused by real packet loss, peer overload, or application-issued resets; treating this as a buffer-sizing problem can mask the actual cause.",
+		})
+	}
 	var qdiscDrops, rxMissed, ifaceDrops uint64
 	for _, q := range a.QdiscStats {
 		qdiscDrops += q.Drops

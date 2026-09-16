@@ -14,6 +14,7 @@ import (
 	"github.com/zyvorai/netra/internal/ai"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/insights"
+	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
 )
@@ -33,6 +34,51 @@ func (s *Server) aiBrief(w http.ResponseWriter, r *http.Request) {
 	brief := ai.BuildBrief(snap)
 	s.recordHealthSample(snap, brief.Severity, brief.Fingerprint)
 	writeJSON(w, 200, brief)
+}
+
+// aiCongestionBrief builds a plain-English brief scoped to kernel-network
+// (Congestion Map) findings. It reuses aiSnapshot(r) for cluster context
+// exactly like aiBrief, then augments a LOCAL COPY of snap.Anomalies from
+// kerneldiag.BuildWindow — the same engine and default window
+// ebpfKernelNetworkDiagnostics already uses — so /api/v1/ai/digest, /ask
+// and /agent (which call aiSnapshot independently) are entirely unaffected;
+// kernel-network findings only ever influence this one endpoint's severity
+// and summary.
+func (s *Server) aiCongestionBrief(w http.ResponseWriter, r *http.Request) {
+	snap, err := s.aiSnapshot(r)
+	if err != nil {
+		errorJSON(w, 503, err.Error())
+		return
+	}
+	window := 5 * time.Minute
+	if raw := strings.TrimSpace(r.URL.Query().Get("window")); raw != "" {
+		parsed, perr := time.ParseDuration(raw)
+		if perr != nil || parsed <= 0 {
+			errorJSON(w, http.StatusBadRequest, "window must be a positive duration such as 5m or 1h")
+			return
+		}
+		window = parsed
+	}
+	if s.store != nil {
+		agents := s.store.AgentStatuses(time.Now(), s.agentStaleAfter)
+		diag := kerneldiag.BuildWindow(agents, s.store.KernelNetworkWindows(window))
+		snap.KernelCritical = diag.Summary.Critical
+		snap.KernelWarnings = diag.Summary.Warnings
+		for _, n := range diag.Nodes {
+			for _, f := range n.Findings {
+				if len(snap.Anomalies) >= 12 {
+					break
+				}
+				snap.Anomalies = append(snap.Anomalies, ai.Finding{
+					Severity: f.Severity,
+					Kind:     "kernel-network/" + f.Layer,
+					Subject:  n.Node,
+					Message:  f.Explanation,
+				})
+			}
+		}
+	}
+	writeJSON(w, 200, ai.CongestionBrief(snap))
 }
 
 func (s *Server) aiAsk(w http.ResponseWriter, r *http.Request) {
