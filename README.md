@@ -24,6 +24,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [TCP Path Diagnostics](#tcp-path-diagnostics)
 - [Drop Diagnostics](#drop-diagnostics)
 - [Kernel Network Diagnostics](#kernel-network-diagnostics)
+- [Packet Capture](#packet-capture)
 - [Behavior and Rate Insights](#behavior-and-rate-insights)
 - [Hook model](#hook-model)
 - [Important visibility boundaries](#important-visibility-boundaries)
@@ -151,6 +152,22 @@ review-only, reversible canary guidance. The Drops dashboard renders the same
 per-node findings, rates, reset/warm-up state and full collected tunable
 inventory. Netra never writes a sysctl. See
 `docs/kernel-network-diagnostics.md`.
+
+The **Congestion Map** dashboard page turns this into a pictorial, cluster-wide view: every layer of the Linux network stack as a stage card across ingress/shared/egress columns, colored by the worst finding right now — a full tinted background per severity (`ok`/`warming`/`warning`/`critical`), not just a border, so a healthy cluster reads as a field of green instead of flat gray. Click a stage to drill into per-node detail, a trend sparkline, and a one-click "Capture on {node}" button that jumps straight into a live packet capture on the offending node.
+
+![Congestion Map — colored by severity, cluster-wide](docs/ux/09-congestion-map.jpg)
+
+## Packet Capture
+
+The **Capture** dashboard page starts a filtered, time-bounded packet capture on one node or, in one click, a bulk capture across many — streamed live as a macOS-terminal-styled feed, color-coded by protocol and direction. Click any packet for a Wireshark-style layered breakdown (Ethernet II / IP / TCP or UDP or ICMP, each its own color) plus a hex dump, all decoded client-side. Endpoints are labeled automatically when they match a known pod or VM IP, filterable alongside protocol/direction/text. A live packets/sec and bytes/sec sparkline, named filter presets, `.json`/`.csv` export next to the existing `.pcap` download, ended-session history, and a direct line from the Congestion Map (either a manual "Capture on {node}" click or an automatic "Suggested capture" banner when a node has a live critical finding) round it out. See `docs/capture.md`.
+
+![Capture Live View — color-coded terminal feed with pod/VM attribution](docs/ux/10-capture-live.jpg)
+
+![Wireshark-style packet detail, expanded from a live-view row](docs/ux/11-capture-decode.jpg)
+
+Full workflow — a Congestion Map finding to a live, decoded, color-coded capture on the offending node:
+
+![Netra live demo — Congestion Map finding to live packet capture](docs/ux/capture-diagnostics-demo.gif)
 
 ## Behavior and Rate Insights
 

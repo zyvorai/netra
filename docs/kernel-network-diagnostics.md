@@ -54,6 +54,12 @@ The allow-list is intentionally bounded and contains no secrets:
 Missing settings are omitted because kernel version, build configuration and
 network namespace determine which files exist.
 
+## Dashboard (Diagnostics → Congestion Map)
+
+A pictorial, cluster-wide view lays out the layers above as stage cards across ingress/shared/egress columns, colored by the worst finding across the cluster right now. Every one of the four severities — `ok`, `warming`, `warning`, `critical` — gets a full tinted card background (not just a border color), so a healthy cluster's grid reads as a field of green rather than flat gray. Clicking a stage drills into per-node detail, a trend sparkline for the worst-affected node, and a plain-English glossary popover per stage.
+
+Each per-node finding in the drill-down has a "Capture on {node}" button that jumps to the Capture page with that node pre-selected — see `docs/capture.md`'s Congestion Map integration section for the other half of that link (the Capture page also polls this same `GET /api/v1/ebpf/kernel-network` endpoint to suggest a capture on a node with a live critical finding).
+
 ## Prometheus
 
 The default five-minute window exports low-cardinality gauges without node,
