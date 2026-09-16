@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.84 — 2026-09-16
+
+- **Fix a grid-collision bug on the Congestion Map: `ip` and `conntrack` silently overlapped.** Both stages were placed at the identical grid position (shared column, row 3); CSS grid doesn't auto-reflow explicitly-placed items, so Conntrack painted directly over IP layer and hid it completely — found via the live-Chrome verification pass for 0.27.83, visible as garbled overlapping text once the new rate line (0.27.83) gave both cards enough content to visibly clash.
+  - `web/src/pages/CongestionMap.tsx`: `conntrack` moved to its own row (4), with every subsequent stage/blank-cell row shifted down by one to keep the same top-to-bottom order.
+  - New regression test in `CongestionMap.test.ts` asserting no two `STAGES`/`BLANK_CELLS` entries ever share a `(column, row)` position.
+- Version bumped to 0.27.84 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.83 — 2026-09-16
 
 - **Congestion Map: show live rates, not just OK badges.** Live-cluster feedback on 0.27.82: on a currently-healthy cluster every stage showed a static "OK" pill with no other information, which read as blank/broken rather than as a measurement. Each of the 8 rate-bearing stage cards now shows a real number pulled straight from the same `/api/v1/ebpf/kernel-network` response already being fetched — `"0 in this window · 0.00/s across cluster"` when clean, the same wording scaled up when not. The Conntrack card (which has no window-based rate — it's a point-in-time table-utilization gauge, not a counter delta) instead shows its `net.netfilter.nf_conntrack_max` ceiling and the 75%-utilization threshold that triggers a finding.

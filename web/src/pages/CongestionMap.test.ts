@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STAGES, conntrackCeiling, formatStageRate, nodeStageSeverity, stageForLayer, stageLiveRate, stageSummaries, worstSeverity } from './CongestionMap';
+import { BLANK_CELLS, STAGES, conntrackCeiling, formatStageRate, nodeStageSeverity, stageForLayer, stageLiveRate, stageSummaries, worstSeverity } from './CongestionMap';
 
 // The 11 layers below are grepped directly from internal/kerneldiag/analyze.go's
 // `Layer: "..."` literals. If a 12th is ever added there without a matching
@@ -32,6 +32,17 @@ describe('stageForLayer', () => {
   it('covers every layer referenced by STAGES exactly once', () => {
     const allLayers = STAGES.flatMap((s) => s.layers);
     expect(new Set(allLayers).size).toBe(allLayers.length);
+  });
+});
+
+describe('STAGES + BLANK_CELLS grid placement', () => {
+  it('never places two cells (a stage or a blank placeholder) in the same column/row — a real bug this once shipped: ip and conntrack both at (shared, row 3) silently overlapped, so conntrack painted over and completely hid the IP layer card', () => {
+    const cells = [...STAGES.map((s) => `${s.column}:${s.row}`), ...BLANK_CELLS.map((b) => `${b.column}:${b.row}`)];
+    const seen = new Set<string>();
+    for (const cell of cells) {
+      expect(seen.has(cell), `duplicate grid position ${cell}`).toBe(false);
+      seen.add(cell);
+    }
   });
 });
 

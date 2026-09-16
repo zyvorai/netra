@@ -55,16 +55,23 @@ export type Stage = { key: StageKey; title: string; column: StageColumn; row: nu
 // this is laid out as three columns (ingress / shared / egress) across 7
 // rows, per docs/kernel-network-diagnostics.md's "Where congestion and
 // drops occur" table — not a single misleadingly linear pipe.
+// `ip` and `conntrack` are both "shared" (direction-agnostic), and the
+// shared column is a single grid column — so they can't sit literally
+// side-by-side without splitting that column. They get their own
+// consecutive rows (3, 4) instead: giving both the same row/column, as an
+// earlier revision of this table did, made them silently occupy the exact
+// same CSS grid cell, so Conntrack painted over IP layer and hid it
+// completely. Stacked-but-separate is correct; overlapping is a bug.
 export const STAGES: Stage[] = [
   { key: 'nic-driver', title: 'NIC / driver ring', column: 'shared', row: 1, layers: ['nic-driver'] },
   { key: 'napi-softnet', title: 'NAPI / softirq backlog', column: 'ingress', row: 2, layers: ['softnet-backlog', 'softnet-budget'] },
   { key: 'ip', title: 'IP layer', column: 'shared', row: 3, layers: ['ip'] },
-  { key: 'conntrack', title: 'Conntrack', column: 'shared', row: 3, layers: ['conntrack'] },
-  { key: 'tcp-listen', title: 'TCP accept / SYN queue', column: 'ingress', row: 4, layers: ['tcp-listen'] },
-  { key: 'socket-receive', title: 'Socket receive, TCP + UDP', column: 'ingress', row: 5, layers: ['tcp-receive', 'socket-receive'] },
-  { key: 'socket-send', title: 'Socket send, UDP', column: 'egress', row: 5, layers: ['socket-send'] },
-  { key: 'qdisc', title: 'Egress qdisc', column: 'egress', row: 6, layers: ['qdisc'], caption: 'Egress packets return through the same NIC/driver ring shown above.' },
-  { key: 'tcp-memory', title: 'TCP memory pressure', column: 'shared', row: 7, layers: ['tcp-memory'] },
+  { key: 'conntrack', title: 'Conntrack', column: 'shared', row: 4, layers: ['conntrack'] },
+  { key: 'tcp-listen', title: 'TCP accept / SYN queue', column: 'ingress', row: 5, layers: ['tcp-listen'] },
+  { key: 'socket-receive', title: 'Socket receive, TCP + UDP', column: 'ingress', row: 6, layers: ['tcp-receive', 'socket-receive'] },
+  { key: 'socket-send', title: 'Socket send, UDP', column: 'egress', row: 6, layers: ['socket-send'] },
+  { key: 'qdisc', title: 'Egress qdisc', column: 'egress', row: 7, layers: ['qdisc'], caption: 'Egress packets return through the same NIC/driver ring shown above.' },
+  { key: 'tcp-memory', title: 'TCP memory pressure', column: 'shared', row: 8, layers: ['tcp-memory'] },
 ];
 
 // Deliberately blank cells, rendered as muted dashed placeholders rather
@@ -73,8 +80,8 @@ export const STAGES: Stage[] = [
 // prettifying a linear pipe that doesn't reflect the real packet path.
 export const BLANK_CELLS: { column: StageColumn; row: number; caption: string }[] = [
   { column: 'egress', row: 2, caption: 'No egress NAPI/softirq backlog — that queue is RX-only.' },
-  { column: 'egress', row: 4, caption: 'No egress SYN/accept queue — connection setup is inbound-only.' },
-  { column: 'ingress', row: 6, caption: 'Ingress ends at the socket above — there is no separate ingress qdisc stage.' },
+  { column: 'egress', row: 5, caption: 'No egress SYN/accept queue — connection setup is inbound-only.' },
+  { column: 'ingress', row: 7, caption: 'Ingress ends at the socket above — there is no separate ingress qdisc stage.' },
 ];
 
 const SEVERITY_RANK: Record<StageSeverity, number> = { warming: 0, ok: 1, warning: 2, critical: 3 };
