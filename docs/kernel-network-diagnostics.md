@@ -4,6 +4,11 @@ Netra collects a read-only, per-node snapshot of Linux networking sysctls and
 cumulative protocol counters, then correlates them with the existing softnet,
 interface, qdisc and eBPF drop evidence.
 
+> See also [`docs/sysctl-audit.md`](sysctl-audit.md) for a separate, flat
+> baseline-checked inventory of security/IPv6/TCP-lifecycle/conntrack-timeout/
+> ARP-bridge sysctls — this document's findings stay evidence-correlated to
+> observed congestion/drops, not a pass/fail hardening checklist.
+
 ```text
 GET /api/v1/ebpf/kernel-network?window=5m
 netractl ebpf kernel-network 5m

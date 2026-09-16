@@ -1106,6 +1106,13 @@ type AgentReport struct {
 	// KernelNetwork is an observe-only snapshot of networking sysctls and
 	// cumulative /proc/net counters. Netra never applies these values.
 	KernelNetwork KernelNetworkSnapshot `json:"kernelNetwork,omitempty"`
+	// SysctlNetworkAudit is a separate, flat baseline-checked inventory of
+	// network hardening/tuning sysctls (security posture, IPv6, TCP
+	// lifecycle, conntrack timeouts, ARP/bridge) — unlike KernelNetwork
+	// above, it carries no counters/window state and is not evidence-
+	// correlated to observed congestion. Netra never applies these values.
+	// See internal/sysctlaudit.
+	SysctlNetworkAudit SysctlAuditSnapshot `json:"sysctlNetworkAudit,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

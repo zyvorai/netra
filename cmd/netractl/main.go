@@ -124,7 +124,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | sysctl-audit | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
@@ -680,6 +680,8 @@ func ebpf() error {
 			path += "?window=" + url.QueryEscape(os.Args[3])
 		}
 		return request("GET", path, nil)
+	case "sysctl-audit":
+		return request("GET", "/api/v1/ebpf/sysctl-audit", nil)
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":

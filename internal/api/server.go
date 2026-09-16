@@ -42,6 +42,7 @@ import (
 	"github.com/zyvorai/netra/internal/policy"
 	"github.com/zyvorai/netra/internal/shielddiag"
 	"github.com/zyvorai/netra/internal/store"
+	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/workload"
 )
 
@@ -124,13 +125,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.94"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.95"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.94"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.95"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.94"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.95"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -242,6 +243,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/drops", s.auth(http.HandlerFunc(s.ebpfDropDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/kernel-network", s.auth(http.HandlerFunc(s.ebpfKernelNetworkDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/kernel-network/sparkline", s.auth(http.HandlerFunc(s.ebpfKernelNetworkSparkline)))
+	mux.Handle("GET /api/v1/ebpf/sysctl-audit", s.auth(http.HandlerFunc(s.ebpfSysctlAudit)))
 	mux.Handle("GET /api/v1/ebpf/ipv6", s.auth(http.HandlerFunc(s.ebpfIPv6Diagnostics)))
 	mux.Handle("GET /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/interfaces", s.auth(http.HandlerFunc(s.ebpfInterfaceFlows)))
@@ -399,7 +401,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.94", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.95", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2490,6 +2492,14 @@ func (s *Server) ebpfKernelNetworkSparkline(w http.ResponseWriter, r *http.Reque
 		points = n
 	}
 	writeJSON(w, 200, map[string]any{"node": node, "windows": s.store.KernelNetworkSparkline(node, points)})
+}
+
+func (s *Server) ebpfSysctlAudit(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
+		limit = n
+	}
+	writeJSON(w, 200, sysctlaudit.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
 }
 
 func (s *Server) ebpfIPv6Diagnostics(w http.ResponseWriter, r *http.Request) {

@@ -26,7 +26,8 @@ export type Page =
   | 'fleet'
   | 'traffic'
   | 'capture'
-  | 'congestion';
+  | 'congestion'
+  | 'sysctl-audit';
 
 type NavLink = { page: Page; label: string; blurb: string };
 type NavGroup = { label: string; page?: Page; children?: NavLink[] };
@@ -54,6 +55,7 @@ const groups: NavGroup[] = [
       { page: 'path', label: 'Path', blurb: 'Measured active TCP establishment and cwnd/packets-out pressure.' },
       { page: 'drops', label: 'Drops', blurb: 'Kernel skb reasons, softnet pressure, policy-drop findings, and windowed kernel-network diagnostics — see also Congestion Map for where in the stack.' },
       { page: 'congestion', label: 'Congestion Map', blurb: 'A pictorial view of the Linux network stack, colored by where the cluster is congested right now.' },
+      { page: 'sysctl-audit', label: 'Sysctl Audit', blurb: 'A flat, baseline-checked inventory of network hardening and tuning sysctls — security posture, IPv6, TCP lifecycle, conntrack timeouts, ARP/bridge — separate from Congestion Map’s evidence-correlated findings.' },
       { page: 'l7', label: 'L7', blurb: 'Best-effort SNI and HTTP Host from the datapath.' },
       { page: 'insights', label: 'Insights', blurb: 'Baselines, drift, and review-only remediation proposals.' },
       { page: 'topology', label: 'Topology', blurb: 'The observed-traffic dependency graph, live and force-directed.' },

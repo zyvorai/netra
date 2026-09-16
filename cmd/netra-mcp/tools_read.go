@@ -304,6 +304,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_sysctl_audit", method: "GET", path: "/api/v1/ebpf/sysctl-audit",
+			description: "Network-hardening/tuning sysctl inventory across agents: per-interface security posture (rp_filter, redirects, source-route, martians, proxy_arp), IPv6 posture, TCP tuning/lifecycle, conntrack timeouts, and ARP/neighbor/bridge settings, flagged against an established hardening baseline where one exists. Context-dependent settings (ip_forward, disable_ipv6, tcp_congestion_control, conntrack timeout durations, etc.) are reported informationally, without a pass/fail verdict. Distinct from netra_ebpf_drops/kernel-network, which are evidence-correlated congestion diagnostics.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max findings/outlier rows per node, 1-500. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_ebpf_ipv6", method: "GET", path: "/api/v1/ebpf/ipv6",
 			description: "IPv6 extension-header and fragmentation diagnostics: extension-header counts, fragmentation rate, and truncated-chain counts per node, with anomaly detection.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),

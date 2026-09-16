@@ -23,6 +23,7 @@ import Fleet from './pages/Fleet';
 import Traffic from './pages/Traffic';
 import Capture from './pages/Capture';
 import CongestionMap from './pages/CongestionMap';
+import SysctlAudit from './pages/SysctlAudit';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -78,6 +79,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     eyebrow: 'Drop Diagnostics',
     title: 'Where the stack is under pressure.',
     lede: 'A pictorial view of the Linux network stack — NIC, softirq, IP, sockets, qdisc, conntrack — colored by where the cluster is congested right now, cluster-wide with per-node drill-down.',
+    tint: 'amber',
+  },
+  'sysctl-audit': {
+    eyebrow: 'Sysctl Audit',
+    title: 'Network hardening, checked.',
+    lede: 'A flat, baseline-checked inventory of security posture, IPv6, TCP lifecycle, conntrack timeouts, and ARP/bridge sysctls — separate from Congestion Map’s evidence-correlated findings.',
     tint: 'amber',
   },
   l7: {
@@ -206,6 +213,7 @@ export default function App() {
     path: <Path />,
     drops: <Drops />,
     congestion: <CongestionMap />,
+    'sysctl-audit': <SysctlAudit />,
     l7: <L7 />,
     insights: <Insights />,
     topology: <Topology />,

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.95 — 2026-09-16
+
+- **New: Sysctl Audit — a flat, baseline-checked network-hardening inventory.** Separate from Kernel Network Diagnostics/Congestion Map, whose findings stay evidence-correlated to observed congestion: this feature reports current settings against an established security/hardening baseline, independent of whether anything is currently going wrong.
+  - Collects a bounded allow-list of `/proc/sys/net/*` sysctls across five categories: security/hardening (`rp_filter`, `accept_redirects`, `secure_redirects`, `send_redirects`, `accept_source_route`, `log_martians`, `proxy_arp`, `tcp_syncookies`, `ip_forward`, ICMP settings), IPv6 posture (`disable_ipv6`, `accept_ra*`, `use_tempaddr`, `autoconf`), TCP tuning/lifecycle (`tcp_fin_timeout`, keepalive, `tcp_tw_reuse`, `tcp_sack`/`timestamps`/`window_scaling`, `tcp_congestion_control`, `tcp_fastopen`, `tcp_ecn`), conntrack timeouts (beyond the `nf_conntrack_max` Kernel Network Diagnostics already covers), and ARP/neighbor + bridge-netfilter settings. Per-interface sysctls are enumerated by listing the real `/proc/sys/net/{ipv4,ipv6}/conf/` directories (including `all`/`default`), not a netlink call — correctly handles VLAN sub-interface names like `eth0.100` that contain a literal dot.
+  - Only well-established, unambiguous misconfigurations get a real severity verdict (`rp_filter=0`, `accept_redirects`/`secure_redirects`/`accept_source_route=1`, `tcp_syncookies!=1` → critical; disabled `tcp_sack`/`timestamps`/`window_scaling`, unexpected `proxy_arp=1`, disabled `log_martians` → warning). Everything else in scope (`ip_forward`, `disable_ipv6`, `accept_ra*`, `tcp_congestion_control`, `tcp_fastopen`, conntrack timeout durations, `bridge-nf-call-*`, ARP settings) is genuinely context-dependent and is always reported informationally, never forced into a false pass/fail.
+  - Stateless by design (`internal/sysctlaudit`, following the `dropdiag`/`pathdiag` pattern): these are current settings, not cumulative counters, so no store/window/delta machinery is needed, unlike Kernel Network Diagnostics.
+  - Cluster-wide outlier detection flags every `(sysctl, interface, category)` where fresh nodes disagree, so an operator scans a short outlier list instead of a full per-node-per-interface dump.
+  - New endpoint `GET /api/v1/ebpf/sysctl-audit`, CLI `netractl ebpf sysctl-audit`, MCP tool `netra_ebpf_sysctl_audit`, dashboard page **Sysctl Audit** under Diagnostics, and `docs/sysctl-audit.md`.
+- **Shrink `.page-hero h1` again.** Live feedback on the Congestion Map heading ("Where the stack is under pressure.") after the 0.27.93 pass: still read as oversized. Cut from `clamp(28px, 3.5vw, 48px)` to `clamp(22px, 2.6vw, 38px)` across every page.
+- Version bumped to 0.27.95 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.94 — 2026-09-16
 
 - **UX audit follow-through: one real empty-state gap, one real off-token color.** A broader UX survey (prompted by the hero-heading fix) flagged several candidates; most didn't survive direct verification against the code, which is worth recording since it corrects the survey's own claims:
