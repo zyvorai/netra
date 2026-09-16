@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.27.79 — 2026-09-16
+
+- **Natural-language graph (LangGraph companion + in-process `/ai/agent`).** Single-shot `/ai/ask` still exists; this adds a bounded multi-node graph so an operator question can classify, pull specialist evidence, preview a deny/rate/allow draft, and synthesize in one call. `netrad` stays stdlib-only — LangGraph is not a Go module (`AGENTS.md`).
+  - `POST /api/v1/ai/agent`, `netractl ai agent QUESTION...`, MCP read tool `netra_ai_agent` (81 read / 52 mutate / 133 total). Payload includes `intent`, `steps[]`, optional preview-only `draft`, and the same `brief` `/ai/ask` would have returned. Never applies a rule or flips enforce mode.
+  - Optional companion `python/netra_langgraph/`: LangGraph `StateGraph` (`classify → gather_core → specialist → maybe_draft → synthesize`) over existing `/api/v1/ai/*` + specialist GETs. Linear stdlib runner when LangGraph is not installed. CLI: `python3 -m netra_langgraph "why is DNS failing?"`.
+  - Docs: `docs/langgraph.md`, `python/README.md`, `examples/langgraph.env.example`.
+  - Merged from an externally authored patch (`0001-langgraph-nl-agent.patch`); the CHANGELOG hunk didn't apply cleanly against 0.27.78 (its base predated that entry) and was hand-merged as a proper version entry rather than "Unreleased" (this repo's convention), everything else applied cleanly.
+- Version bumped to 0.27.79 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.78 — 2026-09-16
 
 - **Add read-only kernel network buffer and congestion diagnostics.** Node

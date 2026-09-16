@@ -133,3 +133,26 @@ func TestAIDigestExplainsWhyFingerprintChanged(t *testing.T) {
 		t.Fatalf("card missing Why section: %v", second["card"])
 	}
 }
+
+func TestAIAgentReturnsStepTrace(t *testing.T) {
+	s := &Server{store: store.New()}
+	r := httptest.NewRequest("POST", "/api/v1/ai/agent", strings.NewReader(`{"question":"deny dns malware.example"}`))
+	rec := httptest.NewRecorder()
+	s.aiAgent(rec, r)
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["intent"] != "drops" && body["intent"] != "policy" {
+		// "deny dns" classifies as drops because "deny" is a drop keyword.
+		// Either way the graph must have run and attached steps.
+		t.Logf("intent=%v", body["intent"])
+	}
+	steps, _ := body["steps"].([]any)
+	if len(steps) < 2 {
+		t.Fatalf("steps=%v, want classify + synthesize at least", body["steps"])
+	}
+}

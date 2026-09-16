@@ -514,6 +514,17 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			bodyFields: true,
 		},
 		{
+			name: "netra_ai_agent", method: "POST", path: "/api/v1/ai/agent",
+			description: "Run the in-process natural-language graph: classify the question, optionally preview a deny/rate/allow draft, then synthesize a brief. Same snapshot and read-only contract as netra_ai_ask. Returns a step trace. Never applies rules.",
+			schema: objSchema(map[string]any{
+				"question":       strProp("Operator question, e.g. \"why is DNS failing in kube-system?\" or \"deny dns malware.example\"."),
+				"namespace":      strProp("Optional namespace hint included in the answer context."),
+				"preferLlm":      map[string]any{"type": "boolean", "description": "Hint only; the controller uses the configured provider when a key is set."},
+				"conversationId": strProp("Optional. Web/ChatOps multi-turn id; leave empty from MCP — the calling agent already has its own memory."),
+			}, "question"),
+			bodyFields: true,
+		},
+		{
 			name: "netra_insights_remediations", method: "GET", path: "/api/v1/insights/remediations",
 			description: "Proposed remediations combining exposure and drift findings. Always requires human review before applying (reviewRequired is always true, autoApply always false in the result).",
 			schema: objSchema(map[string]any{

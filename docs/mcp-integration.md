@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the 80 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the 81 read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -174,6 +174,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ai_digest` | `GET /api/v1/ai/digest` | — | On-call card: severity, incident fingerprint, copy-paste text. Fingerprint is stable across counter chatter; when it changed, `whyChanged` (and optionally `whyChangedProse`) explains exactly what moved |
 | `netra_ai_suggestions` | `GET /api/v1/ai/suggestions` | — | Live follow-up questions derived from the current snapshot |
 | `netra_ai_explain` | `POST /api/v1/ai/explain` | `kind`, `subject`, `message`, `severity`, `page`, `question` (all optional) | Narrates one structured page finding against the live snapshot |
+| `netra_ai_agent` | `POST /api/v1/ai/agent` | `question` **(required)**, `namespace`, `preferLlm`, `conversationId` | In-process NL graph (classify → optional draft preview → synthesize). Read-only. `conversationId` is a web/ChatOps feature — leave empty from MCP |
 | `netra_status` | `GET /api/v1/status` | — | Fast-path config, agent counts/staleness, baseline state, Hubble/HA/Cilium flags |
 | `netra_agents` | `GET /api/v1/agents` | — | One entry per reporting node agent |
 | `netra_audit` | `GET /api/v1/audit` | `limit` (1-500, default 100) | Every mutating action recorded by the controller, including this MCP server's own |

@@ -60,6 +60,33 @@ func (s *Server) aiAsk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, ai.Answer(r.Context(), snap, req.Question, ai.ProviderFromEnv(), req.ConversationID))
 }
 
+// aiAgent runs the in-process NL graph (classify → optional draft →
+// synthesize). Same snapshot and safety contract as aiAsk; the extra
+// payload is the step trace plus a preview-only draft when the question
+// looks like deny/rate/allow. The optional Python LangGraph companion
+// calls this endpoint as one of its tools.
+func (s *Server) aiAgent(w http.ResponseWriter, r *http.Request) {
+	var req ai.AskRequest
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		errorJSON(w, 400, "unable to read request body")
+		return
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			errorJSON(w, 400, "invalid JSON body")
+			return
+		}
+	}
+	snap, err := s.aiSnapshot(r)
+	if err != nil {
+		errorJSON(w, 503, err.Error())
+		return
+	}
+	_ = req.PreferLLM
+	writeJSON(w, 200, ai.Run(r.Context(), snap, req.Question, ai.ProviderFromEnv(), req.ConversationID))
+}
+
 // aiForget clears any stored conversation memory (conversation.go) for
 // the given id — used by the web "New conversation" reset and ChatOps's
 // /netra forget, both of which only ever reach conversation state through

@@ -1,9 +1,13 @@
-.PHONY: test build web bpf fmt
+.PHONY: test build web bpf fmt test-python
 fmt:
 	gofmt -w cmd internal
 
 test:
 	go test ./...
+
+# Optional companion; no pip packages required for the linear runner.
+test-python:
+	PYTHONPATH=python python3 -m unittest discover -s python/tests -v
 
 build: web
 	go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor

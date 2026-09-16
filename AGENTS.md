@@ -22,17 +22,22 @@ fails open to observe. The node agent owns programs under
 ## AI surface
 
 - Heuristic briefs + optional OpenAI-compatible rewrite: `internal/ai`,
-  `GET/POST /api/v1/ai/*` (`status`, `brief`, `ask`, `draft`, `digest`,
-  `suggestions`, `explain`), `netractl ai`, MCP `netra_ai_*` plus
-  `netra://ai/*` resources.
-- Docs: `docs/ai.md`, `docs/mcp-integration.md`.
+  `GET/POST /api/v1/ai/*` (`status`, `brief`, `ask`, `agent`, `draft`,
+  `digest`, `suggestions`, `explain`), `netractl ai`, MCP `netra_ai_*`
+  plus `netra://ai/*` resources.
+- Multi-step NL graph: in-process `POST /api/v1/ai/agent` (`internal/ai.Run`,
+  stdlib-only) and the optional Python companion `python/netra_langgraph/`
+  (LangGraph extra). Docs: `docs/ai.md`, `docs/langgraph.md`,
+  `docs/mcp-integration.md`.
 - AI endpoints are read-only. Do not wire them to mode/rule/policy apply.
+  Do not import LangGraph/LangChain into Go.
 
 ## Validation before a PR
 
 ```bash
 make fmt
 go test ./...
+make test-python
 npm --prefix web run test
 # eBPF compile gate from the Makefile / CI ebpf job
 ```

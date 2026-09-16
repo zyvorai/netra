@@ -18,7 +18,7 @@ GET/POST read-only.
 ## Why this is separate from `netra-mcp`
 
 `netra-mcp` is a translation layer: one MCP tool per controller HTTP
-endpoint. It still leaves the model to decide *which* of the 80 read
+endpoint. It still leaves the model to decide *which* of the 81 read
 tools to call and how to narrate the JSON.
 
 The AI endpoints give the model (or a human) a single, bounded snapshot
@@ -42,6 +42,7 @@ POST /api/v1/ai/ask
 POST /api/v1/ai/forget
 POST /api/v1/ai/draft
 POST /api/v1/ai/explain
+POST /api/v1/ai/agent
 Content-Type: application/json
 
 {"question":"why is DNS failing in kube-system?","namespace":"kube-system"}
@@ -84,6 +85,14 @@ API body and the matching `netractl` line. It never applies the rule.
 
 `POST /api/v1/ai/explain` narrates one structured finding (kind /
 subject / message / page) against the live snapshot.
+
+`POST /api/v1/ai/agent` runs the in-process natural-language graph
+(classify → optional draft preview → synthesize). Same snapshot and
+read-only contract as `ai/ask`; the response adds a step trace and a
+preview-only `draft` when the sentence looks like deny/rate/allow.
+The optional Python LangGraph companion (`python/netra_langgraph/`,
+`docs/langgraph.md`) calls this endpoint plus specialist GETs from a
+separate process — LangGraph is not a Go dependency.
 
 `POST /api/v1/ai/forget` clears one conversation's stored memory
 (`{"conversationId": "..."}` → `{"ok": true}`) — see "Conversation memory"
@@ -152,6 +161,7 @@ netractl ai digest
 netractl ai draft deny dns malware.example
 netractl ai explain dns-failure high SERVFAIL ratio
 netractl ai ask why are we dropping packets in kube-system?
+netractl ai agent deny dns malware.example
 ```
 
 ## MCP
@@ -165,6 +175,7 @@ Always-on read tools:
 - `netra_ai_digest` — on-call card + incident fingerprint, plus `whyChanged`/`whyChangedProse` when it changed
 - `netra_ai_suggestions` — live follow-up questions
 - `netra_ai_explain` (`kind`, `subject`, `message`, `severity`, `page`, `question`, all optional)
+- `netra_ai_agent` (`question` required) — in-process NL graph; preview-only draft; stateless from MCP
 
 Prompts (MCP `prompts/list` / `prompts/get`):
 

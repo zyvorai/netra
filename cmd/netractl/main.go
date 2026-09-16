@@ -167,12 +167,12 @@ func usage() {
   insights protocol-downgrades
   incidents | incidents timeline [since-RFC3339]
   insights rate-baseline show | capture [window] | clear
-  ai status | brief | digest | suggestions | ask QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
+  ai status | brief | digest | suggestions | ask QUESTION... | agent QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
 
 func aiCmd() error {
 	if len(os.Args) < 3 {
-		return fmt.Errorf("ai status|brief|digest|suggestions|ask|draft|explain")
+		return fmt.Errorf("ai status|brief|digest|suggestions|ask|agent|draft|explain")
 	}
 	switch os.Args[2] {
 	case "status":
@@ -183,7 +183,7 @@ func aiCmd() error {
 		return request("GET", "/api/v1/ai/digest", nil)
 	case "suggestions":
 		return request("GET", "/api/v1/ai/suggestions", nil)
-	case "ask", "draft":
+	case "ask", "draft", "agent":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("ai %s QUESTION...", os.Args[2])
 		}
@@ -207,7 +207,7 @@ func aiCmd() error {
 		}
 		return request("POST", "/api/v1/ai/explain", b)
 	default:
-		return fmt.Errorf("ai status|brief|digest|suggestions|ask|draft|explain")
+		return fmt.Errorf("ai status|brief|digest|suggestions|ask|agent|draft|explain")
 	}
 }
 func policy() error {
