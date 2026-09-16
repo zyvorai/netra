@@ -1082,6 +1082,9 @@ type AgentReport struct {
 	ScopeMode       string             `json:"scopeMode,omitempty"`
 	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
 	QdiscStats      []QdiscStat        `json:"qdiscStats,omitempty"`
+	// KernelNetwork is an observe-only snapshot of networking sysctls and
+	// cumulative /proc/net counters. Netra never applies these values.
+	KernelNetwork KernelNetworkSnapshot `json:"kernelNetwork,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

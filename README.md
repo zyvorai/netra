@@ -23,6 +23,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Firewall dashboard page](docs/firewall.md)
 - [TCP Path Diagnostics](#tcp-path-diagnostics)
 - [Drop Diagnostics](#drop-diagnostics)
+- [Kernel Network Diagnostics](#kernel-network-diagnostics)
 - [Behavior and Rate Insights](#behavior-and-rate-insights)
 - [Hook model](#hook-model)
 - [Important visibility boundaries](#important-visibility-boundaries)
@@ -139,6 +140,16 @@ The **Health** and **Explain** pages now surface IPv4/IPv6 MTU, unreachable-dest
 ## Drop Diagnostics
 
 Netra v0.19 adds a dedicated **Drop Diagnostics** surface independent of Cilium. When the host exposes a modern `kfree_skb` drop-reason tracepoint, the agent attaches an optional raw tracepoint and counts kernel skb drop reasons. It also reports `/proc/net/softnet_stat` backlog drops/time-squeeze events and per-interface receive/transmit drop/error/missed/no-handler counters. Drop-reason counters are intentionally node-level because the kernel tracepoint does not provide a trustworthy Kubernetes workload identity. See `docs/drop-diagnostics.md`.
+
+## Kernel Network Diagnostics
+
+Netra now correlates Linux network-buffer and congestion sysctls with cumulative
+`/proc/net/snmp` and `/proc/net/netstat` evidence plus the existing softnet,
+interface and qdisc counters. `GET /api/v1/ebpf/kernel-network` and
+`netractl ebpf kernel-network` explain where loss is occurring and provide
+review-only, reversible canary guidance. The Drops dashboard renders the same
+per-node findings and full collected tunable inventory. Netra never writes a
+sysctl. See `docs/kernel-network-diagnostics.md`.
 
 ## Behavior and Rate Insights
 
@@ -276,6 +287,7 @@ docs/rate-insights.md     time-window rate baseline, exposure and remediation ru
 docs/high-availability.md HA runbook
 docs/host-readiness.md    netra-doctor host readiness runbook
 docs/drop-detective.md    conntrack + policy Drop Detective
+docs/kernel-network-diagnostics.md sysctl/counter correlation and safe tuning workflow
 docs/tcx-and-shield.md    TCX modes + XDP Shield
 docs/native-netpol.md     optional native NetPol maps: v1 deny-list + v2 allow-list/default-deny
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns

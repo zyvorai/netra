@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.27.78 — 2026-09-16
+
+- **Add read-only kernel network buffer and congestion diagnostics.** Node
+  agents now report a bounded allow-list of networking sysctls plus selected
+  cumulative `/proc/net/snmp` and `/proc/net/netstat` counters. The new
+  `internal/kerneldiag` package correlates that snapshot with existing
+  softnet, interface, qdisc and conntrack evidence, producing per-layer
+  findings for ingress backlog overflow, softirq budget exhaustion, TCP/UDP
+  socket queues, listen queues, TCP memory pressure, conntrack capacity, NIC
+  rings, qdiscs and IP discards. `GET /api/v1/ebpf/kernel-network` and
+  `netractl ebpf kernel-network` expose the result, and the Drops dashboard
+  renders the same findings, evidence, tunables, canary and rollback commands.
+  Numeric recommendations are evidence-gated and include an observed-value
+  rollback command; Netra never writes sysctls. See
+  `docs/kernel-network-diagnostics.md`.
+  - Merged from an externally authored patch (`0001-Add-kernel-network-pressure-diagnostics.patch`); the CHANGELOG hunk didn't apply cleanly against 0.27.77 (its base predated that entry) and was hand-merged, everything else applied cleanly.
+- Version bumped to 0.27.78 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.77 — 2026-09-16
 
 - **Add an AF_PACKET packet-capture backend, user-selectable alongside the existing eBPF one.** The shipped capture feature (`bpf/netra_capture.c`, v0.27.70+) only ever ran as an in-kernel TCX observer; an operator can now start a capture session on either backend — no `bpf/*.c` changes were needed for the new one, since AF_PACKET is a Linux socket family, not an eBPF hook (the only "BPF" involved is classic BPF, a much older, unrelated mechanism used only for in-kernel packet filtering on the raw socket).

@@ -34,6 +34,7 @@ import (
 	"github.com/zyvorai/netra/internal/cgroupmeta"
 	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/histograms"
+	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/workload"
 )
@@ -902,6 +903,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	stack := a.readNodeStack()
 	qdiscStats := a.readQdiscStats()
+	kernelNetwork := kerneldiag.Collect("/")
 	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
 	histJSON := models.NetworkHistogramReport{
 		TCPRetransmissions: models.HistogramSnapshot{
@@ -938,7 +940,8 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
-		QdiscStats: qdiscStats,
+		QdiscStats:    qdiscStats,
+		KernelNetwork: kernelNetwork,
 	})
 }
 

@@ -5,12 +5,18 @@ import ExplainFinding from '../components/ExplainFinding';
 export default function Drops() {
   const [data, setData] = useState<any>();
   const [diag, setDiag] = useState<any>();
+  const [kernel, setKernel] = useState<any>();
   const [err, setErr] = useState('');
   const load = () =>
-    Promise.all([api<any>('/api/v1/ebpf/drops?limit=100'), api<any>('/api/v1/ebpf/diagnose?limit=50')])
-      .then(([d, x]) => {
+    Promise.all([
+      api<any>('/api/v1/ebpf/drops?limit=100'),
+      api<any>('/api/v1/ebpf/diagnose?limit=50'),
+      api<any>('/api/v1/ebpf/kernel-network'),
+    ])
+      .then(([d, x, k]) => {
         setData(d);
         setDiag(x);
+        setKernel(k);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -24,6 +30,7 @@ export default function Drops() {
   const anomalies = s.anomalies || [];
   const findings = diag?.findings || [];
   const ds = diag?.summary || {};
+  const ks = kernel?.summary || {};
   return (
     <div className="grid">
       {err && (
@@ -73,6 +80,78 @@ export default function Drops() {
         </div>
         <p>{ds.text || ''}</p>
       </section>
+      <section className="card span3">
+        <p className="eyebrow">KERNEL NETWORK PRESSURE</p>
+        <h3>Buffers, queues, and congestion</h3>
+        <div className="metrics">
+          <div>
+            <b>{ks.nodes || 0}</b>
+            <span>fresh nodes</span>
+          </div>
+          <div>
+            <b>{ks.findings || 0}</b>
+            <span>evidence-backed findings</span>
+          </div>
+          <div>
+            <b>{ks.critical || 0}</b>
+            <span>critical</span>
+          </div>
+          <div>
+            <b>{ks.warnings || 0}</b>
+            <span>warnings</span>
+          </div>
+        </div>
+        <p>
+          Read-only correlation of sysctls, protocol counters, softnet, NIC, qdisc, and conntrack evidence. Suggested commands are
+          temporary canaries; Netra never applies them.
+        </p>
+      </section>
+      {(kernel?.nodes || []).map((n: any) => (
+        <section className="card span3" key={`${n.node}-kernel-network`}>
+          <p className="eyebrow">KERNEL NETWORK · {n.node}</p>
+          <div className="list">
+            {!(n.findings || []).length && <p className="empty-state">No current counter evidence requires a buffer recommendation.</p>}
+            {(n.findings || []).map((f: any, i: number) => (
+              <div className="agent wide" key={`${f.layer}-${f.signal}-${i}`}>
+                <b>{f.signal}</b>
+                <span className={`severity-badge ${f.severity}`}>{f.severity}</span>
+                <span>{f.layer}</span>
+                <small>{(f.evidence || []).join(' · ')}</small>
+                <small>{f.explanation}</small>
+                <small>{f.recommendation}</small>
+                {f.tunable && (
+                  <small>
+                    {f.tunable}: {f.currentValue || 'unavailable'}
+                    {f.suggestedValue ? ` → canary ${f.suggestedValue}` : ''}
+                  </small>
+                )}
+                {f.applyCommand && <code>{f.applyCommand}</code>}
+                {f.rollbackCommand && <code>rollback: {f.rollbackCommand}</code>}
+                <small className="warning">Risk: {f.risk}</small>
+                <ExplainFinding
+                  page="drops"
+                  kind={f.signal}
+                  subject={`${n.node}/${f.layer}`}
+                  message={`${f.explanation} ${f.recommendation}`}
+                  severity={f.severity}
+                />
+              </div>
+            ))}
+          </div>
+          <details>
+            <summary>Collected sysctls ({(n.snapshot?.tunables || []).length})</summary>
+            <div className="list">
+              {(n.snapshot?.tunables || []).map((t: any) => (
+                <div className="agent wide" key={t.name}>
+                  <b>{t.name}</b>
+                  <code>{t.value}</code>
+                  <small>{t.source}</small>
+                </div>
+              ))}
+            </div>
+          </details>
+        </section>
+      ))}
       <section className="card span3">
         <p className="eyebrow">DROP DETECTIVE</p>
         <h3>Policy-aware findings</h3>

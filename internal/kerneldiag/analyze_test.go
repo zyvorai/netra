@@ -1,0 +1,49 @@
+// Copyright 2026 Zyvor AI Labs · https://zyvor.dev
+// SPDX-License-Identifier: Apache-2.0
+
+package kerneldiag
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/zyvorai/netra/internal/models"
+)
+
+func TestBuildCorrelatesEvidenceAndSafeCommands(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node:  "node-a",
+		Stack: models.NodeStackStat{SoftnetDropped: 12},
+		KernelNetwork: models.KernelNetworkSnapshot{
+			Tunables: []models.KernelTunable{{Name: "net.core.netdev_max_backlog", Value: "1000"}, {Name: "net.core.rmem_max", Value: "212992"}},
+			Counters: []models.KernelNetworkCounter{{Name: "Udp.RcvbufErrors", Value: 9}},
+		},
+	}}
+	r := Build([]models.AgentStatus{a})
+	if r.Summary.Nodes != 1 || r.Summary.Findings != 2 || r.Summary.Warnings != 2 {
+		t.Fatalf("unexpected summary: %#v", r.Summary)
+	}
+	for _, f := range r.Nodes[0].Findings {
+		if f.ApplyCommand == "" || f.RollbackCommand == "" {
+			t.Fatalf("finding lacks reversible commands: %#v", f)
+		}
+		if strings.Contains(f.ApplyCommand, "212992") && !strings.Contains(f.RollbackCommand, "212992") {
+			t.Fatalf("rollback must preserve observed value: %#v", f)
+		}
+	}
+}
+
+func TestBuildDoesNotRecommendFromTunablesAlone(t *testing.T) {
+	a := models.AgentStatus{AgentReport: models.AgentReport{Node: "quiet", KernelNetwork: models.KernelNetworkSnapshot{Tunables: []models.KernelTunable{{Name: "net.core.rmem_max", Value: "1024"}}}}}
+	r := Build([]models.AgentStatus{a})
+	if r.Summary.Findings != 0 {
+		t.Fatalf("low value without drop evidence must not create a finding: %#v", r)
+	}
+}
+
+func TestBuildSkipsStaleAgent(t *testing.T) {
+	r := Build([]models.AgentStatus{{Stale: true, AgentReport: models.AgentReport{Node: "old", Stack: models.NodeStackStat{SoftnetDropped: 99}}}})
+	if r.Summary.Nodes != 0 {
+		t.Fatalf("stale node included: %#v", r)
+	}
+}

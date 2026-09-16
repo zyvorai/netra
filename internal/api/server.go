@@ -32,6 +32,7 @@ import (
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/ipv6diag"
+	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
@@ -123,13 +124,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.77"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.78"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.77"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.78"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.77"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.78"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -237,6 +238,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/exehash", s.auth(http.HandlerFunc(s.ebpfExeHashDrift)))
 	mux.Handle("GET /api/v1/ebpf/path", s.auth(http.HandlerFunc(s.ebpfPathDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/drops", s.auth(http.HandlerFunc(s.ebpfDropDiagnostics)))
+	mux.Handle("GET /api/v1/ebpf/kernel-network", s.auth(http.HandlerFunc(s.ebpfKernelNetworkDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/ipv6", s.auth(http.HandlerFunc(s.ebpfIPv6Diagnostics)))
 	mux.Handle("GET /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/interfaces", s.auth(http.HandlerFunc(s.ebpfInterfaceFlows)))
@@ -392,7 +394,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.77", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.78", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -876,6 +878,7 @@ func (s *Server) streamFlows(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("Hubble stream ended", "error", err)
 	}
 }
+
 // ebpfDropExplain is the unified "explain a drop" endpoint: standalone
 // eBPF Drop Detective findings are always computed (primary, Cilium-
 // independent, per docs/standalone-ebpf.md); Hubble flows are appended as
@@ -2456,6 +2459,10 @@ func (s *Server) ebpfDropDiagnostics(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	writeJSON(w, 200, dropdiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
+func (s *Server) ebpfKernelNetworkDiagnostics(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, kerneldiag.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter)))
 }
 
 func (s *Server) ebpfIPv6Diagnostics(w http.ResponseWriter, r *http.Request) {
