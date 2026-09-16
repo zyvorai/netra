@@ -137,25 +137,13 @@ func (f *Forwarder) drain(fetch func() []models.AuditEvent) {
 	cutoff := f.lastAt
 	f.mu.Unlock()
 
-	var recs []Record
-	var newest time.Time
-	// store.Audit returns newest-first. Walk oldest-first so a partial
-	// send still advances the watermark monotonically.
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		if e.At.IsZero() {
-			continue
-		}
-		if !cutoff.IsZero() && !e.At.After(cutoff) {
-			continue
-		}
-		recs = append(recs, FromAudit(e))
-		if e.At.After(newest) {
-			newest = e.At
-		}
-	}
-	if len(recs) == 0 {
+	fresh, newest := NewSince(events, cutoff)
+	if len(fresh) == 0 {
 		return
+	}
+	recs := make([]Record, len(fresh))
+	for i, e := range fresh {
+		recs[i] = FromAudit(e)
 	}
 	if err := f.Send(recs); err != nil {
 		f.log.Warn("syslog forward failed", "error", err, "count", len(recs), "addr", f.cfg.Addr)
@@ -168,6 +156,30 @@ func (f *Forwarder) drain(fetch func() []models.AuditEvent) {
 		}
 		f.mu.Unlock()
 	}
+}
+
+// NewSince filters a newest-first audit event snapshot (as returned by
+// store.Audit) down to events strictly after cutoff, returning them
+// oldest-first alongside the newest timestamp seen — so a caller can
+// advance its own watermark monotonically even on a partial send. A
+// zero cutoff means "everything" (first-tick catch-up). Shared between
+// Forwarder and any other push sink (e.g. internal/snowflakesink) so
+// every consumer of the audit stream agrees on what "new" means.
+func NewSince(events []models.AuditEvent, cutoff time.Time) (fresh []models.AuditEvent, newest time.Time) {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.At.IsZero() {
+			continue
+		}
+		if !cutoff.IsZero() && !e.At.After(cutoff) {
+			continue
+		}
+		fresh = append(fresh, e)
+		if e.At.After(newest) {
+			newest = e.At
+		}
+	}
+	return fresh, newest
 }
 
 // Configured reports whether a forwarder would start from env-style fields.

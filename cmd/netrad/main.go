@@ -23,6 +23,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/siem"
+	"github.com/zyvorai/netra/internal/snowflakesink"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/webhook"
 )
@@ -113,6 +114,11 @@ func main() {
 		defer stop()
 		defer syslogWG.Wait()
 	}
+	var snowflakeWG sync.WaitGroup
+	if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
+		defer stop()
+		defer snowflakeWG.Wait()
+	}
 
 	runHTTP(ctx, log, handler, st.Persistent(), false)
 }
@@ -143,6 +149,48 @@ func startSyslog(ctx context.Context, log *slog.Logger, st *store.Store, wg *syn
 		defer wg.Done()
 		log.Info("syslog forwarder started", "addr", addr, "interval", interval)
 		fwd.Run(sctx, interval, func() []models.AuditEvent {
+			return st.Audit(200)
+		})
+	}()
+	return cancel
+}
+
+// startSnowflake starts the optional audit-event export sink when
+// NETRA_SNOWFLAKE_ACCOUNT is set. Off by default. Same optional-feature
+// shape as startSyslog: env-var gated, best-effort per flush, and
+// leader-only in HA mode so two replicas never double-ship. Unlike
+// startSyslog, this dials Snowflake and creates the target table once
+// at startup, so a bad account/credential/warehouse config fails fast
+// here — matching NETRA_API_KEY's fail-closed startup check — rather
+// than being discovered later as a stream of failed-flush warnings.
+func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *sync.WaitGroup) func() {
+	account := strings.TrimSpace(os.Getenv("NETRA_SNOWFLAKE_ACCOUNT"))
+	if account == "" || st == nil || wg == nil {
+		return nil
+	}
+	cfg := snowflakesink.Config{
+		Account:        account,
+		User:           env("NETRA_SNOWFLAKE_USER", ""),
+		PrivateKeyPath: env("NETRA_SNOWFLAKE_PRIVATE_KEY_PATH", ""),
+		Warehouse:      env("NETRA_SNOWFLAKE_WAREHOUSE", ""),
+		Database:       env("NETRA_SNOWFLAKE_DATABASE", ""),
+		Schema:         env("NETRA_SNOWFLAKE_SCHEMA", ""),
+		Table:          env("NETRA_SNOWFLAKE_TABLE", "NETRA_AUDIT"),
+		BatchSize:      envInt("NETRA_SNOWFLAKE_BATCH_SIZE", 50),
+	}
+	sink, err := snowflakesink.New(ctx, cfg, log)
+	if err != nil {
+		log.Error("snowflake sink config", "error", err)
+		os.Exit(1)
+	}
+	interval := envDuration("NETRA_SNOWFLAKE_INTERVAL", 15*time.Second)
+	sctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer sink.Close()
+		log.Info("snowflake sink started", "account", account, "table", cfg.Table, "interval", interval)
+		sink.Run(sctx, interval, func() []models.AuditEvent {
 			return st.Audit(200)
 		})
 	}()
@@ -258,6 +306,8 @@ func electionLoop(
 	var gitopsWG sync.WaitGroup
 	var syslogCancel func()
 	var syslogWG sync.WaitGroup
+	var snowflakeCancel func()
+	var snowflakeWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
@@ -278,6 +328,11 @@ func electionLoop(
 			syslogCancel()
 			syslogWG.Wait()
 			syslogCancel = nil
+		}
+		if snowflakeCancel != nil {
+			snowflakeCancel()
+			snowflakeWG.Wait()
+			snowflakeCancel = nil
 		}
 		if st != nil {
 			if err := st.Close(); err != nil {
@@ -350,6 +405,9 @@ func electionLoop(
 		}
 		if stop := startSyslog(ctx, log, st, &syslogWG); stop != nil {
 			syslogCancel = stop
+		}
+		if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
+			snowflakeCancel = stop
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)
 	}

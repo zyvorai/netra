@@ -118,6 +118,60 @@ curl -sS -H "Authorization: Bearer $NETRA_API_KEY" \
 
 See `examples/siem-export.sh`.
 
+## Snowflake export
+
+Optional best-effort push sink, off by default, leader-only in HA — same
+shape as the syslog forwarder above, but writes audit events straight
+into a Snowflake table via `internal/snowflakesink` instead of dialing a
+syslog collector. **Audit events only** in this pass; flows, blocks,
+anomalies, and incidents have no continuous/watermarked source inside
+`netrad` today (only the point-in-time pull endpoints above), so they
+aren't part of this sink yet.
+
+Enable by setting `NETRA_SNOWFLAKE_ACCOUNT` (presence gates the
+feature, same as `NETRA_SYSLOG_ADDR`):
+
+| Var | Default | Notes |
+|---|---|---|
+| `NETRA_SNOWFLAKE_ACCOUNT` | (empty = off) | |
+| `NETRA_SNOWFLAKE_USER` | — | required |
+| `NETRA_SNOWFLAKE_PRIVATE_KEY_PATH` | — | required; unencrypted PKCS#8 or PKCS#1 PEM. Key-pair (JWT) auth only — there is no password field |
+| `NETRA_SNOWFLAKE_WAREHOUSE` | — | required |
+| `NETRA_SNOWFLAKE_DATABASE` | — | required |
+| `NETRA_SNOWFLAKE_SCHEMA` | — | required |
+| `NETRA_SNOWFLAKE_TABLE` | `NETRA_AUDIT` | created on startup if missing |
+| `NETRA_SNOWFLAKE_INTERVAL` | `15s` | Go duration string |
+| `NETRA_SNOWFLAKE_BATCH_SIZE` | `50` | rows per `INSERT` |
+
+A misconfigured account (bad credentials, unreachable warehouse, syntax
+error) fails `netrad` startup — this is the one push sink that dials out
+and validates connectivity eagerly, unlike the syslog forwarder, because
+a wrong Snowflake config is easy to get right once and then forget about.
+
+Target schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS NETRA_AUDIT (
+  at      TIMESTAMP_NTZ NOT NULL,
+  actor   STRING,
+  action  STRING,
+  target  STRING,
+  message STRING,
+  details VARIANT
+)
+```
+
+```bash
+# optional push (controller env, off by default, leader-only in HA)
+# NETRA_SNOWFLAKE_ACCOUNT=myorg-myaccount NETRA_SNOWFLAKE_USER=netra_svc
+# NETRA_SNOWFLAKE_PRIVATE_KEY_PATH=/etc/netra/snowflake_key.p8
+# NETRA_SNOWFLAKE_WAREHOUSE=NETRA_WH NETRA_SNOWFLAKE_DATABASE=NETRA NETRA_SNOWFLAKE_SCHEMA=PUBLIC
+```
+
+Same durability tradeoff as the syslog forwarder: a failed flush is
+logged and dropped, not retried from this package — the store still has
+the audit events for a pull export.
+
 ## Safety
 
 - Observe-only. No mode change, no rule edit, no lease refresh.

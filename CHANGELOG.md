@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **New: optional Snowflake audit export sink.** A second best-effort push sink alongside the existing syslog forwarder — same shape (env-var gated, off by default, leader-only in HA, per-tick drain of `store.Audit`), but lands rows straight into a Snowflake table instead of a syslog collector.
+  - `internal/snowflakesink` — key-pair (JWT) auth only via `github.com/snowflakedb/gosnowflake`, `CREATE TABLE IF NOT EXISTS` on startup, batched multi-row `INSERT` (default 50 rows/flush), `details` landed as `VARIANT`.
+  - Extracted `siem.NewSince` from `Forwarder.drain` so the syslog and Snowflake sinks share one definition of "new since the last successful send" instead of two independently-evolving watermark implementations.
+  - Wired into `cmd/netrad/main.go` as `startSnowflake`, called from both the single-replica startup path and the HA leader-promotion path (mirrors `startSyslog` exactly, including demote-time teardown).
+  - New env vars: `NETRA_SNOWFLAKE_ACCOUNT` (gates the feature), `_USER`, `_PRIVATE_KEY_PATH`, `_WAREHOUSE`, `_DATABASE`, `_SCHEMA`, `_TABLE` (default `NETRA_AUDIT`), `_INTERVAL` (default `15s`), `_BATCH_SIZE` (default `50`). Unlike the syslog forwarder, a bad config fails `netrad` startup rather than surfacing as ongoing flush warnings, since this sink dials out and validates connectivity eagerly.
+  - **Audit events only** in this pass — flows/blocks/anomalies/incidents have no continuous/watermarked source inside `netrad` today, only the point-in-time pull export endpoints, so they're not wired into this sink yet. See `docs/siem-export.md`.
+  - New regression test `cmd/netrad.TestElectionLoopNeverDoubleShipsPushSinks`: races two `electionLoop` replicas against a shared fake Kubernetes Lease backend and shared state file, forces a mid-test handoff, and proves their leadership windows never overlap — the invariant both `startSyslog` and `startSnowflake` rely on to avoid double-shipping. No prior automated coverage of this existed for either sink.
+
 ## 0.27.95 — 2026-09-16
 
 - **New: Sysctl Audit — a flat, baseline-checked network-hardening inventory.** Separate from Kernel Network Diagnostics/Congestion Map, whose findings stay evidence-correlated to observed congestion: this feature reports current settings against an established security/hardening baseline, independent of whether anything is currently going wrong.
