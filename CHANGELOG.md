@@ -9,6 +9,7 @@
   - New env vars: `NETRA_SNOWFLAKE_ACCOUNT` (gates the feature), `_USER`, `_PRIVATE_KEY_PATH`, `_WAREHOUSE`, `_DATABASE`, `_SCHEMA`, `_TABLE` (default `NETRA_AUDIT`), `_INTERVAL` (default `15s`), `_BATCH_SIZE` (default `50`). Unlike the syslog forwarder, a bad config fails `netrad` startup rather than surfacing as ongoing flush warnings, since this sink dials out and validates connectivity eagerly.
   - **Audit events only** in this pass — flows/blocks/anomalies/incidents have no continuous/watermarked source inside `netrad` today, only the point-in-time pull export endpoints, so they're not wired into this sink yet. See `docs/siem-export.md`.
   - New regression test `cmd/netrad.TestElectionLoopNeverDoubleShipsPushSinks`: races two `electionLoop` replicas against a shared fake Kubernetes Lease backend and shared state file, forces a mid-test handoff, and proves their leadership windows never overlap — the invariant both `startSyslog` and `startSnowflake` rely on to avoid double-shipping. No prior automated coverage of this existed for either sink.
+  - Follow-up: added `auditMessage()` (mirrors `internal/siem`'s unexported helper of the same name) so the `message` column is actually populated instead of left as an empty placeholder; added a dedicated `docs/snowflake-export.md` (setup, config, table schema, example queries, semantics/limitations), cross-linked from `docs/siem-export.md`; and added a CI job running `TestElectionLoopNeverDoubleShipsPushSinks` 5x under `-race`.
 
 ## 0.27.95 — 2026-09-16
 

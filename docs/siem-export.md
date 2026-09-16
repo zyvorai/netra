@@ -128,6 +128,10 @@ anomalies, and incidents have no continuous/watermarked source inside
 `netrad` today (only the point-in-time pull endpoints above), so they
 aren't part of this sink yet.
 
+See [`docs/snowflake-export.md`](snowflake-export.md) for full
+Snowflake-side setup (warehouse/role/user/key-pair), example queries,
+and semantics/limitations — this section stays a short summary.
+
 Enable by setting `NETRA_SNOWFLAKE_ACCOUNT` (presence gates the
 feature, same as `NETRA_SYSLOG_ADDR`):
 

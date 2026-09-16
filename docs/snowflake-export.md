@@ -154,12 +154,13 @@ CREATE TABLE IF NOT EXISTS NETRA_AUDIT (
 
 `at`/`actor`/`action`/`target`/`details` map 1:1 to `models.AuditEvent`
 — the same struct the pull export and syslog forwarder read from.
-`message` is currently always written as an empty string placeholder
-column reserved for a future human-readable summary (parallel to
-`siem.Record.Message`, which the pull export and syslog paths already
-compute via `auditMessage()`); the sink does not populate it yet, so
-treat it as reserved rather than expect content in it today. `details`
-is loaded via `PARSE_JSON(...)`, so it queries as a native Snowflake
+`message` is a human-readable summary (`<action>` alone, or `<action>
+<target>` when a target is set) computed by `snowflakesink.auditMessage`
+— a package-local duplicate of `internal/siem`'s unexported helper of
+the same name, since that helper isn't exported across the package
+boundary, kept intentionally in sync so the same event reads identically
+in Snowflake, the pull export, and the syslog forwarder. `details` is
+loaded via `PARSE_JSON(...)`, so it queries as a native Snowflake
 `VARIANT`/`OBJECT`, not a JSON string column — no `PARSE_JSON()` needed
 at query time, just `details:someKey`.
 
