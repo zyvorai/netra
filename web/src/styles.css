@@ -48,6 +48,10 @@
   --warning-bg: #fff6ed;
   --warning-border: #ffd8ba;
   --warning-text: #8b3d00;
+  --success-bg: #e8f8ec;
+  --success-border: #b8ecc4;
+  --info-bg: #eaf6fc;
+  --info-border: #bfe6f5;
   --terminal-bg: #0d0d0f;
   --terminal-bar: #1b1b1e;
   --terminal-text: #f5f5f7;
@@ -116,6 +120,10 @@
   --warning-bg: rgba(255, 159, 10, 0.12);
   --warning-border: rgba(255, 159, 10, 0.35);
   --warning-text: #ffd60a;
+  --success-bg: rgba(48, 209, 88, 0.14);
+  --success-border: rgba(48, 209, 88, 0.35);
+  --info-bg: rgba(100, 210, 255, 0.14);
+  --info-border: rgba(100, 210, 255, 0.35);
   --terminal-bg: #000000;
   --terminal-bar: #1d1d1f;
   --terminal-text: #f5f5f7;
@@ -1337,11 +1345,24 @@ code {
 .stage-cell.selected {
   border-color: var(--accent-cyan);
 }
-.stage-cell.critical {
-  border-color: var(--danger);
+/* Full tinted backgrounds, not just a border color — on a healthy cluster
+   almost every cell is "ok", and a border-only treatment left the whole
+   grid reading as flat/monochrome gray. */
+.stage-cell.ok {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+}
+.stage-cell.warming {
+  background: var(--info-bg);
+  border-color: var(--info-border);
 }
 .stage-cell.warning {
+  background: var(--warning-bg);
   border-color: var(--warning-border);
+}
+.stage-cell.critical {
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 .stage-cell-body {
   display: flex;

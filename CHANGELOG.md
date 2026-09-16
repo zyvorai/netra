@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.90 — 2026-09-16
+
+- **Congestion Map: color every stage cell by severity, not just critical/warning borders.** `.stage-cell.ok`/`.stage-cell.warming` had no styling at all, so a healthy cluster's grid (the common case) read as flat, monochrome gray boxes. New `--success-bg`/`--success-border`/`--info-bg`/`--info-border` tokens (light + dark) give every one of the four severities (`ok`/`warming`/`warning`/`critical`) a full tinted card background, not just a border-color change.
+- **Capture page: live throughput sparkline, saved filter presets, JSON/CSV export, and two integrations with the rest of the app.**
+  - **Live throughput.** New `web/src/lib/captureExport.ts`'s `bucketRates()` buckets buffered frames into 1-second packets/sec and bytes/sec series (from each frame's own observed timestamp, not client receipt time) rendered via the existing `Sparkline` component — no new charting dependency, no backend change (the data was already buffered client-side for the pcap download).
+  - **Saved presets.** New `web/src/lib/capturePresets.ts` persists named `{backend, protocol, host, port, duration}` presets to `localStorage` (a pure per-browser convenience, not shared state) with save/load/delete in the Start-a-capture card.
+  - **Export.** `captureExport.ts`'s `toCSV()` plus a `JSON.stringify` path export the *currently filtered* decoded rows (including pod/VM attribution) as `.json`/`.csv`, alongside the existing `.pcap` download.
+  - **Congestion Map → Capture.** Each per-node finding in the Congestion Map's stage detail gets a "Capture on {node}" button (`navigate('capture', {node})`, the same cross-page scope mechanism every other page already uses) — `Capture.tsx` now reads `useRoute()`'s `scope.node` on mount to pre-select it.
+  - **Alert-to-capture.** Capture.tsx polls the same `GET /api/v1/ebpf/kernel-network` the Congestion Map already uses (no new endpoint) every 20s; a live critical finding surfaces a dismissible "Suggested capture" banner with a one-click prefill (node + a `tcp` protocol default) rather than requiring the operator to go find it on the Congestion Map first.
+  - 10 new unit tests across `captureExport.test.ts` and `capturePresets.test.ts`.
+- Version bumped to 0.27.90 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.89 — 2026-09-16
 
 - **Capture Live View: label packet endpoints by pod/VM, and filter by them.** A captured packet's src/dst IP is directly a pod/VM's own routable IP on this cluster's CNI, so a pure IP lookup against already-existing inventory is enough for reliable attribution — no kernel change needed.

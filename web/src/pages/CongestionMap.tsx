@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
 import Sparkline from '../components/Sparkline';
+import { navigate } from '../hooks/useInvestigation';
 
 type KernelFinding = {
   severity: string;
@@ -535,6 +536,9 @@ export default function CongestionMap() {
                   {f.applyCommand && <code>{f.applyCommand}</code>}
                   {f.rollbackCommand && <code>rollback: {f.rollbackCommand}</code>}
                   <small className="warning">Risk: {f.risk}</small>
+                  <div className="toolbar">
+                    <button className="btn-secondary" onClick={() => navigate('capture', { node: p.node })}>Capture on {p.node}</button>
+                  </div>
                   <ExplainFinding
                     page="congestion"
                     kind={f.signal}

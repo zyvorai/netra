@@ -2,8 +2,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api, wsURL } from '../api';
 import CaptureHistory from '../components/CaptureHistory';
 import TerminalFrame from '../components/TerminalFrame';
+import Sparkline from '../components/Sparkline';
+import { useRoute } from '../hooks/useInvestigation';
 import { decodeDetailed, decodeL3L4, hexDump } from '../lib/packetDecode';
 import { buildIPIndex, labelForIP } from '../lib/workloadAttribution';
+import { bucketRates, toCSV, type ExportRow } from '../lib/captureExport';
+import { loadPresets, savePresets, upsertPreset, removePreset, type CapturePreset } from '../lib/capturePresets';
+
+type KernelFindingAlert = { node: string; signal: string; explanation?: string };
 
 const PROTO_CLASS: Record<number, string> = { 1: 'proto-icmp', 6: 'proto-tcp', 17: 'proto-udp', 58: 'proto-icmpv6' };
 
@@ -89,8 +95,14 @@ export default function Capture() {
   const [filterWorkload, setFilterWorkload] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
   const [ipIndex, setIpIndex] = useState<Map<string, string>>(new Map());
+  const [presets, setPresets] = useState<CapturePreset[]>(() => loadPresets());
+  const [presetName, setPresetName] = useState('');
+  const [presetToLoad, setPresetToLoad] = useState('');
+  const [alerts, setAlerts] = useState<KernelFindingAlert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const framesRef = useRef<Frame[]>([]);
+  const route = useRoute();
 
   const loadStatus = () => api<CaptureStatus>('/api/v1/capture/status').then(setStatus).catch((e) => setErr(String(e)));
   useEffect(() => {
@@ -111,6 +123,35 @@ export default function Capture() {
     ]).then(([pods, vms]) => setIpIndex(buildIPIndex(pods, vms)));
   }, []);
   useEffect(() => () => wsRef.current?.close(), []);
+  // A "Capture on this node" link from the Congestion Map (or anywhere
+  // else) pre-selects the node via the shared URL scope instead of a
+  // page-specific query param, matching how the rest of the app navigates.
+  useEffect(() => {
+    if (route.scope.node) setSelectedNodes((prev) => (prev.includes(route.scope.node) ? prev : [route.scope.node]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.scope.node]);
+  // Reuses the same GET /api/v1/ebpf/kernel-network the Congestion Map
+  // already polls — no new backend endpoint — to suggest a capture when a
+  // node has a live critical finding, so there's evidence gathered close
+  // to the moment of an incident instead of only after the fact.
+  useEffect(() => {
+    type KernelAlertResponse = { nodes?: { node: string; findings?: { severity: string; signal: string; explanation?: string }[] }[] };
+    const load = () =>
+      api<KernelAlertResponse>('/api/v1/ebpf/kernel-network?window=5m')
+        .then((r) => {
+          const found: KernelFindingAlert[] = [];
+          for (const n of r.nodes || []) {
+            for (const f of n.findings || []) {
+              if (f.severity === 'critical') found.push({ node: n.node, signal: f.signal, explanation: f.explanation });
+            }
+          }
+          setAlerts(found);
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, []);
 
   function addNode() {
     if (nodeToAdd && !selectedNodes.includes(nodeToAdd)) setSelectedNodes((prev) => [...prev, nodeToAdd]);
@@ -194,6 +235,71 @@ export default function Capture() {
     setPort(e.port ? String(e.port) : '');
   }
 
+  function saveCurrentAsPreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    const next = upsertPreset(presets, { name, backend, protocol, host, port, duration });
+    setPresets(next);
+    savePresets(next);
+    setPresetName('');
+  }
+  function applyPreset(name: string) {
+    const p = presets.find((x) => x.name === name);
+    if (!p) return;
+    setBackend(p.backend || '');
+    setProtocol(p.protocol || '');
+    setHost(p.host || '');
+    setPort(p.port || '');
+    setDuration(p.duration || '60s');
+  }
+  function deletePreset(name: string) {
+    const next = removePreset(presets, name);
+    setPresets(next);
+    savePresets(next);
+    if (presetToLoad === name) setPresetToLoad('');
+  }
+
+  function downloadFile(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function exportRows(): ExportRow[] {
+    return filteredIdx.map((i) => {
+      const f = rows[i];
+      const d = decoded[i];
+      const w = workloads[i];
+      return {
+        time: new Date(Number(f.observedAtUnixNano / 1_000_000n)).toISOString(),
+        protocol: PROTOCOL_NAMES[f.protocol] || String(f.protocol),
+        direction: f.direction === 1 ? 'ingress' : 'egress',
+        lengthBytes: f.origLen,
+        capturedBytes: f.data.byteLength,
+        srcIP: d?.srcIP, srcPort: d?.srcPort, dstIP: d?.dstIP, dstPort: d?.dstPort,
+        tcpFlags: d?.tcpFlags, icmpType: d?.icmpType,
+        srcWorkload: w?.src, dstWorkload: w?.dst,
+      };
+    });
+  }
+  function exportJSON() {
+    downloadFile(JSON.stringify(exportRows(), null, 2), `netra-capture-${watching || 'session'}.json`, 'application/json');
+  }
+  function exportCSV() {
+    downloadFile(toCSV(exportRows()), `netra-capture-${watching || 'session'}.csv`, 'text/csv');
+  }
+
+  function dismissAlert(node: string, signal: string) {
+    setDismissedAlerts((prev) => new Set(prev).add(`${node}:${signal}`));
+  }
+  function startFromAlert(node: string) {
+    setSelectedNodes([node]);
+    if (!protocol && !host && !port) setProtocol('tcp');
+  }
+
   const active = status?.active || [];
   const decoded = useMemo(() => rows.map((f) => decodeL3L4(f.data)), [rows]);
   const workloads = useMemo(
@@ -220,6 +326,11 @@ export default function Capture() {
         return true;
       });
   }, [rows, decoded, workloads, filterProtocol, filterDirection, filterQuery, filterWorkload]);
+  const rates = useMemo(
+    () => bucketRates(rows.map((f) => ({ atMs: Number(f.observedAtUnixNano / 1_000_000n), bytes: f.data.byteLength })), 30),
+    [rows],
+  );
+  const visibleAlerts = alerts.filter((a) => !dismissedAlerts.has(`${a.node}:${a.signal}`));
 
   return (
     <div className="grid">
@@ -227,6 +338,26 @@ export default function Capture() {
       {active.length > 0 && (
         <section className="card span3">
           <p className="warning">Capturing full packet bytes on {active.length} node{active.length === 1 ? '' : 's'} — captured traffic may contain sensitive application data (auth headers, tokens, cookies).</p>
+        </section>
+      )}
+
+      {visibleAlerts.length > 0 && (
+        <section className="card span3">
+          <p className="eyebrow">SUGGESTED CAPTURE</p>
+          <h3>Live critical finding{visibleAlerts.length === 1 ? '' : 's'} on the Congestion Map</h3>
+          <div className="list">
+            {visibleAlerts.map((a) => (
+              <div className="agent wide" key={`${a.node}:${a.signal}`}>
+                <b>{a.node}</b>
+                <span className="severity-badge critical">critical</span> <span>{a.signal}</span>
+                {a.explanation && <small>{a.explanation}</small>}
+                <div className="toolbar">
+                  <button className="primary" onClick={() => startFromAlert(a.node)}>Start a capture on {a.node}</button>
+                  <button className="btn-secondary" onClick={() => dismissAlert(a.node, a.signal)}>Dismiss</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
@@ -279,6 +410,21 @@ export default function Capture() {
           {selectedNodes.length === 0 && <span>No nodes selected yet.</span>}
           {selectedNodes.map((n) => <button key={n} aria-label={`Remove ${n}`} onClick={() => removeNode(n)}>{n} ×</button>)}
         </div>
+        <div className="toolbar">
+          <label>Preset name <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="ssh, dns, …" /></label>
+          <button className="btn-secondary" onClick={saveCurrentAsPreset} disabled={!presetName.trim()}>Save current filters as preset</button>
+          {presets.length > 0 && (
+            <>
+              <label>Load preset{' '}
+                <select value={presetToLoad} onChange={(e) => { setPresetToLoad(e.target.value); if (e.target.value) applyPreset(e.target.value); }}>
+                  <option value="">select…</option>
+                  {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+              </label>
+              <button className="btn-secondary" disabled={!presetToLoad} onClick={() => deletePreset(presetToLoad)}>Delete preset</button>
+            </>
+          )}
+        </div>
       </section>
 
       <section className="card span3">
@@ -310,6 +456,14 @@ export default function Capture() {
             {active.map((c) => <button key={c.node} className={watching === c.node ? 'primary' : 'btn-secondary'} onClick={() => watch(c.node)}>{c.node}</button>)}
           </div>
         )}
+        {rates.packetsPerSec.length >= 2 && (
+          <p className="sparkline-row">
+            <Sparkline values={rates.packetsPerSec} />
+            <small className="stage-cell-gloss">packets/sec, last {rates.packetsPerSec.length}s</small>
+            <Sparkline values={rates.bytesPerSec} />
+            <small className="stage-cell-gloss">bytes/sec, last {rates.bytesPerSec.length}s</small>
+          </p>
+        )}
         <div className="toolbar">
           <label>Protocol{' '}
             <select value={filterProtocol} onChange={(e) => setFilterProtocol(e.target.value)}>
@@ -327,6 +481,8 @@ export default function Capture() {
           <label>Search <input value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} placeholder="10.0.0.5:443" /></label>
           <label>Pod / VM <input value={filterWorkload} onChange={(e) => setFilterWorkload(e.target.value)} placeholder="namespace/name" /></label>
           <button className="btn-secondary" disabled={framesRef.current.length === 0} onClick={download}>Download .pcap ({framesRef.current.length} packets)</button>
+          <button className="btn-secondary" disabled={filteredIdx.length === 0} onClick={exportJSON}>Export JSON</button>
+          <button className="btn-secondary" disabled={filteredIdx.length === 0} onClick={exportCSV}>Export CSV</button>
         </div>
         {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
         {rows.length > 0 && filteredIdx.length === 0 && <p className="empty-state">No packets match this filter.</p>}
