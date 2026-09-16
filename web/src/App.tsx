@@ -22,6 +22,7 @@ import Talkers from './pages/Talkers';
 import Fleet from './pages/Fleet';
 import Traffic from './pages/Traffic';
 import Capture from './pages/Capture';
+import CongestionMap from './pages/CongestionMap';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -70,7 +71,13 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
   drops: {
     eyebrow: 'Drop Diagnostics',
     title: 'Where packets disappear.',
-    lede: 'Kernel skb reasons, softnet pressure, interface counters, and Netra policy-drop detective findings.',
+    lede: 'Kernel skb reasons, softnet pressure, interface counters, windowed kernel-network diagnostics, and Netra policy-drop detective findings — see also Congestion Map for where in the stack.',
+    tint: 'amber',
+  },
+  congestion: {
+    eyebrow: 'Drop Diagnostics',
+    title: 'Where the stack is under pressure.',
+    lede: 'A pictorial view of the Linux network stack — NIC, softirq, IP, sockets, qdisc, conntrack — colored by where the cluster is congested right now, cluster-wide with per-node drill-down.',
     tint: 'amber',
   },
   l7: {
@@ -198,6 +205,7 @@ export default function App() {
     health: <Health />,
     path: <Path />,
     drops: <Drops />,
+    congestion: <CongestionMap />,
     l7: <L7 />,
     insights: <Insights />,
     topology: <Topology />,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.27.82 — 2026-09-16
+
+- **Congestion Map: a pictorial, cluster-wide view of where the Linux network stack is under pressure.** A flat findings list doesn't tell a non-expert operator *where* a drop or congestion signal actually sits in the stack. This adds a new dashboard page laying out the 11 `kerneldiag` `Layer` values as 9 stage cards across ingress/shared/egress columns (NIC ring, NAPI/softirq backlog, IP layer, conntrack, TCP accept/SYN queue, socket receive, socket send, egress qdisc, TCP memory pressure), colored by the worst finding across the cluster right now, with click-to-drill per-node detail. No backend changes — reads the existing `GET /api/v1/ebpf/kernel-network` response.
+  - `web/src/pages/CongestionMap.tsx` (new) + `CongestionMap.test.ts`: `STAGES`/`BLANK_CELLS` tables, `stageForLayer`, `worstSeverity` (critical > warning > ok > warming), `nodeStageSeverity`, `stageSummaries`. Ingress and egress are rendered as genuinely different paths — three deliberately blank, captioned placeholder cells (no egress NAPI backlog, no egress SYN queue, no separate ingress qdisc) rather than a misleadingly linear pipe; a warming node never collapses into a false-clean "ok".
+  - Registered as a new `congestion` page: `Nav.tsx` (`Page` union + a Diagnostics nav entry beside Drops), `web/src/lib/investigation.ts` (`pages` allow-list), `App.tsx` (`pageHero.congestion` + body map).
+  - New `.congestion-grid`/`.stage-cell` CSS in `styles.css`, reusing existing `.severity-badge`/design tokens — no new charting dependency (`reagraph` is the wrong tool for a fixed top-to-bottom layout).
+- **Fix capture-backend failure messaging on Health and Fleet.** `AgentReport.MissingMaps` deliberately folds real missing-BPF-map names together with AF_PACKET/eBPF capture-backend failure sentinels (`"afpacket:CAP_NET_RAW"`, `"ebpf:..."`) onto one node-health channel; the frontend was rendering every entry with "rebuild and roll the agent image," which is wrong advice for a capture-capability problem.
+  - `web/src/lib/missingMaps.ts` (new) + test: `classifyMissingMaps`/`missingMapMessage` split entries into `bpf-map` / `afpacket-backend` / `ebpf-capture-backend`, each with correct, specific copy (AF_PACKET: grant `CAP_NET_RAW`; eBPF capture: roll the agent image — both explicitly scoped to Capture only, core datapath unaffected).
+  - Wired into `web/src/pages/Health.tsx` and `web/src/pages/Fleet.tsx`.
+- Drops nav blurb and page lede updated to mention windowed kernel-network diagnostics and point at the new Congestion Map page.
+- This deploy also carries 0.27.78 (kernel network diagnostics), 0.27.79/0.27.80 (in-process NL graph), and 0.27.81 (windowed rates), none of which had been deployed to the live cluster before this release.
+- Version bumped to 0.27.82 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.81 — 2026-09-16
 
 - **Add rolling kernel-network deltas and rates.** The controller keeps a

@@ -25,7 +25,8 @@ export type Page =
   | 'talkers'
   | 'fleet'
   | 'traffic'
-  | 'capture';
+  | 'capture'
+  | 'congestion';
 
 type NavLink = { page: Page; label: string; blurb: string };
 type NavGroup = { label: string; page?: Page; children?: NavLink[] };
@@ -51,7 +52,8 @@ const groups: NavGroup[] = [
     children: [
       { page: 'health', label: 'Health', blurb: 'RTT, retransmits, RTOs, resets, and cleartext DNS latency from the kernel.' },
       { page: 'path', label: 'Path', blurb: 'Measured active TCP establishment and cwnd/packets-out pressure.' },
-      { page: 'drops', label: 'Drops', blurb: 'Kernel skb reasons, softnet pressure, and policy-drop findings.' },
+      { page: 'drops', label: 'Drops', blurb: 'Kernel skb reasons, softnet pressure, policy-drop findings, and windowed kernel-network diagnostics — see also Congestion Map for where in the stack.' },
+      { page: 'congestion', label: 'Congestion Map', blurb: 'A pictorial view of the Linux network stack, colored by where the cluster is congested right now.' },
       { page: 'l7', label: 'L7', blurb: 'Best-effort SNI and HTTP Host from the datapath.' },
       { page: 'insights', label: 'Insights', blurb: 'Baselines, drift, and review-only remediation proposals.' },
       { page: 'topology', label: 'Topology', blurb: 'The observed-traffic dependency graph, live and force-directed.' },

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { classifyMissingMaps } from '../lib/missingMaps';
 
 type FleetNode = { node?: string; stale?: boolean; mode?: string; ageSeconds?: number; hooks?: number; programs?: number; attached?: number; workloads?: number; destinations?: number; events?: number };
 type Inventory = { nodes?: FleetNode[]; agentCount?: number; staleAgents?: number };
@@ -50,7 +51,19 @@ export default function Fleet() {
               <small>
                 {n.hookCount} hooks
                 {(n.detached || []).length > 0 && <> · detached: {(n.detached || []).join(', ')}</>}
-                {(n.missingMaps || []).length > 0 && <> · missing maps: {(n.missingMaps || []).join(', ')}</>}
+                {(() => {
+                  const classified = classifyMissingMaps(n.missingMaps || []);
+                  const bpfMaps = classified.filter((e) => e.kind === 'bpf-map').map((e) => e.raw);
+                  const captureIssues = classified.filter((e) => e.kind !== 'bpf-map');
+                  return (
+                    <>
+                      {bpfMaps.length > 0 && <> · missing maps: {bpfMaps.join(', ')}</>}
+                      {captureIssues.length > 0 && (
+                        <> · capture backend: {captureIssues.map((e) => (e.kind === 'afpacket-backend' ? 'AF_PACKET unavailable (needs CAP_NET_RAW)' : 'eBPF capture object not attached')).join(', ')}</>
+                      )}
+                    </>
+                  );
+                })()}
               </small>
             </div>
           ))}

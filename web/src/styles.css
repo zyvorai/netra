@@ -1232,6 +1232,77 @@ code {
   border: 1px solid var(--border);
 }
 
+/* Congestion Map: a deterministic ingress/shared/egress x 7-row layout of
+   network-stack stage cards, placed via inline gridColumn/gridRow — plain
+   CSS grid, not reagraph (the wrong tool for a fixed top-to-bottom layout,
+   not a force-directed graph). Cells reuse .severity-badge tokens; no new
+   colors. */
+.congestion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.congestion-col-label {
+  grid-row: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.stage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated-2);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s var(--ease-apple), transform 0.2s var(--ease-apple);
+}
+.stage-cell:hover {
+  transform: translateY(-2px);
+}
+.stage-cell.selected {
+  border-color: var(--accent-cyan);
+}
+.stage-cell.critical {
+  border-color: var(--danger);
+}
+.stage-cell.warning {
+  border-color: var(--warning-border);
+}
+.stage-cell-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.stage-cell-warming {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-style: italic;
+  opacity: 0.7;
+}
+.stage-cell.blank {
+  cursor: default;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-tertiary);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.stage-cell.blank:hover {
+  transform: none;
+}
+
 .chips {
   display: flex;
   gap: 8px;

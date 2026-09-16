@@ -5,6 +5,7 @@ import ICMPDiagnostics from '../components/ICMPDiagnostics';
 import ExplainFinding from '../components/ExplainFinding';
 import NamespaceDrift from '../components/NamespaceDrift';
 import ExeHashDrift from '../components/ExeHashDrift';
+import { classifyMissingMaps, missingMapMessage } from '../lib/missingMaps';
 
 const ms = (us: number | undefined) => ((us || 0) / 1000).toFixed((us || 0) >= 100000 ? 0 : 1);
 const pct = (n: number, d: number) => d ? `${(n * 100 / d).toFixed(1)}%` : '0%';
@@ -94,13 +95,22 @@ export default function Health() {
       <section className="card span3">
         <p className="eyebrow">BPF OBJECT</p>
         <h3>Agent maps missing</h3>
-        <p className="warning">Rebuild and roll the agent image so allow/rate/icmp maps exist. Until then those controls fail open.</p>
-        {agents.filter((a: any) => (a.missingMaps || []).length).map((a: any) => (
-          <div className="agent wide" key={a.node}>
-            <b>{a.node}</b><small>{(a.missingMaps || []).join(', ')}</small>
-            <ExplainFinding page="health" kind="bpf-maps-missing" subject={a.node} message={(a.missingMaps || []).join(', ')} />
-          </div>
-        ))}
+        {agents.filter((a: any) => (a.missingMaps || []).length).map((a: any) => {
+          const classified = classifyMissingMaps(a.missingMaps || []);
+          const byKind = new Map<string, string[]>();
+          for (const e of classified) byKind.set(e.kind, [...(byKind.get(e.kind) || []), e.raw]);
+          return (
+            <div className="agent wide" key={a.node}>
+              <b>{a.node}</b>
+              {[...byKind.entries()].map(([kind, raws]) => (
+                <small key={kind}>
+                  {missingMapMessage(kind as any)} <i>({raws.join(', ')})</i>
+                </small>
+              ))}
+              <ExplainFinding page="health" kind="bpf-maps-missing" subject={a.node} message={(a.missingMaps || []).join(', ')} />
+            </div>
+          );
+        })}
       </section>
     )}
     <section className="card span3">
