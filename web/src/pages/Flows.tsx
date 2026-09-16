@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from '../api';
 import TerminalFrame from '../components/TerminalFrame';
-import { endpointName, tuple } from '../lib/flow';
+import { endpointName, tuple, verdictClass } from '../lib/flow';
 
 type Filter = {
   direction: string;
@@ -184,8 +184,8 @@ export default function Flows() {
           </div>
           {flows.map((f, i) => (
             <div className="flowrow" key={i}>
-              <span>{f.verdict}</span>
-              <span>{f.trafficDirection}</span>
+              <span className={verdictClass(f.verdict)}>{f.verdict}</span>
+              <span className={f.trafficDirection === 'INGRESS' ? 'dir-ingress' : 'dir-egress'}>{f.trafficDirection}</span>
               <span>
                 {endpointName(f.source)} → {endpointName(f.destination)}
               </span>

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.92 — 2026-09-16
+
+- **Roll out the color-coding from Capture/Congestion Map to the rest of the app.** A survey of every dashboard page found the genuine gaps: existing categorical fields (verdict, direction, protocol, blocked counts, rule type, audit action) rendered as flat text elsewhere, while Capture/Congestion Map already colored the same kind of data. Reuses established tokens/classes throughout — no new colors invented.
+  - **`LiveFlowTerminal.tsx` + `Flows.tsx`** (identical `.flowhead`/`.flowrow` shape Capture already solved, left uncolored until now): `f.trafficDirection` reuses the existing `.dir-ingress`/`.dir-egress` classes directly (zero new CSS); `f.verdict` gets a new `verdictClass()` helper (`web/src/lib/flow.ts`) and `.flowrow .verdict-forwarded/-dropped/-audit` CSS.
+  - **`Talkers.tsx` / `Traffic.tsx`**: rows with a nonzero `blocked`/`failures` count get a new `.agent.wide.row-blocked` tinted background; `Traffic.tsx`'s protocol rows reuse `.proto-tcp`/`.proto-udp`/`.proto-icmp` via a new text-keyed `protoNameClass()` (`flow.ts`) and matching `.agent .proto-*` CSS (Capture/Flows' existing `.proto-*` classes were scoped under `.flowrow`, not usable from a plain `.agent` card until this).
+  - **`EBPF.tsx` Firewall Rules table**: `r.type` (bare name = deny, `allow-`-prefixed = allow, `rate`/`shield` = throttle) now colors via new `ruleTypeClass()` (`web/src/lib/ebpfRules.ts`) and `.datarow .rule-deny/-allow/-rate` CSS. Also extended EBPF's existing `.blocked` class (already used on its "Recent activity" table) to its three other `obs` tables' packet/byte/blocked counts, which had it as plain text.
+  - **`Audit.tsx`**: the `action` column (`capture.start`, `ebpf.deny.add`, `policy.rollback`, …) now colors by verb suffix via new `auditActionClass()` (`web/src/lib/audit.ts`) — destructive (`.delete`/`.deny`), mutating (`.add`/`.apply`/`.mode`), lifecycle (`.start`/`.stop`/`.rollback`).
+  - **Cleanup**: `ConnectionTable.tsx`'s `.outcome.blocked` used hardcoded hex reds instead of the shared `--danger` token — aligned for consistency.
+  - **Deliberately not touched** (verified during the survey, not real gaps): `L7.tsx`'s BLOCKED columns already had this treatment; `Health.tsx`/`Report.tsx`/`Scorecard.tsx` are mostly scalar tiles, not per-row categorical data; `Drops.tsx`'s raw kernel-drops table and `Path.tsx`'s raw counter table have no existing severity/threshold model to key a color off; `EBPF.tsx`'s rule-history diffs and `PodLogs.tsx`'s raw log lines are genuinely unstructured.
+  - 15 new unit tests across `flow.test.ts`, `ebpfRules.test.ts` (new), and `audit.test.ts` (new).
+- Version bumped to 0.27.92 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.91 — 2026-09-16
 
 - **Capture's Wireshark-style packet detail: color each protocol layer, not just the summary row.** Live-cluster feedback on 0.27.87's detail panel: every layer heading (Ethernet II, IP, TCP, …) rendered the same flat white, unlike the already-colored live-view row above it.

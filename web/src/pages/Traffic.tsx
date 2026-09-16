@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { protoNameClass } from '../lib/flow';
 
 type NSRow = { namespace: string; packets: number; bytes: number; blocked: number; destinations: number };
 type ProtoRow = { protocol: string; packets: number; bytes: number; blocked: number; flows: number };
@@ -31,7 +32,7 @@ export default function Traffic() {
         <div className="list">
           {(ns?.rows || []).length === 0 && <p className="empty-state">No namespace traffic observed yet.</p>}
           {(ns?.rows || []).map((r) => (
-            <div className="agent wide" key={r.namespace}>
+            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.namespace}>
               <b>{r.namespace}</b><span>{r.packets} pkts</span><small>{r.destinations} destinations · {r.blocked} blocked</small>
             </div>
           ))}
@@ -45,8 +46,8 @@ export default function Traffic() {
         <div className="list">
           {(proto?.rows || []).length === 0 && <p className="empty-state">No protocol data yet.</p>}
           {(proto?.rows || []).map((r) => (
-            <div className="agent wide" key={r.protocol}>
-              <b>{r.protocol}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
+            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.protocol}>
+              <b className={protoNameClass(r.protocol)}>{r.protocol}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
             </div>
           ))}
         </div>
@@ -59,8 +60,8 @@ export default function Traffic() {
         <div className="list">
           {(ports?.rows || []).length === 0 && <p className="empty-state">No port data yet.</p>}
           {(ports?.rows || []).map((r) => (
-            <div className="agent wide" key={r.key}>
-              <b>{r.protocol}/{r.port}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
+            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.key}>
+              <b><span className={protoNameClass(r.protocol)}>{r.protocol}</span>/{r.port}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
             </div>
           ))}
         </div>
@@ -73,7 +74,7 @@ export default function Traffic() {
         <div className="list">
           {(dns?.rows || []).length === 0 && <p className="empty-state">No DNS activity observed yet.</p>}
           {(dns?.rows || []).map((r) => (
-            <div className="agent wide" key={r.name}>
+            <div className={`agent wide${r.failures ? ' row-blocked' : ''}`} key={r.name}>
               <b>{r.name}</b><span>{(r.failRate * 100).toFixed(1)}% fail</span><small>{r.queries} queries · {r.failures} failures</small>
             </div>
           ))}

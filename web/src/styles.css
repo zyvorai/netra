@@ -1112,6 +1112,9 @@ code {
 .flowrow .proto-other { color: var(--terminal-text-dim); }
 .flowrow .dir-ingress { color: var(--accent-cyan); }
 .flowrow .dir-egress { color: var(--accent-purple); }
+.flowrow .verdict-forwarded { color: var(--accent-green); }
+.flowrow .verdict-dropped { color: var(--danger); }
+.flowrow .verdict-audit { color: var(--accent-amber); }
 /* Wireshark-style layered packet detail, expanded under a clicked
    .flowrow.capture — one block per protocol layer, each a label/value
    list, followed by a raw hex dump of the frame's first bytes. */
@@ -1237,6 +1240,16 @@ code {
 .datarow.capture {
   grid-template-columns: minmax(90px, 130px) minmax(0, 1.3fr) minmax(80px, 100px) minmax(160px, 220px) minmax(120px, 1fr);
 }
+/* ".datarow span" (class+element) outranks a bare single-class modifier —
+   same lesson as .flowrow's .proto-* fix — so these are scoped through
+   .datarow to actually win. Firewall Rules table (EBPF.tsx), by ruleTypeClass. */
+.datarow .rule-deny { color: var(--danger); }
+.datarow .rule-allow { color: var(--accent-green); }
+.datarow .rule-rate { color: var(--accent-amber); }
+/* Audit log action verb, by auditActionClass(). */
+.datarow .action-destructive { color: var(--danger); }
+.datarow .action-mutating { color: var(--accent-amber); }
+.datarow .action-lifecycle { color: var(--accent-cyan); }
 
 /* Truncate a single long identifier instead of letting it wrap 3 lines;
    pair with a title="" attribute on the same element for a hover tooltip. */
@@ -1537,6 +1550,21 @@ code {
 .agent.wide {
   grid-template-columns: minmax(0, 1fr) auto;
 }
+/* Highlights a .agent.wide row that carries a nonzero blocked/failure count
+   (Talkers, Traffic) — needs the extra .wide class to outrank plain
+   ".agent" the same way .flowrow's color classes needed ".flowrow" (see
+   that comment above). */
+.agent.wide.row-blocked {
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+}
+/* Same .proto-* class family Capture/Flows use for their .flowrow rows,
+   scoped to .agent instead so Traffic.tsx's plain card rows can reuse it. */
+.agent .proto-tcp { color: var(--accent-green); }
+.agent .proto-udp { color: var(--accent-cyan); }
+.agent .proto-icmp,
+.agent .proto-icmpv6 { color: var(--accent-amber); }
+.agent .proto-other { color: var(--text-tertiary); }
 .terminalbody .agent { color: var(--terminal-text); }
 .terminalbody .agent small { color: var(--terminal-text-dim); }
 
@@ -1921,8 +1949,7 @@ code {
 .investigation-table small, .attention-row small { display: block; color: var(--text-secondary); margin-top: 5px; }
 .investigation-table td { overflow-wrap: anywhere; }
 .outcome { display: inline-block; font-size: 12px; font-weight: 600; text-transform: capitalize; }
-.outcome.blocked { color: #b42318; }
-[data-theme="dark"] .outcome.blocked { color: #ff8b82; }
+.outcome.blocked { color: var(--danger); }
 .snapshot-time { font-size: 12px; color: var(--text-secondary); }
 .attention-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border); }
 .workload-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }

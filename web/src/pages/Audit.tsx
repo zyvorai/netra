@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import BlockedEvents from '../components/BlockedEvents';
+import { auditActionClass } from '../lib/audit';
 
 export default function Audit() {
   const [items, setItems] = useState<any[]>([]);
@@ -44,7 +45,7 @@ export default function Audit() {
               <div className="datarow audit" key={i}>
                 <span>{new Date(x.at).toLocaleString()}</span>
                 <span className="truncate" title={x.actor} aria-label={x.actor}>{x.actor}</span>
-                <span>{x.action}</span>
+                <span className={auditActionClass(x.action)}>{x.action}</span>
                 <span className="truncate" title={x.target || '—'} aria-label={x.target || '—'}>{x.target || '—'}</span>
               </div>
             ))}

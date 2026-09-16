@@ -20,7 +20,7 @@ export default function Talkers() {
         {err && <p className="warning">{err}</p>}
         <div className="list">
           {(board?.rows || []).map((r) => (
-            <div className="agent wide" key={r.destination}>
+            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.destination}>
               <b>{r.destination}</b>
               <span>{r.packets} pkts</span>
               <small>{r.blocked || 0} blocked · {r.nodes || 0} nodes</small>
