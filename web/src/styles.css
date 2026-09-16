@@ -1172,6 +1172,10 @@ code {
 .datarow.rules {
   grid-template-columns: minmax(70px, 90px) minmax(0, 1fr) minmax(80px, 100px) minmax(140px, 210px) minmax(160px, 230px);
 }
+.datahead.capture,
+.datarow.capture {
+  grid-template-columns: minmax(90px, 130px) minmax(0, 1.3fr) minmax(80px, 100px) minmax(160px, 220px) minmax(120px, 1fr);
+}
 
 /* Truncate a single long identifier instead of letting it wrap 3 lines;
    pair with a title="" attribute on the same element for a hover tooltip. */
@@ -1733,7 +1737,9 @@ code {
   .datahead.deps,
   .datarow.deps,
   .datahead.rules,
-  .datarow.rules {
+  .datarow.rules,
+  .datahead.capture,
+  .datarow.capture {
     min-width: 640px;
   }
   .buildergrid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }

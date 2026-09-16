@@ -45,6 +45,7 @@ type diskState struct {
 	NextRuleSeq           map[string]uint64             `json:"nextRuleSeq,omitempty"`
 	FirewallRuleRevisions []models.FirewallRuleRevision `json:"firewallRuleRevisions,omitempty"`
 	NextFirewallRevID     uint64                        `json:"nextFirewallRevisionId,omitempty"`
+	CaptureHistory        []models.CaptureHistoryEntry  `json:"captureHistory,omitempty"`
 }
 
 // Open returns a store backed by an atomically replaced JSON state file. The
@@ -123,6 +124,7 @@ func (s *Store) load() error {
 	sort.Strings(d.Config.BlockedIPv6)
 	s.config = d.Config
 	s.audit = append([]models.AuditEvent(nil), tailAudit(d.Audit, 1000)...)
+	s.captureHistory = append([]models.CaptureHistoryEntry(nil), tailCaptureHistory(d.CaptureHistory, 500)...)
 	s.policyRevisions = cloneRevisions(tailRevisions(d.PolicyRevisions, 1000))
 	s.nextRevisionID = d.NextRevisionID
 	s.preflights = map[string]preflight{}
@@ -249,6 +251,7 @@ func (s *Store) persistLocked() error {
 		NextRuleSeq:           nextRuleSeq,
 		FirewallRuleRevisions: append([]models.FirewallRuleRevision(nil), s.firewallRuleRevisions...),
 		NextFirewallRevID:     s.nextFirewallRevID,
+		CaptureHistory:        append([]models.CaptureHistoryEntry(nil), s.captureHistory...),
 	}
 	now := time.Now().UTC()
 	for token, item := range s.preflights {
@@ -300,6 +303,12 @@ func tailAudit(in []models.AuditEvent, n int) []models.AuditEvent {
 	return in[len(in)-n:]
 }
 func tailRevisions(in []models.PolicyRevision, n int) []models.PolicyRevision {
+	if len(in) <= n {
+		return in
+	}
+	return in[len(in)-n:]
+}
+func tailCaptureHistory(in []models.CaptureHistoryEntry, n int) []models.CaptureHistoryEntry {
 	if len(in) <= n {
 		return in
 	}

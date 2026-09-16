@@ -4,6 +4,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +16,11 @@ import (
 const (
 	defaultCaptureDuration = 60 * time.Second
 	maxCaptureDuration     = 5 * time.Minute
-	maxConcurrentCaptures  = 5
-	defaultCaptureMaxPPS   = 2000
+	// maxConcurrentCaptures is a soft, cluster-wide in-memory guard, not a
+	// hard resource limit — raised from the original 5 so a multi-node bulk
+	// start (captureBulkStart) doesn't immediately trip it.
+	maxConcurrentCaptures = 25
+	defaultCaptureMaxPPS  = 2000
 )
 
 // captureHub fans agent-pushed capture frames out to every browser watching
@@ -84,6 +88,56 @@ func (s *captureSession) broadcast(data []byte) {
 	}
 }
 
+// captureRequestBody is the shared request shape for starting a capture,
+// used by both the single-node PUT and the multi-node bulk POST below.
+type captureRequestBody struct {
+	Backend         string `json:"backend"`
+	Protocol        string `json:"protocol"`
+	Host            string `json:"host"`
+	Port            uint16 `json:"port"`
+	SnapLen         uint16 `json:"snapLen"`
+	MaxPPS          uint32 `json:"maxPps"`
+	DurationSeconds int    `json:"durationSeconds"`
+}
+
+// validateCaptureRequest normalizes and validates a capture request body
+// for one node — shared by captureStart and captureBulkStart so the two
+// can never disagree about what counts as a legal capture spec. A non-zero
+// status return means validation failed and msg is the error to report;
+// the cluster-wide concurrency cap is still checked separately by each
+// caller, since captureBulkStart must recheck it fresh for every node in
+// the batch.
+func validateCaptureRequest(node string, x captureRequestBody) (spec models.CaptureSpec, status int, msg string) {
+	backend, err := models.NormalizeCaptureBackend(strings.ToLower(strings.TrimSpace(x.Backend)))
+	if err != nil {
+		return models.CaptureSpec{}, 400, err.Error()
+	}
+	protocol := strings.ToLower(strings.TrimSpace(x.Protocol))
+	host := strings.TrimSpace(x.Host)
+	// Applies identically to both backends: a promiscuous raw-socket
+	// AF_PACKET capture has the same "sees all host-visible traffic on the
+	// interface" blast radius as the eBPF path, so this rule is not
+	// eBPF-specific and must never become so.
+	if protocol == "" && host == "" && x.Port == 0 {
+		return models.CaptureSpec{}, 400, "at least one of protocol, host, or port is required — unfiltered whole-interface captures are not allowed"
+	}
+	duration := defaultCaptureDuration
+	if x.DurationSeconds > 0 {
+		duration = time.Duration(x.DurationSeconds) * time.Second
+	}
+	if duration > maxCaptureDuration {
+		return models.CaptureSpec{}, 400, "durationSeconds cannot exceed " + maxCaptureDuration.String()
+	}
+	maxPPS := x.MaxPPS
+	if maxPPS == 0 {
+		maxPPS = defaultCaptureMaxPPS
+	}
+	return models.CaptureSpec{
+		Node: node, Backend: backend, Protocol: protocol, Host: host, Port: x.Port, SnapLen: x.SnapLen, MaxPPS: maxPPS,
+		ExpiresAt: time.Now().UTC().Add(duration),
+	}, 0, ""
+}
+
 // captureStart handles PUT /api/v1/vms/{node}/capture — an operator
 // starting a new packet-capture session on one node. See
 // bpf/netra_capture.c and internal/agent's applyCapture for how this
@@ -94,40 +148,14 @@ func (s *Server) captureStart(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "node is required")
 		return
 	}
-	var x struct {
-		Backend         string `json:"backend"`
-		Protocol        string `json:"protocol"`
-		Host            string `json:"host"`
-		Port            uint16 `json:"port"`
-		SnapLen         uint16 `json:"snapLen"`
-		MaxPPS          uint32 `json:"maxPps"`
-		DurationSeconds int    `json:"durationSeconds"`
-	}
+	var x captureRequestBody
 	if err := decodeJSON(r, &x, 1<<16); err != nil {
 		errorJSON(w, 400, err.Error())
 		return
 	}
-	backend, err := models.NormalizeCaptureBackend(strings.ToLower(strings.TrimSpace(x.Backend)))
-	if err != nil {
-		errorJSON(w, 400, err.Error())
-		return
-	}
-	x.Protocol = strings.ToLower(strings.TrimSpace(x.Protocol))
-	x.Host = strings.TrimSpace(x.Host)
-	// Applies identically to both backends: a promiscuous raw-socket
-	// AF_PACKET capture has the same "sees all host-visible traffic on the
-	// interface" blast radius as the eBPF path, so this rule is not
-	// eBPF-specific and must never become so.
-	if x.Protocol == "" && x.Host == "" && x.Port == 0 {
-		errorJSON(w, 400, "at least one of protocol, host, or port is required — unfiltered whole-interface captures are not allowed")
-		return
-	}
-	duration := defaultCaptureDuration
-	if x.DurationSeconds > 0 {
-		duration = time.Duration(x.DurationSeconds) * time.Second
-	}
-	if duration > maxCaptureDuration {
-		errorJSON(w, 400, "durationSeconds cannot exceed "+maxCaptureDuration.String())
+	spec, status, msg := validateCaptureRequest(node, x)
+	if status != 0 {
+		errorJSON(w, status, msg)
 		return
 	}
 	if len(s.store.Captures()) >= maxConcurrentCaptures {
@@ -136,16 +164,57 @@ func (s *Server) captureStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	maxPPS := x.MaxPPS
-	if maxPPS == 0 {
-		maxPPS = defaultCaptureMaxPPS
-	}
-	spec := models.CaptureSpec{
-		Node: node, Backend: backend, Protocol: x.Protocol, Host: x.Host, Port: x.Port, SnapLen: x.SnapLen, MaxPPS: maxPPS,
-		ExpiresAt: time.Now().UTC().Add(duration),
-	}
 	spec = s.store.SetCapture(spec, actor(r))
 	writeJSON(w, 200, spec)
+}
+
+// captureBulkStart handles POST /api/v1/capture/bulk — start the same
+// filtered capture across many nodes at once. Capture is already a
+// per-node, pull-based primitive (each agent independently reconciles its
+// own DesiredCapture, see internal/agent's applyCapture), so "many nodes"
+// needs no new coordination — just N independent calls to
+// Store.SetCapture. A cap hit or validation failure partway through the
+// batch fails only that node, not the whole request.
+func (s *Server) captureBulkStart(w http.ResponseWriter, r *http.Request) {
+	var x struct {
+		Nodes []string `json:"nodes"`
+		captureRequestBody
+	}
+	if err := decodeJSON(r, &x, 1<<16); err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
+	if len(x.Nodes) == 0 {
+		errorJSON(w, 400, "nodes is required")
+		return
+	}
+	type nodeResult struct {
+		Node  string              `json:"node"`
+		OK    bool                `json:"ok"`
+		Spec  *models.CaptureSpec `json:"spec,omitempty"`
+		Error string              `json:"error,omitempty"`
+	}
+	results := make([]nodeResult, 0, len(x.Nodes))
+	for _, node := range x.Nodes {
+		node = strings.TrimSpace(node)
+		if node == "" {
+			continue
+		}
+		spec, status, msg := validateCaptureRequest(node, x.captureRequestBody)
+		if status != 0 {
+			results = append(results, nodeResult{Node: node, Error: msg})
+			continue
+		}
+		if len(s.store.Captures()) >= maxConcurrentCaptures {
+			if existing := s.store.Capture(node); existing == nil {
+				results = append(results, nodeResult{Node: node, Error: "too many concurrent captures already active cluster-wide"})
+				continue
+			}
+		}
+		started := s.store.SetCapture(spec, actor(r))
+		results = append(results, nodeResult{Node: node, OK: true, Spec: &started})
+	}
+	writeJSON(w, 200, map[string]any{"results": results})
 }
 
 // captureStop handles DELETE /api/v1/vms/{node}/capture.
@@ -165,6 +234,19 @@ func (s *Server) captureStop(w http.ResponseWriter, r *http.Request) {
 // captureStatus handles GET /api/v1/capture/status.
 func (s *Server) captureStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, models.CaptureStatusResponse{Active: s.store.Captures()})
+}
+
+// captureHistory handles GET /api/v1/capture/history?limit=N — metadata
+// for already-ended sessions; see models.CaptureHistoryEntry's doc comment
+// for why packet bytes are never included.
+func (s *Server) captureHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 0
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	writeJSON(w, 200, models.CaptureHistoryResponse{Entries: s.store.CaptureHistory(limit)})
 }
 
 // agentCaptureStream handles GET /api/v1/agents/capture/stream?node=X — the

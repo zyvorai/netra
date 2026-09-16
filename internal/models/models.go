@@ -203,6 +203,27 @@ type CaptureStatusResponse struct {
 	Active []CaptureSpec `json:"active"`
 }
 
+// CaptureHistoryEntry records one capture session that has already ended —
+// metadata only, never packet bytes (those are relayed live and never held
+// server-side, see internal/api/capture.go's captureHub doc comment).
+// Backs GET /api/v1/capture/history and the Capture page's history table.
+type CaptureHistoryEntry struct {
+	Node      string    `json:"node"`
+	Backend   string    `json:"backend,omitempty"`
+	Protocol  string    `json:"protocol,omitempty"`
+	Host      string    `json:"host,omitempty"`
+	Port      uint16    `json:"port,omitempty"`
+	Requestor string    `json:"requestor,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
+	EndedAt   time.Time `json:"endedAt"`
+	Reason    string    `json:"reason"` // "manual" | "expired"
+}
+
+// CaptureHistoryResponse backs GET /api/v1/capture/history.
+type CaptureHistoryResponse struct {
+	Entries []CaptureHistoryEntry `json:"entries"`
+}
+
 type DestinationStat struct {
 	SourceIP      string `json:"sourceIp,omitempty"`
 	SourcePort    uint16 `json:"sourcePort,omitempty"`

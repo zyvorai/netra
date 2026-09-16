@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, wsURL } from '../api';
+import CaptureHistory from '../components/CaptureHistory';
+import { decodeL3L4, hexDump } from '../lib/packetDecode';
 
 type CaptureSpec = {
   node: string;
@@ -14,6 +16,7 @@ type CaptureSpec = {
   expiresAt?: string;
 };
 type CaptureStatus = { active?: CaptureSpec[] };
+type BulkResult = { node: string; ok: boolean; error?: string };
 
 type Frame = { observedAtUnixNano: bigint; origLen: number; direction: number; family: number; protocol: number; data: Uint8Array<ArrayBuffer> };
 
@@ -65,7 +68,8 @@ function buildPCAP(frames: Frame[]): Blob {
 export default function Capture() {
   const [status, setStatus] = useState<CaptureStatus>();
   const [nodes, setNodes] = useState<string[]>([]);
-  const [node, setNode] = useState('');
+  const [nodeToAdd, setNodeToAdd] = useState('');
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [backend, setBackend] = useState('');
   const [protocol, setProtocol] = useState('');
   const [host, setHost] = useState('');
@@ -73,7 +77,12 @@ export default function Capture() {
   const [duration, setDuration] = useState('60s');
   const [err, setErr] = useState('');
   const [live, setLive] = useState(false);
+  const [watching, setWatching] = useState('');
   const [rows, setRows] = useState<Frame[]>([]);
+  const [filterProtocol, setFilterProtocol] = useState('');
+  const [filterDirection, setFilterDirection] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
+  const [expanded, setExpanded] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const framesRef = useRef<Frame[]>([]);
 
@@ -90,11 +99,21 @@ export default function Capture() {
   }, []);
   useEffect(() => () => wsRef.current?.close(), []);
 
+  function addNode() {
+    if (nodeToAdd && !selectedNodes.includes(nodeToAdd)) setSelectedNodes((prev) => [...prev, nodeToAdd]);
+    setNodeToAdd('');
+  }
+  function removeNode(n: string) {
+    setSelectedNodes((prev) => prev.filter((x) => x !== n));
+  }
+
   function watch(target: string) {
     wsRef.current?.close();
     framesRef.current = [];
     setRows([]);
     setErr('');
+    setExpanded(null);
+    setWatching(target);
     const ws = new WebSocket(wsURL(`/api/v1/vms/${encodeURIComponent(target)}/capture/ws`));
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => setLive(true);
@@ -109,7 +128,7 @@ export default function Capture() {
   }
 
   async function start() {
-    if (!node) { setErr('node is required'); return; }
+    if (selectedNodes.length === 0) { setErr('at least one node is required'); return; }
     if (!protocol && !host && !port) { setErr('at least one of protocol, host, or port is required'); return; }
     const body: Record<string, unknown> = {};
     if (backend) body.backend = backend;
@@ -119,10 +138,20 @@ export default function Capture() {
     const m = /^(\d+)([smh])$/.exec(duration.trim());
     if (m) body.durationSeconds = Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2] as 's' | 'm' | 'h'];
     try {
-      await api(`/api/v1/vms/${encodeURIComponent(node)}/capture`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      setErr('');
-      await loadStatus();
-      watch(node);
+      if (selectedNodes.length === 1) {
+        await api(`/api/v1/vms/${encodeURIComponent(selectedNodes[0])}/capture`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        setErr('');
+        await loadStatus();
+        watch(selectedNodes[0]);
+      } else {
+        const res = await api<{ results?: BulkResult[] }>('/api/v1/capture/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: selectedNodes, ...body }) });
+        const results = res.results || [];
+        const failed = results.filter((r) => !r.ok);
+        setErr(failed.length ? `${failed.length} of ${selectedNodes.length} node(s) failed to start: ${failed.map((f) => `${f.node} (${f.error})`).join('; ')}` : '');
+        await loadStatus();
+        const firstOK = results.find((r) => r.ok);
+        if (firstOK) watch(firstOK.node);
+      }
     } catch (e) { setErr(String(e)); }
   }
 
@@ -130,7 +159,7 @@ export default function Capture() {
     try {
       await api(`/api/v1/vms/${encodeURIComponent(target)}/capture`, { method: 'DELETE' });
       await loadStatus();
-      if (target === node) { wsRef.current?.close(); }
+      if (target === watching) { wsRef.current?.close(); }
     } catch (e) { setErr(String(e)); }
   }
 
@@ -139,12 +168,36 @@ export default function Capture() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `netra-capture-${node || 'session'}.pcap`;
+    a.download = `netra-capture-${watching || 'session'}.pcap`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
+  function repeat(e: { node: string; backend?: string; protocol?: string; host?: string; port?: number }) {
+    setSelectedNodes([e.node]);
+    setBackend(e.backend || '');
+    setProtocol(e.protocol || '');
+    setHost(e.host || '');
+    setPort(e.port ? String(e.port) : '');
+  }
+
   const active = status?.active || [];
+  const decoded = useMemo(() => rows.map((f) => decodeL3L4(f.data)), [rows]);
+  const filteredIdx = useMemo(() => {
+    const q = filterQuery.trim().toLowerCase();
+    return rows
+      .map((_, i) => i)
+      .filter((i) => {
+        const f = rows[i];
+        if (filterProtocol && (PROTOCOL_NAMES[f.protocol] || String(f.protocol)) !== filterProtocol) return false;
+        if (filterDirection && String(f.direction) !== filterDirection) return false;
+        if (q) {
+          const hay = `${decoded[i]?.summary || ''} ${PROTOCOL_NAMES[f.protocol] || ''}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+  }, [rows, decoded, filterProtocol, filterDirection, filterQuery]);
 
   return (
     <div className="grid">
@@ -162,20 +215,22 @@ export default function Capture() {
           Full packet bytes by default, filtered and time-bounded (max 5 minutes).{' '}
           {backend === 'afpacket'
             ? 'AF_PACKET mode: a pure userspace raw-socket capture, no eBPF object dependency.'
-            : 'Standalone, fail-open eBPF observer — never affects the datapath verdict.'}
+            : 'Standalone, fail-open eBPF observer — never affects the datapath verdict.'}{' '}
+          Add more than one node to start a bulk capture across all of them at once.
         </p>
         <div className="toolbar">
           <label>
             Node{' '}
             {nodes.length > 0 ? (
-              <select value={node} onChange={(e) => setNode(e.target.value)}>
+              <select value={nodeToAdd} onChange={(e) => setNodeToAdd(e.target.value)}>
                 <option value="">select…</option>
                 {nodes.map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
             ) : (
-              <input value={node} onChange={(e) => setNode(e.target.value)} placeholder="node-1" />
+              <input value={nodeToAdd} onChange={(e) => setNodeToAdd(e.target.value)} placeholder="node-1" />
             )}
           </label>
+          <button className="btn-secondary" onClick={addNode} disabled={!nodeToAdd}>Add node</button>
           <label>
             Backend{' '}
             <select value={backend} onChange={(e) => setBackend(e.target.value)}>
@@ -196,7 +251,11 @@ export default function Capture() {
           <label>Host <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="10.0.0.5" /></label>
           <label>Port <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="443" /></label>
           <label>Duration <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="60s" /></label>
-          <button className="primary" onClick={start}>Start capture</button>
+          <button className="primary" onClick={start}>Start capture{selectedNodes.length > 1 ? ` (${selectedNodes.length} nodes)` : ''}</button>
+        </div>
+        <div className="chips">
+          {selectedNodes.length === 0 && <span>No nodes selected yet.</span>}
+          {selectedNodes.map((n) => <button key={n} aria-label={`Remove ${n}`} onClick={() => removeNode(n)}>{n} ×</button>)}
         </div>
       </section>
 
@@ -211,7 +270,7 @@ export default function Capture() {
               <span>{c.protocol || 'any'}{c.host ? ` · ${c.host}` : ''}{c.port ? `:${c.port}` : ''}{c.backend === 'afpacket' ? ' · AF_PACKET' : ''}</span>
               <small>started by {c.requestor || 'unknown'}, expires {c.expiresAt ? new Date(c.expiresAt).toLocaleTimeString() : '—'}</small>
               <div className="toolbar">
-                <button className="btn-secondary" onClick={() => watch(c.node)}>Watch</button>
+                <button className={watching === c.node ? 'primary' : 'btn-secondary'} onClick={() => watch(c.node)}>Watch</button>
                 <button className="btn-secondary" onClick={() => stop(c.node)}>Stop</button>
               </div>
             </div>
@@ -221,22 +280,50 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">LIVE VIEW</p>
-        <h3>{live ? 'Connected' : 'Not connected'} · {rows.length} packets shown (last {MAX_LIVE_ROWS})</h3>
+        <h3>{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h3>
         <p>Click Watch on an active session, or start one above, to stream packets here as they're captured.</p>
+        {active.length > 1 && (
+          <div className="toolbar">
+            <span>Switch node:</span>
+            {active.map((c) => <button key={c.node} className={watching === c.node ? 'primary' : 'btn-secondary'} onClick={() => watch(c.node)}>{c.node}</button>)}
+          </div>
+        )}
         <div className="toolbar">
+          <label>Protocol{' '}
+            <select value={filterProtocol} onChange={(e) => setFilterProtocol(e.target.value)}>
+              <option value="">any</option>
+              {Object.values(PROTOCOL_NAMES).map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label>Direction{' '}
+            <select value={filterDirection} onChange={(e) => setFilterDirection(e.target.value)}>
+              <option value="">any</option>
+              <option value="1">ingress</option>
+              <option value="0">egress</option>
+            </select>
+          </label>
+          <label>Search <input value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} placeholder="10.0.0.5:443" /></label>
           <button className="btn-secondary" disabled={framesRef.current.length === 0} onClick={download}>Download .pcap ({framesRef.current.length} packets)</button>
         </div>
         <div className="list">
           {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
-          {rows.slice().reverse().map((f, i) => (
-            <div className="agent wide" key={i}>
-              <b>{PROTOCOL_NAMES[f.protocol] || f.protocol}</b>
-              <span>{f.direction === 1 ? 'ingress' : 'egress'} · {f.origLen}B{f.origLen !== f.data.byteLength ? ` (${f.data.byteLength}B captured)` : ''}</span>
-              <small>{new Date(Number(f.observedAtUnixNano / 1_000_000n)).toLocaleTimeString()}</small>
-            </div>
-          ))}
+          {rows.length > 0 && filteredIdx.length === 0 && <p className="empty-state">No packets match this filter.</p>}
+          {filteredIdx.slice().reverse().map((i) => {
+            const f = rows[i];
+            const d = decoded[i];
+            return (
+              <div className="agent wide" key={i} onClick={() => setExpanded(expanded === i ? null : i)} role="button" tabIndex={0}>
+                <b>{PROTOCOL_NAMES[f.protocol] || f.protocol}</b>
+                <span>{f.direction === 1 ? 'ingress' : 'egress'} · {f.origLen}B{f.origLen !== f.data.byteLength ? ` (${f.data.byteLength}B captured)` : ''}{d ? ` · ${d.summary}` : ''}</span>
+                <small>{new Date(Number(f.observedAtUnixNano / 1_000_000n)).toLocaleTimeString()}</small>
+                {expanded === i && <pre>{hexDump(f.data)}</pre>}
+              </div>
+            );
+          })}
         </div>
       </section>
+
+      <CaptureHistory onRepeat={repeat} />
     </div>
   );
 }

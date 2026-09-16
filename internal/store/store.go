@@ -84,6 +84,11 @@ type Store struct {
 	// losing it across a controller restart is an acceptable, self-healing
 	// tradeoff, unlike firewall policy or mode.
 	captures map[string]models.CaptureSpec
+	// captureHistory records ended sessions (metadata only, never packet
+	// bytes) so the Capture page can show past captures. Unlike captures
+	// above, this IS persisted (see persistence.go) since it's a small,
+	// bounded audit-style log rather than live session state.
+	captureHistory []models.CaptureHistoryEntry
 }
 
 func New() *Store {
@@ -280,11 +285,13 @@ func (s *Store) SetCapture(spec models.CaptureSpec, actor string) models.Capture
 func (s *Store) ClearCapture(node, actor, reason string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.captures[node]; !ok {
+	spec, ok := s.captures[node]
+	if !ok {
 		return false
 	}
 	delete(s.captures, node)
 	s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: actor, Action: "capture.stop", Target: node, Details: map[string]any{"reason": reason}})
+	s.recordCaptureHistoryLocked(spec, reason)
 	return true
 }
 
@@ -301,6 +308,7 @@ func (s *Store) Capture(node string) *models.CaptureSpec {
 	if !spec.ExpiresAt.IsZero() && time.Now().After(spec.ExpiresAt) {
 		delete(s.captures, node)
 		s.appendAuditLocked(models.AuditEvent{At: time.Now().UTC(), Actor: "system", Action: "capture.stop", Target: node, Details: map[string]any{"reason": "expired"}})
+		s.recordCaptureHistoryLocked(spec, "expired")
 		return nil
 	}
 	out := spec
@@ -318,9 +326,41 @@ func (s *Store) Captures() []models.CaptureSpec {
 		if !spec.ExpiresAt.IsZero() && now.After(spec.ExpiresAt) {
 			delete(s.captures, node)
 			s.appendAuditLocked(models.AuditEvent{At: now.UTC(), Actor: "system", Action: "capture.stop", Target: node, Details: map[string]any{"reason": "expired"}})
+			s.recordCaptureHistoryLocked(spec, "expired")
 			continue
 		}
 		out = append(out, spec)
+	}
+	return out
+}
+
+// recordCaptureHistoryLocked appends one ended session to the bounded
+// capture-history log (metadata only — see captureHistory's doc comment).
+// Callers must hold s.mu.
+func (s *Store) recordCaptureHistoryLocked(spec models.CaptureSpec, reason string) {
+	s.captureHistory = append(s.captureHistory, models.CaptureHistoryEntry{
+		Node: spec.Node, Backend: spec.Backend, Protocol: spec.Protocol, Host: spec.Host, Port: spec.Port,
+		Requestor: spec.Requestor, StartedAt: spec.StartedAt, EndedAt: time.Now().UTC(), Reason: reason,
+	})
+	if len(s.captureHistory) > 500 {
+		s.captureHistory = append([]models.CaptureHistoryEntry(nil), s.captureHistory[len(s.captureHistory)-500:]...)
+	}
+}
+
+// CaptureHistory returns the most recent ended capture sessions, newest
+// first, capped at limit (a non-positive limit defaults to 100).
+func (s *Store) CaptureHistory(limit int) []models.CaptureHistoryEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > len(s.captureHistory) {
+		limit = len(s.captureHistory)
+	}
+	out := make([]models.CaptureHistoryEntry, limit)
+	for i := 0; i < limit; i++ {
+		out[i] = s.captureHistory[len(s.captureHistory)-1-i]
 	}
 	return out
 }
