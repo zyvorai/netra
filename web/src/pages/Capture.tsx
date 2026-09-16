@@ -3,6 +3,7 @@ import { api, wsURL } from '../api';
 import CaptureHistory from '../components/CaptureHistory';
 import TerminalFrame from '../components/TerminalFrame';
 import { decodeDetailed, decodeL3L4, hexDump } from '../lib/packetDecode';
+import { buildIPIndex, labelForIP } from '../lib/workloadAttribution';
 
 const PROTO_CLASS: Record<number, string> = { 1: 'proto-icmp', 6: 'proto-tcp', 17: 'proto-udp', 58: 'proto-icmpv6' };
 
@@ -85,7 +86,9 @@ export default function Capture() {
   const [filterProtocol, setFilterProtocol] = useState('');
   const [filterDirection, setFilterDirection] = useState('');
   const [filterQuery, setFilterQuery] = useState('');
+  const [filterWorkload, setFilterWorkload] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [ipIndex, setIpIndex] = useState<Map<string, string>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const framesRef = useRef<Frame[]>([]);
 
@@ -99,6 +102,13 @@ export default function Capture() {
     api<{ nodes?: { node?: string }[] }>('/api/v1/fleet')
       .then((inv) => setNodes((inv.nodes || []).map((n) => n.node || '').filter(Boolean)))
       .catch(() => {});
+  }, []);
+  useEffect(() => {
+    type Named = { namespace: string; name: string; podIP?: string };
+    Promise.all([
+      api<{ items?: Named[] }>('/api/v1/pods').then((r) => r.items || []).catch(() => []),
+      api<{ items?: Named[] }>('/api/v1/vms').then((r) => r.items || []).catch(() => []),
+    ]).then(([pods, vms]) => setIpIndex(buildIPIndex(pods, vms)));
   }, []);
   useEffect(() => () => wsRef.current?.close(), []);
 
@@ -186,8 +196,13 @@ export default function Capture() {
 
   const active = status?.active || [];
   const decoded = useMemo(() => rows.map((f) => decodeL3L4(f.data)), [rows]);
+  const workloads = useMemo(
+    () => decoded.map((d) => ({ src: labelForIP(ipIndex, d?.srcIP), dst: labelForIP(ipIndex, d?.dstIP) })),
+    [decoded, ipIndex],
+  );
   const filteredIdx = useMemo(() => {
     const q = filterQuery.trim().toLowerCase();
+    const wq = filterWorkload.trim().toLowerCase();
     return rows
       .map((_, i) => i)
       .filter((i) => {
@@ -198,9 +213,13 @@ export default function Capture() {
           const hay = `${decoded[i]?.summary || ''} ${PROTOCOL_NAMES[f.protocol] || ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
+        if (wq) {
+          const hay = `${workloads[i]?.src || ''} ${workloads[i]?.dst || ''}`.toLowerCase();
+          if (!hay.includes(wq)) return false;
+        }
         return true;
       });
-  }, [rows, decoded, filterProtocol, filterDirection, filterQuery]);
+  }, [rows, decoded, workloads, filterProtocol, filterDirection, filterQuery, filterWorkload]);
 
   return (
     <div className="grid">
@@ -284,7 +303,7 @@ export default function Capture() {
       <section className="card span3">
         <p className="eyebrow">LIVE VIEW</p>
         <h3>{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h3>
-        <p>Click Watch on an active session, or start one above, to stream packets here as they're captured.</p>
+        <p>Click Watch on an active session, or start one above, to stream packets here as they're captured. Endpoints matching a known pod or VM IP are labeled automatically — process/PID attribution isn't available (would need a kernel-side capture change, not client-side).</p>
         {active.length > 1 && (
           <div className="toolbar">
             <span>Switch node:</span>
@@ -306,6 +325,7 @@ export default function Capture() {
             </select>
           </label>
           <label>Search <input value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} placeholder="10.0.0.5:443" /></label>
+          <label>Pod / VM <input value={filterWorkload} onChange={(e) => setFilterWorkload(e.target.value)} placeholder="namespace/name" /></label>
           <button className="btn-secondary" disabled={framesRef.current.length === 0} onClick={download}>Download .pcap ({framesRef.current.length} packets)</button>
         </div>
         {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
@@ -322,7 +342,9 @@ export default function Capture() {
             {filteredIdx.slice().reverse().map((i) => {
               const f = rows[i];
               const d = decoded[i];
+              const w = workloads[i];
               const captured = f.origLen !== f.data.byteLength ? ` (${f.data.byteLength}B captured)` : '';
+              const workloadTags = [w?.src, w?.dst].filter(Boolean).join(' / ');
               return (
                 <Fragment key={i}>
                   <div className="flowrow capture" onClick={() => setExpanded(expanded === i ? null : i)} role="button" tabIndex={0}>
@@ -330,10 +352,17 @@ export default function Capture() {
                     <span className={PROTO_CLASS[f.protocol] || 'proto-other'}>{PROTOCOL_NAMES[f.protocol] || f.protocol}</span>
                     <span className={f.direction === 1 ? 'dir-ingress' : 'dir-egress'}>{f.direction === 1 ? '← in' : 'out →'}</span>
                     <span>{f.origLen}B{captured}</span>
-                    <span>{d ? d.summary : '—'}</span>
+                    <span>{d ? d.summary : '—'}{workloadTags ? ` · ${workloadTags}` : ''}</span>
                   </div>
                   {expanded === i && (
                     <div className="packetdetail">
+                      {(w?.src || w?.dst) && (
+                        <div className="layer">
+                          <b>Workload Attribution</b>
+                          {w?.src && <div><span>Source</span><span>{w.src}</span></div>}
+                          {w?.dst && <div><span>Destination</span><span>{w.dst}</span></div>}
+                        </div>
+                      )}
                       {decodeDetailed(f.data).map((layer) => (
                         <div className="layer" key={layer.name}>
                           <b>{layer.name}</b>

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.89 — 2026-09-16
+
+- **Capture Live View: label packet endpoints by pod/VM, and filter by them.** A captured packet's src/dst IP is directly a pod/VM's own routable IP on this cluster's CNI, so a pure IP lookup against already-existing inventory is enough for reliable attribution — no kernel change needed.
+  - New `web/src/lib/workloadAttribution.ts`: `buildIPIndex()` builds an IP→`"pod ns/name"`/`"vm ns/name"` map from `GET /api/v1/pods` + `GET /api/v1/vms` (both already expose `podIP`); `labelForIP()` looks one up. 4 new unit tests.
+  - `Capture.tsx` fetches both endpoints once on mount, labels each decoded frame's src/dst in the Live View row and the Wireshark-style detail panel (new "Workload Attribution" layer), and adds a "Pod / VM" filter field alongside the existing protocol/direction/search filters.
+  - **Deliberately not included: process/PID attribution.** That would require `bpf/netra_capture.c` (the capture eBPF program) to record cgroup/PID context at capture time — a kernel-side wire-format change that can't be safely authored or verified without a local BPF/clang toolchain (there isn't one in this environment) and would need a live-cluster round-trip to even compile-check. Scoped out rather than guessed at; the Live View now says so explicitly.
+- Version bumped to 0.27.89 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.88 — 2026-09-16
 
 - **Fix: Capture Live View's protocol/direction colors never actually rendered.** Live-cluster verification of 0.27.87 (Chrome, real traffic) found every row's `TCP`/`← in`/`out →` text stayed the default terminal white instead of the intended green/cyan/purple — `.flowrow span { color: var(--terminal-text) }` (a class+element descendant selector, specificity 0,1,1) silently outranked the single-class `.proto-tcp`/`.dir-ingress` rules (0,1,0), so the color rules were dead code from the moment they were written.
