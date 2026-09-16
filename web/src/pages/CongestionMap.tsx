@@ -16,8 +16,28 @@ type KernelFinding = {
   applyCommand?: string;
   rollbackCommand?: string;
 };
-type KernelWindow = { warming: boolean; resetDetected?: boolean; resetSignals?: string[]; seconds?: number };
-type KernelNode = { node: string; window?: KernelWindow; findings?: KernelFinding[] };
+type WindowCounter = { name: string; delta: number; perSecond: number };
+type KernelWindow = {
+  warming: boolean;
+  resetDetected?: boolean;
+  resetSignals?: string[];
+  seconds?: number;
+  counters?: WindowCounter[];
+  softnetDropped?: number;
+  softnetDroppedPerSecond?: number;
+  softnetTimeSqueeze?: number;
+  softnetTimeSqueezePerSecond?: number;
+  rxDropped?: number;
+  rxDroppedPerSecond?: number;
+  txDropped?: number;
+  txDroppedPerSecond?: number;
+  rxMissed?: number;
+  rxMissedPerSecond?: number;
+  qdiscDrops?: number;
+  qdiscDropsPerSecond?: number;
+};
+type KernelTunable = { name: string; value: string };
+type KernelNode = { node: string; window?: KernelWindow; findings?: KernelFinding[]; snapshot?: { tunables?: KernelTunable[] } };
 type KernelResponse = { summary?: { nodes?: number; findings?: number; critical?: number; warnings?: number; warming?: number }; nodes?: KernelNode[] };
 
 export type StageKey = 'nic-driver' | 'napi-softnet' | 'ip' | 'tcp-listen' | 'socket-receive' | 'socket-send' | 'qdisc' | 'conntrack' | 'tcp-memory';
@@ -122,6 +142,80 @@ function colIndex(c: StageColumn): number {
   return c === 'ingress' ? 1 : c === 'egress' ? 3 : 2;
 }
 
+// The exact counter names each analyzeNode() branch (internal/kerneldiag/
+// analyze.go) sums as evidence for a given Layer, for the 5 stages driven
+// by named /proc/net/snmp|netstat counters rather than a dedicated window
+// field. Kept 1:1 with analyze.go's `counters["..."]` lookups so a stage's
+// "live" number is always the same evidence a finding would cite — never a
+// number invented for the sake of filling the card.
+const STAGE_COUNTER_NAMES: Partial<Record<StageKey, string[]>> = {
+  'socket-receive': ['TcpExt.TCPBacklogDrop', 'TcpExt.TCPRcvQDrop', 'TcpExt.TCPZeroWindowDrop', 'Udp.RcvbufErrors', 'Udp.MemErrors'],
+  'socket-send': ['Udp.SndbufErrors'],
+  'tcp-listen': ['TcpExt.ListenDrops', 'TcpExt.ListenOverflows', 'TcpExt.TCPReqQFullDrop', 'TcpExt.TCPDeferAcceptDrop'],
+  'tcp-memory': ['TcpExt.TCPMemoryPressures', 'TcpExt.TCPAbortOnMemory', 'TcpExt.TCPWqueueTooBig'],
+  ip: ['Ip.InDiscards', 'Ip.OutDiscards', 'IpExt.InNoRoutes', 'IpExt.OutNoRoutes'],
+};
+
+export type StageRate = { perSecond: number; delta: number };
+
+// A live cluster-wide rate for a stage, aggregated only from nodes whose
+// window has settled (warming nodes contribute no rate — same reasoning as
+// nodeStageSeverity). `conntrack` has no window-based rate at all (it's a
+// point-in-time table-utilization gauge, not a counter delta) and
+// deliberately returns null rather than a fabricated 0 — the UI shows its
+// ceiling from a tunable instead, see conntrackCeiling.
+export function stageLiveRate(nodes: KernelNode[], stage: StageKey): StageRate | null {
+  if (stage === 'conntrack') return null;
+  let perSecond = 0;
+  let delta = 0;
+  let any = false;
+  for (const n of nodes) {
+    const w = n.window;
+    if (!w || w.warming) continue;
+    any = true;
+    if (stage === 'nic-driver') {
+      perSecond += (w.rxMissedPerSecond || 0) + (w.rxDroppedPerSecond || 0) + (w.txDroppedPerSecond || 0);
+      delta += (w.rxMissed || 0) + (w.rxDropped || 0) + (w.txDropped || 0);
+    } else if (stage === 'napi-softnet') {
+      perSecond += (w.softnetDroppedPerSecond || 0) + (w.softnetTimeSqueezePerSecond || 0);
+      delta += (w.softnetDropped || 0) + (w.softnetTimeSqueeze || 0);
+    } else if (stage === 'qdisc') {
+      perSecond += w.qdiscDropsPerSecond || 0;
+      delta += w.qdiscDrops || 0;
+    } else {
+      const names = STAGE_COUNTER_NAMES[stage];
+      if (!names) return null;
+      for (const c of w.counters || []) {
+        if (names.includes(c.name)) {
+          perSecond += c.perSecond || 0;
+          delta += c.delta || 0;
+        }
+      }
+    }
+  }
+  return any ? { perSecond, delta } : null;
+}
+
+export function formatStageRate(rate: StageRate | null): string | null {
+  if (!rate) return null;
+  const rounded = Math.round(rate.delta).toLocaleString();
+  const perSecond = rate.perSecond >= 10 ? Math.round(rate.perSecond).toLocaleString() : rate.perSecond.toFixed(2);
+  return `${rounded} in this window · ${perSecond}/s across cluster`;
+}
+
+// conntrack has no per-window rate (see stageLiveRate); instead surface the
+// table ceiling straight from the same node snapshot already fetched, so
+// the conntrack card still shows a real number instead of just a badge.
+// analyzeNode() only emits a finding at >=75% utilization — this caption
+// makes that threshold visible even while the table is comfortably under it.
+export function conntrackCeiling(nodes: KernelNode[]): string | null {
+  for (const n of nodes) {
+    const t = (n.snapshot?.tunables || []).find((x) => x.name === 'net.netfilter.nf_conntrack_max');
+    if (t && t.value) return t.value;
+  }
+  return null;
+}
+
 export default function CongestionMap() {
   const [kernel, setKernel] = useState<KernelResponse>();
   const [kernelWindow, setKernelWindow] = useState('5m');
@@ -145,6 +239,7 @@ export default function CongestionMap() {
 
   const nodes = useMemo(() => kernel?.nodes || [], [kernel]);
   const summaries = useMemo(() => stageSummaries(nodes), [nodes]);
+  const ceiling = useMemo(() => conntrackCeiling(nodes), [nodes]);
   const selectedStage = selected ? STAGES.find((s) => s.key === selected) : undefined;
   const selectedSummary = selected ? summaries.get(selected) : undefined;
 
@@ -184,6 +279,7 @@ export default function CongestionMap() {
             {STAGES.map((stage) => {
               const summary = summaries.get(stage.key);
               const sev = summary?.severity || 'ok';
+              const rate = sev === 'warming' ? null : formatStageRate(stageLiveRate(nodes, stage.key));
               return (
                 <button
                   key={stage.key}
@@ -197,6 +293,10 @@ export default function CongestionMap() {
                     <span className="stage-cell-warming">warming</span>
                   ) : (
                     <span className={`severity-badge ${sev === 'ok' ? 'info' : sev}`}>{sev}</span>
+                  )}
+                  {rate && <small className="stage-cell-rate">{rate}</small>}
+                  {stage.key === 'conntrack' && ceiling && (
+                    <small className="stage-cell-rate">ceiling: {Number(ceiling).toLocaleString()} entries — findings fire above 75% utilization</small>
                   )}
                   {stage.caption && <small>{stage.caption}</small>}
                 </button>

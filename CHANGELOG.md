@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.83 — 2026-09-16
+
+- **Congestion Map: show live rates, not just OK badges.** Live-cluster feedback on 0.27.82: on a currently-healthy cluster every stage showed a static "OK" pill with no other information, which read as blank/broken rather than as a measurement. Each of the 8 rate-bearing stage cards now shows a real number pulled straight from the same `/api/v1/ebpf/kernel-network` response already being fetched — `"0 in this window · 0.00/s across cluster"` when clean, the same wording scaled up when not. The Conntrack card (which has no window-based rate — it's a point-in-time table-utilization gauge, not a counter delta) instead shows its `net.netfilter.nf_conntrack_max` ceiling and the 75%-utilization threshold that triggers a finding.
+  - `web/src/pages/CongestionMap.tsx`: `stageLiveRate(nodes, stage)` sums the *exact* window fields/counter names `internal/kerneldiag/analyze.go`'s `analyzeNode()` uses as evidence for that Layer (e.g. `tcp-listen` sums `TcpExt.ListenDrops`/`ListenOverflows`/`TCPReqQFullDrop`/`TCPDeferAcceptDrop` — never a number unrelated to what would actually trigger that stage's finding), aggregated across non-warming nodes only. `formatStageRate` renders it; `conntrackCeiling` reads the tunable already present in the same response's per-node snapshot.
+  - 11 new tests in `CongestionMap.test.ts` covering the window-field stages (nic-driver/napi-softnet/qdisc), the counter-summing stages, warming-node exclusion, conntrack's deliberate `null`, and the formatter's zero/large/small-rate cases.
+  - No backend changes — every field this reads was already in the `GET /api/v1/ebpf/kernel-network` response shipped in 0.27.78/0.27.81.
+- Version bumped to 0.27.83 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.82 — 2026-09-16
 
 - **Congestion Map: a pictorial, cluster-wide view of where the Linux network stack is under pressure.** A flat findings list doesn't tell a non-expert operator *where* a drop or congestion signal actually sits in the stack. This adds a new dashboard page laying out the 11 `kerneldiag` `Layer` values as 9 stage cards across ingress/shared/egress columns (NIC ring, NAPI/softirq backlog, IP layer, conntrack, TCP accept/SYN queue, socket receive, socket send, egress qdisc, TCP memory pressure), colored by the worst finding across the cluster right now, with click-to-drill per-node detail. No backend changes — reads the existing `GET /api/v1/ebpf/kernel-network` response.

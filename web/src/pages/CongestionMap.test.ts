@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STAGES, nodeStageSeverity, stageForLayer, stageSummaries, worstSeverity } from './CongestionMap';
+import { STAGES, conntrackCeiling, formatStageRate, nodeStageSeverity, stageForLayer, stageLiveRate, stageSummaries, worstSeverity } from './CongestionMap';
 
 // The 11 layers below are grepped directly from internal/kerneldiag/analyze.go's
 // `Layer: "..."` literals. If a 12th is ever added there without a matching
@@ -113,5 +113,85 @@ describe('stageSummaries', () => {
   it('has one summary entry per declared stage', () => {
     const out = stageSummaries([]);
     expect(out.size).toBe(STAGES.length);
+  });
+});
+
+describe('stageLiveRate', () => {
+  it('aggregates the dedicated window fields for nic-driver', () => {
+    const nodes = [
+      { node: 'n1', window: { warming: false, rxMissedPerSecond: 1, rxDroppedPerSecond: 2, txDroppedPerSecond: 3, rxMissed: 10, rxDropped: 20, txDropped: 30 } },
+    ];
+    expect(stageLiveRate(nodes, 'nic-driver')).toEqual({ perSecond: 6, delta: 60 });
+  });
+
+  it('aggregates the dedicated window fields for napi-softnet and qdisc', () => {
+    const nodes = [
+      { node: 'n1', window: { warming: false, softnetDroppedPerSecond: 1, softnetTimeSqueezePerSecond: 2, softnetDropped: 5, softnetTimeSqueeze: 6, qdiscDropsPerSecond: 4, qdiscDrops: 40 } },
+    ];
+    expect(stageLiveRate(nodes, 'napi-softnet')).toEqual({ perSecond: 3, delta: 11 });
+    expect(stageLiveRate(nodes, 'qdisc')).toEqual({ perSecond: 4, delta: 40 });
+  });
+
+  it('sums exactly the named counters analyze.go uses as evidence for a counter-driven stage', () => {
+    const nodes = [
+      {
+        node: 'n1',
+        window: {
+          warming: false,
+          counters: [
+            { name: 'TcpExt.ListenDrops', delta: 3, perSecond: 0.1 },
+            { name: 'TcpExt.ListenOverflows', delta: 2, perSecond: 0.05 },
+            { name: 'Tcp.EstabResets', delta: 999, perSecond: 99 }, // not tcp-listen evidence — must be ignored
+          ],
+        },
+      },
+    ];
+    expect(stageLiveRate(nodes, 'tcp-listen')).toEqual({ perSecond: 0.15000000000000002, delta: 5 });
+  });
+
+  it('excludes warming nodes from the aggregate', () => {
+    const nodes = [
+      { node: 'n1', window: { warming: true, qdiscDropsPerSecond: 100, qdiscDrops: 1000 } },
+      { node: 'n2', window: { warming: false, qdiscDropsPerSecond: 1, qdiscDrops: 10 } },
+    ];
+    expect(stageLiveRate(nodes, 'qdisc')).toEqual({ perSecond: 1, delta: 10 });
+  });
+
+  it('returns null for conntrack (no window-based rate exists)', () => {
+    expect(stageLiveRate([{ node: 'n1', window: { warming: false } }], 'conntrack')).toBeNull();
+  });
+
+  it('returns null when no node has a settled window', () => {
+    expect(stageLiveRate([{ node: 'n1', window: { warming: true } }], 'qdisc')).toBeNull();
+    expect(stageLiveRate([], 'qdisc')).toBeNull();
+  });
+});
+
+describe('formatStageRate', () => {
+  it('formats a zero rate as an explicit measurement, not a blank', () => {
+    expect(formatStageRate({ perSecond: 0, delta: 0 })).toBe('0 in this window · 0.00/s across cluster');
+  });
+
+  it('formats a null rate as null (caller decides whether to render anything)', () => {
+    expect(formatStageRate(null)).toBeNull();
+  });
+
+  it('rounds a large per-second rate and keeps two decimals for a small one', () => {
+    expect(formatStageRate({ perSecond: 12.7, delta: 500 })).toBe('500 in this window · 13/s across cluster');
+    expect(formatStageRate({ perSecond: 3.5, delta: 1082 })).toBe('1,082 in this window · 3.50/s across cluster');
+  });
+});
+
+describe('conntrackCeiling', () => {
+  it('returns the nf_conntrack_max tunable value from the first node that has it', () => {
+    const nodes = [
+      { node: 'n1', snapshot: { tunables: [{ name: 'net.core.somaxconn', value: '4096' }] } },
+      { node: 'n2', snapshot: { tunables: [{ name: 'net.netfilter.nf_conntrack_max', value: '393216' }] } },
+    ];
+    expect(conntrackCeiling(nodes)).toBe('393216');
+  });
+
+  it('returns null when no node has the tunable', () => {
+    expect(conntrackCeiling([{ node: 'n1', snapshot: { tunables: [] } }])).toBeNull();
   });
 });
