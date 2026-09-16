@@ -2,8 +2,8 @@ apiVersion: v2
 name: netra
 description: Standalone eBPF network observability and enforcement with optional Cilium/Hubble integration
 type: application
-version: 0.27.93
-appVersion: "0.27.93"
+version: 0.27.94
+appVersion: "0.27.94"
 home: https://github.com/zyvorai/netra
 sources:
   - https://github.com/zyvorai/netra

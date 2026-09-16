@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.94 — 2026-09-16
+
+- **UX audit follow-through: one real empty-state gap, one real off-token color.** A broader UX survey (prompted by the hero-heading fix) flagged several candidates; most didn't survive direct verification against the code, which is worth recording since it corrects the survey's own claims:
+  - `Talkers.tsx`'s destination list rendered nothing at all when `board.rows` was empty, unlike every other list page — added the same `<p className="empty-state">No talkers observed yet.</p>` pattern used everywhere else.
+  - `.risk-critical b`/`.risk-high b` (Policies.tsx's GitOps risk badge, class built dynamically as `` risk-${plan.plan.risk} `` — invisible to a literal-string grep, which is why it was initially misflagged as dead code) used a fourth, off-token red (`#ff6961`) instead of `--danger`. Fixed.
+  - **Corrected, not fixed**: `Connections.tsx` and `Topology.tsx` were flagged as missing empty states but already have them — `Connections.tsx` delegates to `ConnectionTable`'s own empty message, `Topology.tsx` has two inline (`Topology.tsx:159,193`). `Scorecard.tsx`'s issue is a different, weaker case (blank values next to labels while loading, not a fully blank page) — left alone. `.operations-grid h2`'s 36px, flagged as an unexplained second "large heading" size alongside `.card h3`'s 21px, turned out to be entirely dead CSS (`.operations-grid` has zero references anywhere) — no live inconsistency exists, so no typography-token scaffolding was introduced for it.
+- Version bumped to 0.27.94 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.93 — 2026-09-16
 
 - **Shrink the oversized page-hero headings.** Live-cluster feedback: `.page-hero h1` (used on every page's opening headline — "Watch the wire, live.", "Where the stack is under pressure.", etc.) scaled up to 84px, reading as oversized "poster" type rather than a page title. Cut to `clamp(28px, 3.5vw, 48px)` (was `clamp(40px, 6vw, 84px)`), with proportionally loosened line-height/letter-spacing since tight display-type tracking looks cramped at a smaller size. `.hero h1` (Overview only, the single biggest heading in the app) shrunk in proportion, `clamp(32px, 4vw, 56px)` (was `clamp(44px, 7vw, 88px)`), keeping Overview a clear step above the other pages. Both heroes' subtext (`.hero p`/`.page-hero p`) sized down to match.

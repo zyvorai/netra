@@ -1591,7 +1591,7 @@ code {
   background: var(--danger-bg);
 }
 .risk-critical b,
-.risk-high b { color: #ff6961; }
+.risk-high b { color: var(--danger); }
 
 .buildergrid {
   display: grid;

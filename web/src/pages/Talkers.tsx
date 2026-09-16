@@ -19,6 +19,7 @@ export default function Talkers() {
         <p>Packet counts from current agent reports. Observe-only, no payloads.</p>
         {err && <p className="warning">{err}</p>}
         <div className="list">
+          {(board?.rows || []).length === 0 && <p className="empty-state">No talkers observed yet.</p>}
           {(board?.rows || []).map((r) => (
             <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.destination}>
               <b>{r.destination}</b>
