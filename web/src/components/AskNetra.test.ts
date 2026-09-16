@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ASK_SUGGESTIONS, canAsk, looksLikeDraft } from './AskNetra';
+import { ASK_SUGGESTIONS, canAsk, formatGraphSteps, looksLikeDraft } from './AskNetra';
 
 describe('AskNetra helpers', () => {
   it('ships a short read-only suggestion set', () => {
@@ -17,5 +17,13 @@ describe('AskNetra helpers', () => {
   it('detects deny/rate sentences for the preview pane', () => {
     expect(looksLikeDraft('deny dns malware.example')).toBe(true);
     expect(looksLikeDraft('why is DNS failing?')).toBe(false);
+  });
+
+  it('formats the in-process graph step trace', () => {
+    expect(formatGraphSteps(undefined)).toBe('');
+    expect(formatGraphSteps([
+      { node: 'classify', detail: 'drops' },
+      { node: 'synthesize', detail: 'answer from snapshot' },
+    ])).toBe('classify:drops → synthesize:answer from snapshot');
   });
 });

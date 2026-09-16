@@ -186,7 +186,7 @@ func TestDispatchAskCallsThroughAndNeverConfirms(t *testing.T) {
 	if pending != nil {
 		t.Fatalf("ask must not require confirmation, got pending=%v", pending)
 	}
-	if gotMethod != "POST" || gotPath != "/api/v1/ai/ask" {
+	if gotMethod != "POST" || gotPath != "/api/v1/ai/agent" {
 		t.Fatalf("method=%q path=%q", gotMethod, gotPath)
 	}
 	if gotAuth != "Bearer test-key" {

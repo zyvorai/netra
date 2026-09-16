@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.80 — 2026-09-16
+
+- **Wire the Ask Netra card and ChatOps `/netra ask` over to the in-process NL graph (`/api/v1/ai/agent`).** 0.27.79 added the graph endpoint itself; this switches its two existing human-facing callers to it instead of `/ai/ask`, so an operator sees the graph's step trace and any preview-only draft in the same round-trip instead of a second `/ai/draft` call.
+  - `web/src/components/AskNetra.tsx`: submits `POST /api/v1/ai/agent` instead of `/api/v1/ai/ask` + a separate conditional `/api/v1/ai/draft` call; renders the graph's own `steps`/`intent`/`draft` directly from the single response. New `formatGraphSteps` helper (`AskNetra.test.ts`).
+  - `internal/chatops/commands.go`: `askCommand` now calls `/api/v1/ai/agent`; a new `chatAgentResponse` type unwraps the nested `brief` (falling back to the flat `/ai/ask` shape so a mis-routed mock still renders) and appends a "Rule preview (not applied)" line when the graph understood a draft.
+  - `docs/ai.md`, `docs/chatops.md` updated to describe the new call path.
+  - `/ai/ask` itself is unchanged and still used by `netractl ai ask`/MCP `netra_ai_ask` for one-shot callers that don't want the graph's extra round-trip.
+  - Merged from an externally authored patch (`0001-langgraph-nl-agent-2.patch`) — a follow-up to the 0.27.79 patch. Nearly all of that patch's content was already merged in 0.27.79; only the genuinely new hunks (ChatOps + `AskNetra.tsx`/`docs/ai.md`'s two remaining lines) were applied here, hand-checked against the already-merged base rather than trusted as "applies cleanly."
+- Version bumped to 0.27.80 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.79 — 2026-09-16
 
 - **Natural-language graph (LangGraph companion + in-process `/ai/agent`).** Single-shot `/ai/ask` still exists; this adds a bounded multi-node graph so an operator question can classify, pull specialist evidence, preview a deny/rate/allow draft, and synthesize in one call. `netrad` stays stdlib-only — LangGraph is not a Go module (`AGENTS.md`).

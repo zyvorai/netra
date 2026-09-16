@@ -15,7 +15,26 @@ type Brief = {
   generatedAt: string;
   conversationId?: string;
 };
-type Exchange = { question: string; brief: Brief };
+type RuleDraft = {
+  understood: boolean;
+  confidence?: string;
+  kind?: string;
+  summary: string;
+  cli?: string;
+  warnings?: string[];
+  note?: string;
+  body?: Record<string, unknown>;
+};
+type AgentStep = { node: string; detail?: string };
+type AgentResult = {
+  brief: Brief;
+  intent?: string;
+  draft?: RuleDraft | null;
+  steps?: AgentStep[];
+  engine?: string;
+  conversationId?: string;
+};
+type Exchange = { question: string; brief: Brief; steps?: AgentStep[]; intent?: string };
 // Rendered scrollback is capped so a long-running tab doesn't grow an
 // unbounded DOM list — the server-side memory itself independently caps at
 // a few turns (internal/ai/conversation.go), this is purely a display cap.
@@ -44,16 +63,13 @@ export function looksLikeDraft(question: string): boolean {
   return /\b(deny|block|drop|rate[- ]?limit|throttle|ban)\b/i.test(question);
 }
 
-type RuleDraft = {
-  understood: boolean;
-  confidence?: string;
-  kind?: string;
-  summary: string;
-  cli?: string;
-  warnings?: string[];
-  note?: string;
-  body?: Record<string, unknown>;
-};
+export function formatGraphSteps(steps: AgentStep[] | undefined): string {
+  if (!steps || steps.length === 0) return '';
+  return steps
+    .map((s) => (s.detail ? `${s.node}:${s.detail}` : s.node))
+    .join(' → ');
+}
+
 type Digest = {
   fingerprint: string;
   changed: boolean;
@@ -110,23 +126,19 @@ export default function AskNetra() {
     setErr('');
     try {
       if (!conversationId.current) conversationId.current = crypto.randomUUID();
-      const b = await api<Brief>('/api/v1/ai/ask', {
+      const res = await api<AgentResult>('/api/v1/ai/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: text, conversationId: conversationId.current }),
       });
-      setThread((prev) => [...prev, { question: text, brief: b }]);
+      const b = res.brief;
+      setThread((prev) => [...prev, { question: text, brief: b, steps: res.steps, intent: res.intent }]);
       setQuestion('');
-      if (looksLikeDraft(text)) {
-        try {
-          setDraft(await api<RuleDraft>('/api/v1/ai/draft', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question: text }),
-          }));
-        } catch {
-          setDraft(null);
-        }
+      if (res.draft && res.draft.understood) {
+        setDraft(res.draft);
+      } else if (looksLikeDraft(text)) {
+        // Agent ran draft and did not understand — still surface that.
+        setDraft(res.draft || null);
       } else {
         setDraft(null);
       }
@@ -156,6 +168,7 @@ export default function AskNetra() {
       <h3>Read-only brief from live aggregates.</h3>
       <p>
         Answers come from agent, health, and insights counters Netra already computed.
+        The question runs a read-only graph (classify → optional draft preview → synthesize).
         Nothing here flips enforce mode or applies policy.
       </p>
       <form className="toolbar ask-netra-form" onSubmit={onSubmit}>
@@ -217,6 +230,9 @@ export default function AskNetra() {
         return (
           <div className="ask-netra-answer" key={(b.conversationId || '') + i + b.generatedAt}>
             {ex.question && <p className="ask-netra-meta ask-netra-question">You asked: {ex.question}</p>}
+            {formatGraphSteps(ex.steps) && (
+              <p className="ask-netra-meta">Graph {ex.intent ? `(${ex.intent}) ` : ''}{formatGraphSteps(ex.steps)}</p>
+            )}
             <p>
               <span className={`severity-badge ${b.severity || 'info'}`}>{b.severity || 'info'}</span>
               {' '}

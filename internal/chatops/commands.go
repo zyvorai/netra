@@ -53,7 +53,7 @@ func helpText(allowMutations bool) string {
 	b.WriteString("`/netra baselines` – baseline age\n")
 	b.WriteString("`/netra lease` – enforce lease clock\n")
 	b.WriteString("`/netra dns` – DNS failures\n")
-	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same engine as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set). Remembers the last few turns in this channel, per user.\n")
+	b.WriteString("`/netra ask <question>` – ask Netra's AI layer about cluster health (same `/api/v1/ai/agent` graph as the web Ask Netra card; heuristic-only unless NETRA_AI_API_KEY is set). Remembers the last few turns in this channel, per user. Drafts are previews only.\n")
 	b.WriteString("`/netra forget` – clear this channel's Ask Netra conversation memory and start fresh\n")
 	if allowMutations {
 		b.WriteString("`/netra mode observe` / `/netra mode enforce [lease]` – switch fast-path mode (requires confirmation)\n")
@@ -215,9 +215,34 @@ type chatAskResponse struct {
 	Engine    string   `json:"engine"`
 }
 
-// askCommand answers a free-text question via the same POST /api/v1/ai/ask
-// endpoint the web "Ask Netra" card and netractl ai ask already use —
-// heuristic-only unless NETRA_AI_API_KEY is configured on the controller,
+// chatAgentResponse is POST /api/v1/ai/agent. Brief is nested; we also
+// accept the older flat /ai/ask shape so a mis-routed mock still renders.
+type chatAgentResponse struct {
+	chatAskResponse
+	Brief  chatAskResponse `json:"brief"`
+	Intent string          `json:"intent"`
+	Draft  *struct {
+		Understood bool   `json:"understood"`
+		Summary    string `json:"summary"`
+		CLI        string `json:"cli"`
+		Note       string `json:"note"`
+	} `json:"draft"`
+	Steps []struct {
+		Node   string `json:"node"`
+		Detail string `json:"detail"`
+	} `json:"steps"`
+}
+
+func (r chatAgentResponse) brief() chatAskResponse {
+	if r.Brief.Headline != "" || r.Brief.Summary != "" {
+		return r.Brief
+	}
+	return r.chatAskResponse
+}
+
+// askCommand answers a free-text question via POST /api/v1/ai/agent —
+// the same in-process NL graph the web Ask Netra card uses.
+// Heuristic-only unless NETRA_AI_API_KEY is configured on the controller,
 // same fallback as every other internal/ai consumer. Read-only: no
 // confirmation step, no allowMutations gate, empty actor (nothing to
 // audit-attribute for a question), matching status/health/audit's
@@ -235,17 +260,18 @@ func askCommand(ctx context.Context, c *Client, question, conversationKey string
 		reqBody["conversationId"] = conversationKey
 	}
 	body, _ := json.Marshal(reqBody)
-	out, status, err := c.Do(callCtx, "POST", "/api/v1/ai/ask", body, "")
+	out, status, err := c.Do(callCtx, "POST", "/api/v1/ai/agent", body, "")
 	if err != nil {
-		return fmt.Sprintf("Request to /api/v1/ai/ask failed: %v", err)
+		return fmt.Sprintf("Request to /api/v1/ai/agent failed: %v", err)
 	}
 	if status < 200 || status >= 300 {
-		return fmt.Sprintf("/api/v1/ai/ask returned HTTP %d:\n```%s```", status, truncate(string(out), 800))
+		return fmt.Sprintf("/api/v1/ai/agent returned HTTP %d:\n```%s```", status, truncate(string(out), 800))
 	}
-	var brief chatAskResponse
-	if err := json.Unmarshal(out, &brief); err != nil {
+	var agent chatAgentResponse
+	if err := json.Unmarshal(out, &agent); err != nil {
 		return fmt.Sprintf("Could not parse the AI response: %v", err)
 	}
+	brief := agent.brief()
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "*%s* _(%s)_\n", brief.Headline, brief.Severity)
@@ -270,6 +296,12 @@ func askCommand(ctx context.Context, c *Client, question, conversationKey string
 	}
 	for _, step := range brief.NextSteps {
 		fmt.Fprintf(&b, "→ %s\n", step)
+	}
+	if agent.Draft != nil && agent.Draft.Understood {
+		fmt.Fprintf(&b, "\n_Rule preview (not applied):_ %s\n", agent.Draft.Summary)
+		if agent.Draft.CLI != "" {
+			fmt.Fprintf(&b, "`%s`\n", agent.Draft.CLI)
+		}
 	}
 	if brief.Engine != "" {
 		fmt.Fprintf(&b, "_engine: %s_", brief.Engine)

@@ -79,7 +79,7 @@ func TestDispatchTeamsActivityModeReturnsConfirmToken(t *testing.T) {
 func TestDispatchTeamsActivitySendsStableConversationIDPerConversationAndUser(t *testing.T) {
 	var gotConversationIDs []string
 	c := fakeControllerClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/ai/ask" {
+		if r.URL.Path != "/api/v1/ai/agent" {
 			w.Write([]byte(`{}`))
 			return
 		}

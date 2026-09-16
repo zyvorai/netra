@@ -138,8 +138,8 @@ The Overview page hosts a read-only **Ask Netra** card
 (`web/src/components/AskNetra.tsx`).
 
 - Loads `GET /api/v1/ai/brief` on mount
-- Submits `POST /api/v1/ai/ask` from the question box or a suggestion chip
-- Shows severity, headline, findings, and next steps
+- Submits `POST /api/v1/ai/agent` from the question box or a suggestion chip (classify → optional draft preview → synthesize; `/ai/ask` remains for one-shot callers)
+- Shows severity, headline, findings, next steps, and the graph step trace
 - Surfaces whether the controller is heuristic-only or has an LLM rewrite configured
 - Contains no enforce / apply / rule-edit controls
 - Loads live suggestion chips from `/api/v1/ai/suggestions`
@@ -150,7 +150,7 @@ The nav bar (`web/src/components/DigestChip.tsx`) shows a small severity/fingerp
 
 Every **Explain** popover (`web/src/components/ExplainFinding.tsx`, on Health/Drops/Path/Insights/L7/Explain findings) can additionally try to draft a rule from that finding: it regex-extracts an IP, CIDR, or DNS/SNI name from the finding's kind/subject/message and, if found, offers a "Draft rule from this" button that calls `POST /api/v1/ai/draft` — same preview-only endpoint the Ask Netra card and `netractl ai draft` use, never applies anything.
 
-`/netra ask <question>` in Slack or Microsoft Teams (`internal/chatops`, see [`docs/chatops.md`](chatops.md)) is a further surface for the same `POST /api/v1/ai/ask` endpoint the Ask Netra card uses — no new boundary, same heuristic/LLM fallback, read-only.
+`/netra ask <question>` in Slack or Microsoft Teams (`internal/chatops`, see [`docs/chatops.md`](chatops.md)) is a further surface for the same `POST /api/v1/ai/agent` graph the Ask Netra card uses — no new boundary, same heuristic/LLM fallback, read-only. A understood draft is appended as a preview, never applied.
 
 ## CLI
 

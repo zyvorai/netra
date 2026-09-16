@@ -38,7 +38,7 @@ Or directly via environment variables on `netrad`:
 | `/netra status` | Controller status — read-only, calls `GET /api/v1/status`. |
 | `/netra health` | Top 5 network-health anomalies — `GET /api/v1/ebpf/health?limit=5`. |
 | `/netra audit` | 5 most recent audit events — `GET /api/v1/audit?limit=5`. |
-| `/netra ask <question>` | Ask Netra's AI layer about cluster health — same engine (and same `POST /api/v1/ai/ask` endpoint) as the web "Ask Netra" card, heuristic-only unless `NETRA_AI_API_KEY` is set. Read-only, no confirmation. An empty question (`/netra ask` with no text) still replies with a general cluster brief. Remembers the last few turns per channel per user — see "Conversation memory" below. |
+| `/netra ask <question>` | Ask Netra's AI layer about cluster health — same in-process graph (`POST /api/v1/ai/agent`) as the web "Ask Netra" card, heuristic-only unless `NETRA_AI_API_KEY` is set. Read-only, no confirmation. An empty question (`/netra ask` with no text) still replies with a general cluster brief. Remembers the last few turns per channel per user — see "Conversation memory" below. A deny/rate/allow sentence may include a preview-only draft. |
 | `/netra forget` | Clear this channel's Ask Netra conversation memory and start fresh. Read-only, no confirmation. |
 | `/netra mode observe` | Switch the fast-path to observe mode. **Requires confirmation.** |
 | `/netra mode enforce [lease]` | Switch to enforce mode for `lease` (default `15m`, auto-reverts to observe on expiry). **Requires confirmation.** |
