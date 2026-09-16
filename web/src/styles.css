@@ -1088,6 +1088,45 @@ code {
 .flowrow.audit {
   grid-template-columns: minmax(120px, 1.1fr) minmax(110px, 0.9fr) minmax(110px, 0.9fr) minmax(0, 1.4fr);
 }
+.flowhead.capture,
+.flowrow.capture {
+  grid-template-columns: minmax(70px, 90px) minmax(60px, 80px) minmax(60px, 70px) minmax(50px, 60px) minmax(0, 1fr);
+  cursor: pointer;
+}
+.flowrow.capture:hover { background: rgba(255, 255, 255, 0.04); }
+.proto-tcp { color: var(--accent-green); }
+.proto-udp { color: var(--accent-cyan); }
+.proto-icmp,
+.proto-icmpv6 { color: var(--accent-amber); }
+.proto-other { color: var(--terminal-text-dim); }
+.dir-ingress { color: var(--accent-cyan); }
+.dir-egress { color: var(--accent-purple); }
+/* Wireshark-style layered packet detail, expanded under a clicked
+   .flowrow.capture — one block per protocol layer, each a label/value
+   list, followed by a raw hex dump of the frame's first bytes. */
+.packetdetail {
+  margin: 6px 0 10px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+.packetdetail .layer { margin-bottom: 10px; }
+.packetdetail .layer:last-of-type { margin-bottom: 0; }
+.packetdetail .layer > b { display: block; color: var(--terminal-text); margin-bottom: 4px; }
+.packetdetail .layer > div { display: flex; gap: 8px; line-height: 1.5; }
+.packetdetail .layer > div > span:first-child { min-width: 160px; color: var(--terminal-text-dim); }
+.packetdetail .layer > div > span:last-child { color: var(--terminal-text); overflow-wrap: anywhere; }
+.packetdetail pre {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: var(--terminal-text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 .flowhead.obs,
 .flowrow.obs {
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1799,6 +1838,8 @@ code {
   .flowrow.deps,
   .flowhead.rules,
   .flowrow.rules,
+  .flowhead.capture,
+  .flowrow.capture,
   .datahead,
   .datarow,
   .datahead.ebpf,

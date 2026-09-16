@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decodeL3L4, hexDump } from './packetDecode';
+import { decodeL3L4, decodeDetailed, hexDump } from './packetDecode';
 
 function ethIPv4TCP(srcIP: [number, number, number, number], dstIP: [number, number, number, number], srcPort: number, dstPort: number, flags: number): Uint8Array {
   const buf = new Uint8Array(14 + 20 + 20);
@@ -58,6 +58,34 @@ describe('decodeL3L4', () => {
     const arp = new Uint8Array(14);
     arp[12] = 0x08; arp[13] = 0x06; // ARP
     expect(decodeL3L4(arp)).toBeNull();
+  });
+});
+
+describe('decodeDetailed', () => {
+  it('breaks an IPv4 TCP frame into Ethernet/IP/TCP layers', () => {
+    const layers = decodeDetailed(ethIPv4TCP([10, 0, 0, 5], [10, 0, 0, 9], 51413, 443, 0x12));
+    const names = layers.map((l) => l.name);
+    expect(names).toEqual(['Frame', 'Ethernet II', 'Internet Protocol Version 4', 'Transmission Control Protocol']);
+    const ip = layers.find((l) => l.name === 'Internet Protocol Version 4')!;
+    expect(ip.fields).toContainEqual({ label: 'Source', value: '10.0.0.5' });
+    expect(ip.fields).toContainEqual({ label: 'Destination', value: '10.0.0.9' });
+    const tcp = layers.find((l) => l.name === 'Transmission Control Protocol')!;
+    expect(tcp.fields).toContainEqual({ label: 'Source Port', value: '51413' });
+    expect(tcp.fields).toContainEqual({ label: 'Flags', value: 'SYN,ACK' });
+  });
+
+  it('breaks an IPv4 UDP frame into Ethernet/IP/UDP layers', () => {
+    const layers = decodeDetailed(ethIPv4UDP([10, 0, 0, 5], [8, 8, 8, 8], 53000, 53));
+    expect(layers.map((l) => l.name)).toEqual(['Frame', 'Ethernet II', 'Internet Protocol Version 4', 'User Datagram Protocol']);
+    const udp = layers.find((l) => l.name === 'User Datagram Protocol')!;
+    expect(udp.fields).toContainEqual({ label: 'Destination Port', value: '53' });
+  });
+
+  it('stops at Frame/Ethernet for a truncated or unknown-ethertype frame', () => {
+    expect(decodeDetailed(new Uint8Array(4)).map((l) => l.name)).toEqual(['Frame']);
+    const arp = new Uint8Array(14);
+    arp[12] = 0x08; arp[13] = 0x06;
+    expect(decodeDetailed(arp).map((l) => l.name)).toEqual(['Frame', 'Ethernet II']);
   });
 });
 

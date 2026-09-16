@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api, wsURL } from '../api';
 import CaptureHistory from '../components/CaptureHistory';
-import { decodeL3L4, hexDump } from '../lib/packetDecode';
+import TerminalFrame from '../components/TerminalFrame';
+import { decodeDetailed, decodeL3L4, hexDump } from '../lib/packetDecode';
+
+const PROTO_CLASS: Record<number, string> = { 1: 'proto-icmp', 6: 'proto-tcp', 17: 'proto-udp', 58: 'proto-icmpv6' };
 
 type CaptureSpec = {
   node: string;
@@ -305,22 +308,48 @@ export default function Capture() {
           <label>Search <input value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} placeholder="10.0.0.5:443" /></label>
           <button className="btn-secondary" disabled={framesRef.current.length === 0} onClick={download}>Download .pcap ({framesRef.current.length} packets)</button>
         </div>
-        <div className="list">
-          {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
-          {rows.length > 0 && filteredIdx.length === 0 && <p className="empty-state">No packets match this filter.</p>}
-          {filteredIdx.slice().reverse().map((i) => {
-            const f = rows[i];
-            const d = decoded[i];
-            return (
-              <div className="agent wide" key={i} onClick={() => setExpanded(expanded === i ? null : i)} role="button" tabIndex={0}>
-                <b>{PROTOCOL_NAMES[f.protocol] || f.protocol}</b>
-                <span>{f.direction === 1 ? 'ingress' : 'egress'} · {f.origLen}B{f.origLen !== f.data.byteLength ? ` (${f.data.byteLength}B captured)` : ''}{d ? ` · ${d.summary}` : ''}</span>
-                <small>{new Date(Number(f.observedAtUnixNano / 1_000_000n)).toLocaleTimeString()}</small>
-                {expanded === i && <pre>{hexDump(f.data)}</pre>}
-              </div>
-            );
-          })}
-        </div>
+        {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
+        {rows.length > 0 && filteredIdx.length === 0 && <p className="empty-state">No packets match this filter.</p>}
+        {rows.length > 0 && filteredIdx.length > 0 && (
+          <TerminalFrame title={`capture · ${watching || 'no session'}`}>
+            <div className="flowhead capture">
+              <span>TIME</span>
+              <span>PROTO</span>
+              <span>DIR</span>
+              <span>LEN</span>
+              <span>ENDPOINTS</span>
+            </div>
+            {filteredIdx.slice().reverse().map((i) => {
+              const f = rows[i];
+              const d = decoded[i];
+              const captured = f.origLen !== f.data.byteLength ? ` (${f.data.byteLength}B captured)` : '';
+              return (
+                <Fragment key={i}>
+                  <div className="flowrow capture" onClick={() => setExpanded(expanded === i ? null : i)} role="button" tabIndex={0}>
+                    <span>{new Date(Number(f.observedAtUnixNano / 1_000_000n)).toLocaleTimeString()}</span>
+                    <span className={PROTO_CLASS[f.protocol] || 'proto-other'}>{PROTOCOL_NAMES[f.protocol] || f.protocol}</span>
+                    <span className={f.direction === 1 ? 'dir-ingress' : 'dir-egress'}>{f.direction === 1 ? '← in' : 'out →'}</span>
+                    <span>{f.origLen}B{captured}</span>
+                    <span>{d ? d.summary : '—'}</span>
+                  </div>
+                  {expanded === i && (
+                    <div className="packetdetail">
+                      {decodeDetailed(f.data).map((layer) => (
+                        <div className="layer" key={layer.name}>
+                          <b>{layer.name}</b>
+                          {layer.fields.map((field) => (
+                            <div key={field.label}><span>{field.label}</span><span>{field.value}</span></div>
+                          ))}
+                        </div>
+                      ))}
+                      <pre>{hexDump(f.data, 128)}</pre>
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+          </TerminalFrame>
+        )}
       </section>
 
       <CaptureHistory onRepeat={repeat} />

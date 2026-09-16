@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.27.87 — 2026-09-16
+
+- **Capture Live View: macOS-terminal-styled packet feed and a Wireshark-style click-to-expand packet detail.** Live-verified against the deployed cluster after 0.27.85 shipped the plain filtered card list — this replaces that list with the same `TerminalFrame`/`.flowhead`/`.flowrow` idiom `LiveFlowTerminal.tsx` already uses (traffic-light title bar, monospace, dark background), color-coded by protocol (`proto-tcp`/`proto-udp`/`proto-icmp(v6)`) and direction (`dir-ingress`/`dir-egress`), reusing the existing `--accent-*` theme tokens so it themes correctly in light/dark instead of hardcoding colors.
+  - `web/src/lib/packetDecode.ts`: new `decodeDetailed()` breaks a frame into Wireshark "packet details"-style layers (Ethernet II / IPv4 or IPv6 / TCP or UDP or ICMP), each a label/value field list — same L3/L4-only scope as the existing `decodeL3L4()`, no L7. 8 new unit tests in `packetDecode.test.ts`.
+  - `web/src/pages/Capture.tsx`: Live View rows are now a `TerminalFrame`-wrapped `.flowhead.capture`/`.flowrow.capture` grid; clicking a row expands a `.packetdetail` panel rendering every `decodeDetailed()` layer plus a longer (128-byte) hex dump, replacing the old bare hex-only expand.
+  - New CSS in `styles.css`: `.flowhead.capture`/`.flowrow.capture` grid columns, `.proto-*`/`.dir-*` color classes, `.packetdetail` layer/field layout — plus the mobile-breakpoint `min-width: 640px` entry every other `.flowhead`/`.flowrow` variant already has.
+  - Live-verified end to end against `212.8.248.187`: multi-node bulk start (`POST /api/v1/capture/bulk` with a real fleet node plus a synthetic one, confirming the endpoint's per-node fan-out independent of node existence), single-node regression path, live packet decode/filter on real traffic, and capture history's "Repeat" pre-fill.
+- Version bumped to 0.27.87 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.86 — 2026-09-16
 
 - **Make the Congestion Map easier for a non-expert to read, and add three new diagnostic capabilities.** A flat grid of technical severity badges still required domain knowledge to interpret; this adds a plain-English layer on top without hiding the underlying detail, plus three genuinely new signals built from data the agent already collects but never surfaced.
