@@ -11,6 +11,12 @@
 #   ./scripts/deploy-remote.sh user@10.0.1.5 --k8s
 #   ./scripts/deploy-container.sh user@10.0.1.5
 #
+# NETRA_REMOTE_SUBDIR overrides where the remote checkout lives, relative to
+# the target user's $HOME (default: .deployments/netra). Set it to a path
+# outside .deployments/ on hosts that also run other projects' deploy
+# scripts syncing into that shared parent with `rsync --delete` — a
+# sibling project's delete-sync can otherwise wipe netra's checkout mid-run.
+#
 # Netra runs on top of Cilium; it does not replace the CNI.
 # UI/API default NodePort/host access: :30870
 set -euo pipefail
@@ -27,7 +33,7 @@ POSITIONAL=()
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 
 usage() {
-  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -88,7 +94,7 @@ AGENT_XDP_INTERFACES_LOCAL="${NETRA_AGENT_XDP_INTERFACES:-}"
 
 ssh_host() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 REMOTE_HOME="$(ssh_host 'printf %s "$HOME"')"
-REMOTE_DIR="${REMOTE_HOME}/.deployments/netra"
+REMOTE_DIR="${REMOTE_HOME}/${NETRA_REMOTE_SUBDIR:-.deployments/netra}"
 
 log() { printf '[netra-deploy] %s\n' "$*"; }
 
