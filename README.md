@@ -215,7 +215,7 @@ When enabled, the existing integrations remain available:
 - Kubernetes server-side dry-run;
 - one-shot durable preflight receipts;
 - CNP revision history and guarded rollback;
-- native Hubble Relay gRPC flow streaming and drop explanation.
+- native Hubble Relay gRPC flow streaming and drop explanation, with each flow row colored by verdict (forwarded/dropped/audit) and direction.
 
 Cilium RBAC is not rendered by Helm unless `cilium.enabled=true`. Hubble is disabled by default with `hubble.enabled=false`.
 

@@ -16,6 +16,11 @@ DNS, SNI, rate limit (independent PPS and/or BPS caps on the same rule —
 see [Byte-rate (BPS) cap](#byte-rate-bps-cap)), plus a synthetic row each
 for the DDoS shield (when its mode isn't `off`) and NetPol (when enabled).
 
+The TYPE column is color-coded by what the rule actually does: red for a
+deny rule (the bare types above, plus NetPol/NetPol V2), green for an
+`allow-*` exception, amber for `rate`/`shield` (a throttle rather than a
+hard allow/deny) — see `ruleTypeClass()` in `web/src/lib/ebpfRules.ts`.
+
 Every real rule (the 18 flat types — not the Shield/NetPol synthetic rows)
 has a **stable ID** (e.g. `cidr-3`) assigned the first time it's created,
 tracked in a server-side index kept separate from `EBPFFastPathConfig`
