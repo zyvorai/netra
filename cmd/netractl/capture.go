@@ -8,11 +8,13 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/zyvorai/netra/internal/models"
 )
 
 func captureCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s] | capture stop NODE | capture status")
+		return fmt.Errorf("capture start NODE [--backend ebpf|afpacket] [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s] | capture stop NODE | capture status")
 	}
 	switch args[0] {
 	case "status":
@@ -31,10 +33,11 @@ func captureCmd(args []string) error {
 
 func captureStartCmd(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]")
+		return fmt.Errorf("capture start NODE [--backend ebpf|afpacket] [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]")
 	}
 	node := args[0]
 	body := struct {
+		Backend         string `json:"backend,omitempty"`
 		Protocol        string `json:"protocol,omitempty"`
 		Host            string `json:"host,omitempty"`
 		Port            uint16 `json:"port,omitempty"`
@@ -44,6 +47,16 @@ func captureStartCmd(args []string) error {
 	}{}
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
+		case "--backend":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--backend needs a value")
+			}
+			backend, err := models.NormalizeCaptureBackend(args[i])
+			if err != nil {
+				return err
+			}
+			body.Backend = backend
 		case "--protocol":
 			i++
 			if i >= len(args) {

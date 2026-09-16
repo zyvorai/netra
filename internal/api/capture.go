@@ -95,6 +95,7 @@ func (s *Server) captureStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x struct {
+		Backend         string `json:"backend"`
 		Protocol        string `json:"protocol"`
 		Host            string `json:"host"`
 		Port            uint16 `json:"port"`
@@ -106,8 +107,17 @@ func (s *Server) captureStart(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, err.Error())
 		return
 	}
+	backend, err := models.NormalizeCaptureBackend(strings.ToLower(strings.TrimSpace(x.Backend)))
+	if err != nil {
+		errorJSON(w, 400, err.Error())
+		return
+	}
 	x.Protocol = strings.ToLower(strings.TrimSpace(x.Protocol))
 	x.Host = strings.TrimSpace(x.Host)
+	// Applies identically to both backends: a promiscuous raw-socket
+	// AF_PACKET capture has the same "sees all host-visible traffic on the
+	// interface" blast radius as the eBPF path, so this rule is not
+	// eBPF-specific and must never become so.
 	if x.Protocol == "" && x.Host == "" && x.Port == 0 {
 		errorJSON(w, 400, "at least one of protocol, host, or port is required — unfiltered whole-interface captures are not allowed")
 		return
@@ -131,7 +141,7 @@ func (s *Server) captureStart(w http.ResponseWriter, r *http.Request) {
 		maxPPS = defaultCaptureMaxPPS
 	}
 	spec := models.CaptureSpec{
-		Node: node, Protocol: x.Protocol, Host: x.Host, Port: x.Port, SnapLen: x.SnapLen, MaxPPS: maxPPS,
+		Node: node, Backend: backend, Protocol: x.Protocol, Host: x.Host, Port: x.Port, SnapLen: x.SnapLen, MaxPPS: maxPPS,
 		ExpiresAt: time.Now().UTC().Add(duration),
 	}
 	spec = s.store.SetCapture(spec, actor(r))

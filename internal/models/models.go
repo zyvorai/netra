@@ -4,6 +4,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -158,7 +159,12 @@ type EBPFFastPathConfig struct {
 // that field; SnapLen 0 means a full-frame capture (capped at the kernel
 // side's fixed NETRA_CAP_MAX_LEN).
 type CaptureSpec struct {
-	Node      string    `json:"node"`
+	Node string `json:"node"`
+	// Backend selects the capture engine: "" or "ebpf" (default) uses the
+	// in-kernel TCX observer (bpf/netra_capture.c); "afpacket" uses a
+	// userspace AF_PACKET raw socket (internal/afcapture) instead — no BPF
+	// object required. See docs/capture.md for the tradeoffs.
+	Backend   string    `json:"backend,omitempty"`
 	Protocol  string    `json:"protocol,omitempty"`
 	Host      string    `json:"host,omitempty"`
 	Port      uint16    `json:"port,omitempty"`
@@ -167,6 +173,27 @@ type CaptureSpec struct {
 	Requestor string    `json:"requestor,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+const (
+	CaptureBackendEBPF     = "ebpf"
+	CaptureBackendAFPacket = "afpacket"
+)
+
+// NormalizeCaptureBackend maps an API/CLI/MCP-supplied backend string to its
+// canonical form. Empty string is a valid input meaning "use the default"
+// (eBPF) — this is the single source of truth for the enum, used by both
+// internal/api's request validation and internal/agent's dispatch, so the
+// two can never disagree about what values are legal.
+func NormalizeCaptureBackend(s string) (string, error) {
+	switch s {
+	case "", CaptureBackendEBPF:
+		return CaptureBackendEBPF, nil
+	case CaptureBackendAFPacket:
+		return CaptureBackendAFPacket, nil
+	default:
+		return "", fmt.Errorf("unknown capture backend %q (want %q or %q)", s, CaptureBackendEBPF, CaptureBackendAFPacket)
+	}
 }
 
 // CaptureStatusResponse lists every node with an active capture session —

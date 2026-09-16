@@ -3,6 +3,7 @@ import { api, wsURL } from '../api';
 
 type CaptureSpec = {
   node: string;
+  backend?: string;
   protocol?: string;
   host?: string;
   port?: number;
@@ -65,6 +66,7 @@ export default function Capture() {
   const [status, setStatus] = useState<CaptureStatus>();
   const [nodes, setNodes] = useState<string[]>([]);
   const [node, setNode] = useState('');
+  const [backend, setBackend] = useState('');
   const [protocol, setProtocol] = useState('');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
@@ -110,6 +112,7 @@ export default function Capture() {
     if (!node) { setErr('node is required'); return; }
     if (!protocol && !host && !port) { setErr('at least one of protocol, host, or port is required'); return; }
     const body: Record<string, unknown> = {};
+    if (backend) body.backend = backend;
     if (protocol) body.protocol = protocol;
     if (host) body.host = host;
     if (port) body.port = Number(port);
@@ -155,7 +158,12 @@ export default function Capture() {
       <section className="card span3">
         <p className="eyebrow">PACKET CAPTURE</p>
         <h3>Start a capture</h3>
-        <p>Full packet bytes by default, filtered and time-bounded (max 5 minutes). Standalone, fail-open eBPF observer — never affects the datapath verdict.</p>
+        <p>
+          Full packet bytes by default, filtered and time-bounded (max 5 minutes).{' '}
+          {backend === 'afpacket'
+            ? 'AF_PACKET mode: a pure userspace raw-socket capture, no eBPF object dependency.'
+            : 'Standalone, fail-open eBPF observer — never affects the datapath verdict.'}
+        </p>
         <div className="toolbar">
           <label>
             Node{' '}
@@ -167,6 +175,13 @@ export default function Capture() {
             ) : (
               <input value={node} onChange={(e) => setNode(e.target.value)} placeholder="node-1" />
             )}
+          </label>
+          <label>
+            Backend{' '}
+            <select value={backend} onChange={(e) => setBackend(e.target.value)}>
+              <option value="">eBPF (default)</option>
+              <option value="afpacket">AF_PACKET</option>
+            </select>
           </label>
           <label>
             Protocol{' '}
@@ -193,7 +208,7 @@ export default function Capture() {
           {active.map((c) => (
             <div className="agent wide" key={c.node}>
               <b>{c.node}</b>
-              <span>{c.protocol || 'any'}{c.host ? ` · ${c.host}` : ''}{c.port ? `:${c.port}` : ''}</span>
+              <span>{c.protocol || 'any'}{c.host ? ` · ${c.host}` : ''}{c.port ? `:${c.port}` : ''}{c.backend === 'afpacket' ? ' · AF_PACKET' : ''}</span>
               <small>started by {c.requestor || 'unknown'}, expires {c.expiresAt ? new Date(c.expiresAt).toLocaleTimeString() : '—'}</small>
               <div className="toolbar">
                 <button className="btn-secondary" onClick={() => watch(c.node)}>Watch</button>

@@ -51,3 +51,15 @@ func TestCaptureStartCmdMissingFlagValue(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestCaptureStartCmdBackendMissingValue(t *testing.T) {
+	if err := captureCmd([]string{"start", "node-1", "--backend"}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCaptureStartCmdBackendUnknownValue(t *testing.T) {
+	if err := captureCmd([]string{"start", "node-1", "--backend", "bogus"}); err == nil {
+		t.Fatal("expected error")
+	}
+}

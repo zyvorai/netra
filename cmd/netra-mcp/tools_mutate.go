@@ -34,6 +34,7 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 			description: "Start a packet-capture session on one node. Captures full packet bytes by default (not just headers) — captured traffic can contain cleartext application secrets (auth headers, tokens, cookies), so only use this when you specifically need to inspect wire traffic, and prefer narrowing protocol/host/port over an unfiltered capture (at least one filter field is required). Duration is capped at 5 minutes and auto-expires; live packets stream to the Capture dashboard page, not through this tool.",
 			schema: objSchema(map[string]any{
 				"node":            strProp("Kubernetes node name to capture on."),
+				"backend":         enumProp("Capture engine. eBPF (default, omit to use it): in-kernel TCX observer, in-kernel filtering/rate-limiting, requires the packet-capture BPF object to be loaded on the node. AF_PACKET: pure userspace raw-socket capture, no BPF object dependency, works anywhere the interface is visible in the pod's network namespace. Requesting a backend unavailable on the target node surfaces an error rather than silently falling back.", "ebpf", "afpacket"),
 				"protocol":        enumProp("Filter to one L4 protocol. Omit for any.", "tcp", "udp", "icmp", "icmpv6"),
 				"host":            strProp("Filter to packets with this IPv4/IPv6 address as either source or destination. Omit for any host."),
 				"port":            intProp("Filter to packets with this port as either source or destination. Omit for any port."),

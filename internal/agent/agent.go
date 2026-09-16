@@ -29,6 +29,7 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/sys/unix"
 
+	"github.com/zyvorai/netra/internal/afcapture"
 	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
 	"github.com/zyvorai/netra/internal/dropreason"
@@ -84,6 +85,15 @@ type Agent struct {
 	captureCollection *ebpf.Collection
 	activeCapture     *models.CaptureSpec
 	captureCancel     context.CancelFunc
+	// captureBackendErr records why the most recent applyCapture failed to
+	// start the requested backend (e.g. "afpacket:CAP_NET_RAW", "ebpf:
+	// capture_spec map unavailable"), or "" when the active/most recent
+	// request succeeded (or none was ever made). Surfaced to the operator
+	// by folding it into AgentReport.MissingMaps — see that field's use in
+	// syncOnce — rather than inventing a second node-health channel, since
+	// this is the same "requested capability unavailable on this node"
+	// category that field already covers.
+	captureBackendErr string
 	events            chan models.FastPathEvent
 	hooks             []string
 	lastRevision      uint64
@@ -2323,15 +2333,25 @@ func (a *Agent) readICMPTypeStats(mapName string) ([]models.NamedCount, error) {
 	return out, nil
 }
 
+// missingMaps also folds in a.captureBackendErr when set — a capture
+// backend explicitly requested by an operator (either "ebpf" or
+// "afpacket") that this node couldn't actually provide is the same
+// "requested capability unavailable on this node" category this field
+// already reports for missing fast-path maps, so it's surfaced the same
+// way rather than inventing a second node-health channel.
 func (a *Agent) missingMaps() []string {
-	if a.collection == nil {
-		return append([]string(nil), mapNames...)
-	}
 	var out []string
-	for _, n := range mapNames {
-		if a.collection.Maps[n] == nil {
-			out = append(out, n)
+	if a.collection == nil {
+		out = append(out, mapNames...)
+	} else {
+		for _, n := range mapNames {
+			if a.collection.Maps[n] == nil {
+				out = append(out, n)
+			}
 		}
+	}
+	if a.captureBackendErr != "" {
+		out = append(out, a.captureBackendErr)
 	}
 	return out
 }
@@ -3160,11 +3180,16 @@ func buildCaptureSpecValue(spec models.CaptureSpec) (capture.SpecValue, error) {
 }
 
 // applyCapture reconciles the one desired capture session (nil = none) for
-// this node into the capture_spec BPF map and the agent→controller
-// streaming connection. Called unconditionally on every syncAndReport tick
-// (see there for why). A no-op when desired is unchanged from
-// a.activeCapture, so a steady-state capture doesn't restart its stream
-// every 3 seconds.
+// this node into either the eBPF capture_spec map or an AF_PACKET session
+// (internal/afcapture), and the agent→controller streaming connection.
+// Called unconditionally on every syncAndReport tick (see there for why).
+// A no-op when desired is unchanged from a.activeCapture, so a steady-state
+// capture doesn't restart its stream every 3 seconds.
+//
+// NETRA_CAPTURE (see attachCapture) only gates whether the eBPF capture
+// object/collection/links are loaded at all; it has no effect on
+// backend: "afpacket" sessions, which need no BPF object whatsoever, so
+// the capture_spec-map-unavailable guard below must never apply to them.
 func (a *Agent) applyCapture(ctx context.Context, desired *models.CaptureSpec) error {
 	if desired == nil {
 		if a.activeCapture == nil {
@@ -3172,6 +3197,7 @@ func (a *Agent) applyCapture(ctx context.Context, desired *models.CaptureSpec) e
 		}
 		a.stopCaptureStream()
 		a.activeCapture = nil
+		a.captureBackendErr = ""
 		if m := a.captureMap("capture_spec"); m != nil {
 			return m.Put(uint32(0), capture.SpecValue{})
 		}
@@ -3180,24 +3206,33 @@ func (a *Agent) applyCapture(ctx context.Context, desired *models.CaptureSpec) e
 	if a.activeCapture != nil && *a.activeCapture == *desired {
 		return nil
 	}
-	m := a.captureMap("capture_spec")
-	if m == nil {
-		return fmt.Errorf("capture_spec map unavailable (packet-capture engine not attached on this node)")
-	}
 	value, err := buildCaptureSpecValue(*desired)
 	if err != nil {
 		return err
 	}
-	if err := m.Put(uint32(0), value); err != nil {
+	backendName, err := models.NormalizeCaptureBackend(desired.Backend)
+	if err != nil {
 		return err
 	}
-	if rate := a.captureMap("capture_rate"); rate != nil {
-		_ = rate.Put(uint32(0), capture.RateValue{}) // fresh counters for the new session
+	if backendName == models.CaptureBackendEBPF {
+		m := a.captureMap("capture_spec")
+		if m == nil {
+			a.captureBackendErr = "ebpf:capture_spec map unavailable"
+			return fmt.Errorf("capture_spec map unavailable (packet-capture engine not attached on this node)")
+		}
+		if err := m.Put(uint32(0), value); err != nil {
+			return err
+		}
+		if rate := a.captureMap("capture_rate"); rate != nil {
+			_ = rate.Put(uint32(0), capture.RateValue{}) // fresh counters for the new session
+		}
 	}
 	a.stopCaptureStream() // in case this is a mid-flight filter change, not a fresh start
 	d := *desired
+	if err := a.startCaptureStream(ctx, d, value); err != nil {
+		return err
+	}
 	a.activeCapture = &d
-	a.startCaptureStream(ctx)
 	return nil
 }
 
@@ -3208,14 +3243,113 @@ func (a *Agent) captureMap(name string) *ebpf.Map {
 	return a.captureCollection.Maps[name]
 }
 
-func (a *Agent) startCaptureStream(parentCtx context.Context) {
-	if a.captureMap("capture_events") == nil {
-		a.log.Warn("capture requested but capture_events map unavailable")
-		return
+// captureBackend is implemented once per capture backend — the eBPF
+// ringbuf path (ringbufCaptureBackend, below) and internal/afcapture's
+// *Session both satisfy it already, with no adapter needed for the latter.
+// runCaptureStream's WS-dial/encode/write loop is backend-agnostic and
+// shared: only frame production differs between backends.
+type captureBackend interface {
+	Frames() <-chan capture.Frame
+	Close() error
+}
+
+// ringbufCaptureBackend adapts bpf/netra_capture.c's capture_events
+// ringbuf.Reader to the captureBackend shape — this is the existing eBPF
+// path's frame production, extracted essentially verbatim from what used
+// to be runCaptureStream's own read loop, so the already-shipped,
+// already-bug-fixed (v0.27.71) WS-streaming logic in runCaptureStream
+// itself stays untouched by this refactor.
+type ringbufCaptureBackend struct {
+	reader *ringbuf.Reader
+	frames chan capture.Frame
+	log    *slog.Logger
+}
+
+func newRingbufCaptureBackend(m *ebpf.Map, log *slog.Logger) (*ringbufCaptureBackend, error) {
+	reader, err := ringbuf.NewReader(m)
+	if err != nil {
+		return nil, err
 	}
+	b := &ringbufCaptureBackend{reader: reader, frames: make(chan capture.Frame, 256), log: log}
+	go b.run()
+	return b, nil
+}
+
+func (b *ringbufCaptureBackend) run() {
+	defer close(b.frames)
+	for {
+		record, err := b.reader.Read()
+		if err != nil {
+			if !errors.Is(err, ringbuf.ErrClosed) {
+				b.log.Warn("read capture ring buffer", "error", err)
+			}
+			return
+		}
+		ev, err := capture.DecodeRingbufRecord(record.RawSample)
+		if err != nil {
+			continue
+		}
+		b.frames <- capture.Frame{
+			ObservedAtUnixNano: time.Now().UnixNano(),
+			OrigLen:            ev.OrigLen,
+			Direction:          ev.Direction,
+			Family:             ev.Family,
+			Protocol:           ev.Protocol,
+			Data:               ev.Data,
+		}
+	}
+}
+
+func (b *ringbufCaptureBackend) Frames() <-chan capture.Frame { return b.frames }
+func (b *ringbufCaptureBackend) Close() error                 { return b.reader.Close() }
+
+// startCaptureStream launches the streaming goroutine for the given
+// backend and desired spec's already-normalized Backend field.
+// NETRA_CAPTURE (see attachCapture) only gates whether the eBPF capture
+// object/collection/links are loaded at all; it has no effect on
+// backend: "afpacket" sessions, which need no BPF object whatsoever — see
+// applyCapture's own doc comment for the same cross-reference.
+func (a *Agent) startCaptureStream(parentCtx context.Context, desired models.CaptureSpec, value capture.SpecValue) error {
 	ctx, cancel := context.WithCancel(parentCtx)
+	backendName, err := models.NormalizeCaptureBackend(desired.Backend)
+	if err != nil {
+		cancel()
+		return err
+	}
+	var be captureBackend
+	switch backendName {
+	case models.CaptureBackendAFPacket:
+		if !afcapture.Available() {
+			cancel()
+			a.captureBackendErr = "afpacket:CAP_NET_RAW"
+			return fmt.Errorf("AF_PACKET capture unavailable on this node (CAP_NET_RAW probe failed)")
+		}
+		sess, err := afcapture.Open(ctx, a.interfaces, value)
+		if err != nil {
+			cancel()
+			a.captureBackendErr = "afpacket:" + err.Error()
+			return err
+		}
+		be = sess
+	default: // "ebpf"
+		m := a.captureMap("capture_events")
+		if m == nil {
+			cancel()
+			a.captureBackendErr = "ebpf:capture_events map unavailable"
+			return fmt.Errorf("capture_events map unavailable (packet-capture engine not attached on this node)")
+		}
+		rb, err := newRingbufCaptureBackend(m, a.log)
+		if err != nil {
+			cancel()
+			a.captureBackendErr = "ebpf:" + err.Error()
+			return err
+		}
+		be = rb
+	}
+	a.captureBackendErr = ""
 	a.captureCancel = cancel
-	go a.runCaptureStream(ctx)
+	go a.runCaptureStream(ctx, be)
+	return nil
 }
 
 func (a *Agent) stopCaptureStream() {
@@ -3225,22 +3359,20 @@ func (a *Agent) stopCaptureStream() {
 	}
 }
 
-// runCaptureStream drains bpf/netra_capture.c's ringbuf and forwards each
-// record, reframed as a capture.Frame, over an agent-initiated WebSocket to
-// the controller (internal/api/capture.go's agentCaptureStream handler),
-// which relays frames byte-for-byte to any browser watching this node —
-// see docs/... the design note in internal/api/capture.go for why the
-// controller never decodes these frames itself. Exits when ctx is
+// runCaptureStream drains be (either backend — see captureBackend) and
+// forwards each frame over an agent-initiated WebSocket to the controller
+// (internal/api/capture.go's agentCaptureStream handler), which relays
+// frames byte-for-byte to any browser watching this node. This loop itself
+// is backend-agnostic and intentionally unchanged from before the
+// eBPF/AF_PACKET dispatch was introduced — only frame production (be)
+// differs between backends; the WS dial/encode/write logic here is the
+// same already-shipped, already-bug-fixed (v0.27.71 TLS-skip-verify fix)
+// code path regardless of which backend is running. Exits when ctx is
 // cancelled (a.stopCaptureStream, called on config change or agent
-// shutdown) or the connection/ringbuf fails.
-func (a *Agent) runCaptureStream(ctx context.Context) {
-	reader, err := ringbuf.NewReader(a.captureMap("capture_events"))
-	if err != nil {
-		a.log.Error("open capture ring buffer", "error", err)
-		return
-	}
-	defer reader.Close()
-	go func() { <-ctx.Done(); _ = reader.Close() }()
+// shutdown), be's Frames() channel closes, or the connection fails.
+func (a *Agent) runCaptureStream(ctx context.Context, be captureBackend) {
+	defer be.Close()
+	go func() { <-ctx.Done(); _ = be.Close() }()
 
 	wsURL := strings.NewReplacer("https://", "wss://", "http://", "ws://").Replace(a.server) +
 		"/api/v1/agents/capture/stream?node=" + url.QueryEscape(a.node)
@@ -3256,26 +3388,11 @@ func (a *Agent) runCaptureStream(ctx context.Context) {
 	defer conn.Close()
 
 	for {
-		record, err := reader.Read()
-		if err != nil {
-			if ctx.Err() == nil {
-				a.log.Warn("read capture ring buffer", "error", err)
-			}
+		frame, ok := <-be.Frames()
+		if !ok {
 			return
 		}
-		ev, err := capture.DecodeRingbufRecord(record.RawSample)
-		if err != nil {
-			continue
-		}
-		frame := capture.EncodeFrame(capture.Frame{
-			ObservedAtUnixNano: time.Now().UnixNano(),
-			OrigLen:            ev.OrigLen,
-			Direction:          ev.Direction,
-			Family:             ev.Family,
-			Protocol:           ev.Protocol,
-			Data:               ev.Data,
-		})
-		if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+		if err := conn.WriteMessage(websocket.BinaryMessage, capture.EncodeFrame(frame)); err != nil {
 			if ctx.Err() == nil {
 				a.log.Warn("write capture frame", "error", err)
 			}

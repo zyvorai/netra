@@ -27,7 +27,7 @@ import (
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.76"
+const version = "0.27.77"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))

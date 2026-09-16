@@ -291,6 +291,7 @@ docs/chatops.md           Slack ChatOps: slash commands, confirmation flow, Ask 
 docs/chatops-teams.md     Microsoft Teams ChatOps: bot setup, confirm-by-reply flow, validation status
 docs/syn-drop.md          SYN-drop mode: exact-IP and CIDR variants, kernel-verified CI coverage
 docs/edge-tcp-intel.md    standalone TCX edge observer: handshake/RTT histograms, retransmit/RST/FIN counters
+docs/capture.md           packet capture: eBPF vs AF_PACKET backend choice and tradeoffs
 ```
 
 ## Prerequisites
