@@ -1094,13 +1094,16 @@ code {
   cursor: pointer;
 }
 .flowrow.capture:hover { background: rgba(255, 255, 255, 0.04); }
-.proto-tcp { color: var(--accent-green); }
-.proto-udp { color: var(--accent-cyan); }
-.proto-icmp,
-.proto-icmpv6 { color: var(--accent-amber); }
-.proto-other { color: var(--terminal-text-dim); }
-.dir-ingress { color: var(--accent-cyan); }
-.dir-egress { color: var(--accent-purple); }
+/* ".flowrow span" (a class + element descendant selector) outweighs a
+   single class, so these must be scoped through .flowrow to win the
+   cascade against that rule rather than silently losing to it. */
+.flowrow .proto-tcp { color: var(--accent-green); }
+.flowrow .proto-udp { color: var(--accent-cyan); }
+.flowrow .proto-icmp,
+.flowrow .proto-icmpv6 { color: var(--accent-amber); }
+.flowrow .proto-other { color: var(--terminal-text-dim); }
+.flowrow .dir-ingress { color: var(--accent-cyan); }
+.flowrow .dir-egress { color: var(--accent-purple); }
 /* Wireshark-style layered packet detail, expanded under a clicked
    .flowrow.capture — one block per protocol layer, each a label/value
    list, followed by a raw hex dump of the frame's first bytes. */

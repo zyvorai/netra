@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.88 — 2026-09-16
+
+- **Fix: Capture Live View's protocol/direction colors never actually rendered.** Live-cluster verification of 0.27.87 (Chrome, real traffic) found every row's `TCP`/`← in`/`out →` text stayed the default terminal white instead of the intended green/cyan/purple — `.flowrow span { color: var(--terminal-text) }` (a class+element descendant selector, specificity 0,1,1) silently outranked the single-class `.proto-tcp`/`.dir-ingress` rules (0,1,0), so the color rules were dead code from the moment they were written.
+  - `web/src/styles.css`: rescoped every `.proto-*`/`.dir-*` rule to `.flowrow .proto-*`/`.flowrow .dir-*` (two classes, specificity 0,2,0), which now correctly outranks `.flowrow span`.
+- Version bumped to 0.27.88 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.87 — 2026-09-16
 
 - **Capture Live View: macOS-terminal-styled packet feed and a Wireshark-style click-to-expand packet detail.** Live-verified against the deployed cluster after 0.27.85 shipped the plain filtered card list — this replaces that list with the same `TerminalFrame`/`.flowhead`/`.flowrow` idiom `LiveFlowTerminal.tsx` already uses (traffic-light title bar, monospace, dark background), color-coded by protocol (`proto-tcp`/`proto-udp`/`proto-icmp(v6)`) and direction (`dir-ingress`/`dir-egress`), reusing the existing `--accent-*` theme tokens so it themes correctly in light/dark instead of hardcoding colors.
