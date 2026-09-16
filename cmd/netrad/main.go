@@ -27,7 +27,7 @@ import (
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.75"
+const version = "0.27.76"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -170,10 +170,13 @@ func buildGitOps() (gitops.Config, bool) {
 // used for every other optional feature in this codebase.
 func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
 	cfg := alert.Config{
-		Interval:   envDuration("NETRA_ALERT_POLL_INTERVAL", 30*time.Second),
-		Cooldown:   envDuration("NETRA_ALERT_COOLDOWN", 5*time.Minute),
-		StaleAfter: envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second),
-		TopN:       envInt("NETRA_ALERT_TOPN", 0),
+		Interval:             envDuration("NETRA_ALERT_POLL_INTERVAL", 30*time.Second),
+		Cooldown:             envDuration("NETRA_ALERT_COOLDOWN", 5*time.Minute),
+		StaleAfter:           envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second),
+		TopN:                 envInt("NETRA_ALERT_TOPN", 0),
+		DropSpikeWindow:      envInt("NETRA_DROP_SPIKE_WINDOW", 0),
+		DropSpikeMultiplier:  envFloat("NETRA_DROP_SPIKE_MULTIPLIER", 0),
+		DropSpikeMinAbsolute: envUint64("NETRA_DROP_SPIKE_MIN_ABSOLUTE", 0),
 	}
 	raw := strings.TrimSpace(os.Getenv("NETRA_ALERT_WEBHOOKS"))
 	if raw == "" {
@@ -411,6 +414,24 @@ func envDuration(k string, d time.Duration) time.Duration {
 func envInt(k string, d int) int {
 	if raw := strings.TrimSpace(os.Getenv(k)); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil {
+			return parsed
+		}
+	}
+	return d
+}
+
+func envFloat(k string, d float64) float64 {
+	if raw := strings.TrimSpace(os.Getenv(k)); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			return parsed
+		}
+	}
+	return d
+}
+
+func envUint64(k string, d uint64) uint64 {
+	if raw := strings.TrimSpace(os.Getenv(k)); raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil {
 			return parsed
 		}
 	}

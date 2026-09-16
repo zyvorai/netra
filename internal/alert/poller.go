@@ -12,12 +12,15 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/zyvorai/netra/internal/ai"
 	"github.com/zyvorai/netra/internal/capdrift"
+	"github.com/zyvorai/netra/internal/detective"
 	"github.com/zyvorai/netra/internal/dropdiag"
+	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/models"
@@ -46,6 +49,17 @@ type Config struct {
 	// for the poller's new-since-start source. Default 5, matching
 	// GET /api/v1/insights/new-since-start's default.
 	MaxPodRestarts int
+	// DropSpikeWindow is the rolling sample count dropBaselineTracker keeps
+	// per (node, reason) key. Default 6 (~3 minutes at the default 30s
+	// Interval).
+	DropSpikeWindow int
+	// DropSpikeMultiplier is how many times a key's own recent average
+	// per-tick delta the newest delta must exceed to fire. Default 3.0.
+	DropSpikeMultiplier float64
+	// DropSpikeMinAbsolute is the minimum delta, regardless of multiplier,
+	// before a drop-rate spike can fire — keeps a near-zero baseline from
+	// turning a handful of drops into an alert. Default 50.
+	DropSpikeMinAbsolute uint64
 }
 
 func (c *Config) applyDefaults() {
@@ -60,6 +74,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxPodRestarts <= 0 {
 		c.MaxPodRestarts = 5
+	}
+	if c.DropSpikeWindow <= 0 {
+		c.DropSpikeWindow = 6
+	}
+	if c.DropSpikeMultiplier <= 0 {
+		c.DropSpikeMultiplier = 3.0
+	}
+	if c.DropSpikeMinAbsolute <= 0 {
+		c.DropSpikeMinAbsolute = 50
 	}
 }
 
@@ -77,8 +100,9 @@ type Poller struct {
 	now       func() time.Time
 	cfg       Config
 
-	dedup    *dedupState
-	restarts *restartTracker
+	dedup        *dedupState
+	restarts     *restartTracker
+	dropBaseline *dropBaselineTracker
 }
 
 // New returns a Poller bound to st (via st.AgentStatuses/st.RecordHealthSample/
@@ -90,16 +114,17 @@ type Poller struct {
 func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config, fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *Poller {
 	cfg.applyDefaults()
 	return &Poller{
-		log:       log,
-		fetch:     st.AgentStatuses,
-		publish:   publish,
-		record:    st.RecordHealthSample,
-		baseline:  st.Baseline,
-		fetchPods: fetchPods,
-		now:       time.Now,
-		cfg:       cfg,
-		dedup:     newDedupState(),
-		restarts:  newRestartTracker(),
+		log:          log,
+		fetch:        st.AgentStatuses,
+		publish:      publish,
+		record:       st.RecordHealthSample,
+		baseline:     st.Baseline,
+		fetchPods:    fetchPods,
+		now:          time.Now,
+		cfg:          cfg,
+		dedup:        newDedupState(),
+		restarts:     newRestartTracker(),
+		dropBaseline: newDropBaselineTracker(),
 	}
 }
 
@@ -128,6 +153,7 @@ func (p *Poller) tick() {
 		p.record(sample, now)
 	}
 	events = append(events, p.newSinceStartEvents(now, agents)...)
+	events = append(events, p.dropSpikeEvents(now, agents)...)
 	for _, ev := range events {
 		if !p.publish(ev) {
 			p.log.Warn("alert dropped: dispatcher queue full", "source", ev.Source, "kind", ev.Kind, "subject", ev.Subject)
@@ -167,6 +193,81 @@ func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus)
 		}
 	}
 	return out
+}
+
+// dropSpikeEvents adds a baseline-relative signal dropdiag's own anomalies()
+// doesn't carry: dropdiag flags "drops are nonzero" against a fixed
+// threshold from a single snapshot, not "this reason's drop rate just
+// jumped" across ticks. Cumulative KernelDrops/PolicyDrops counters are
+// converted to per-tick deltas by dropBaselineTracker and compared against
+// each (node, reason) key's own recent history — reused, not recomputed,
+// wherever dropdiag/detective already provide it.
+func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+	if p.dropBaseline == nil {
+		// Tests construct a Poller directly with fixture-backed functions
+		// (see the Poller doc comment) rather than always going through
+		// New(), so this stays nil-safe the same way dedup/restarts would
+		// need to be if a test path touched them without going through New().
+		p.dropBaseline = newDropBaselineTracker()
+	}
+	var out []webhook.Event
+	for _, a := range agents {
+		if a.Stale {
+			continue
+		}
+		for _, d := range a.KernelDrops {
+			key := fmt.Sprintf("%s/kernel/%d", a.Node, d.Reason)
+			delta, isSpike := p.dropBaseline.spike(key, now, d.Count, p.cfg.DropSpikeWindow, p.cfg.DropSpikeMultiplier, p.cfg.DropSpikeMinAbsolute)
+			if !isSpike {
+				continue
+			}
+			name := d.ReasonName
+			if name == "" {
+				name = dropreason.Name(d.Reason)
+			}
+			ev := webhook.Event{
+				Source: "dropdiag-baseline", Kind: "kernel-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
+				Subject: a.Node + "/" + name,
+				Message: fmt.Sprintf("kernel drops (%s) on %s spiked by %d in the last interval", name, a.Node, delta),
+				Value:   float64(delta), Timestamp: now,
+			}
+			if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+				out = append(out, ev)
+			}
+		}
+		for _, d := range a.PolicyDrops {
+			key := fmt.Sprintf("%s/policy/%d", a.Node, d.Reason)
+			delta, isSpike := p.dropBaseline.spike(key, now, d.Packets, p.cfg.DropSpikeWindow, p.cfg.DropSpikeMultiplier, p.cfg.DropSpikeMinAbsolute)
+			if !isSpike {
+				continue
+			}
+			name := detective.ReasonName(d.Reason)
+			if name == "" {
+				name = fmt.Sprintf("reason-%d", d.Reason)
+			}
+			ev := webhook.Event{
+				Source: "dropdiag-baseline", Kind: "policy-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
+				Subject: a.Node + "/" + name,
+				Message: fmt.Sprintf("policy drops (%s) on %s spiked by %d packets in the last interval", name, a.Node, delta),
+				Value:   float64(delta), Timestamp: now,
+			}
+			if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
+				out = append(out, ev)
+			}
+		}
+	}
+	p.dropBaseline.sweep(now, p.cfg.Cooldown*8)
+	return out
+}
+
+// spikeSeverity mirrors dropdiag.anomalies()'s own severity-doubling
+// convention (warning by default, critical once well past the floor) rather
+// than inventing a third severity scheme.
+func spikeSeverity(delta, minAbsolute uint64) string {
+	if delta >= minAbsolute*4 {
+		return "critical"
+	}
+	return "warning"
 }
 
 // evaluate is the pure core: given a point in time and an agent snapshot, it

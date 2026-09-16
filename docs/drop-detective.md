@@ -26,6 +26,10 @@ Existing flow counter maps are unchanged.
 | `confidence=probable` | Unknown/reserved reason |
 | `stage` | `netra-policy/<code>` |
 | `suggestion` | Operator hint |
+| `pid`/`comm`/`uid`/`pod` | Process/workload identity, only when `attributionState="attributed"` |
+| `attributionState` | `attributed`, `unattributable-ingress`, `unattributable-protocol`, or `unmatched` — see `docs/drop-diagnostics.md`'s Scope and attribution section for what each means |
+
+Attribution joins the drop's local tuple against the same TCP connection tracking `tcp_health`/Path Diagnostics already uses — it is only ever possible for **egress TCP** drops where that connection was still tracked when the report was built. Ingress drops and UDP are always unattributable by construction, not a bug.
 
 CLI: `netractl ebpf diagnose`
 

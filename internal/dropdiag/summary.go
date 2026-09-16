@@ -21,7 +21,7 @@ func Build(agents []models.AgentStatus, topN int) models.DropDiagnosticsResponse
 		if a.Stale {
 			continue
 		}
-		n := models.NodeDropDiagnostics{Node: a.Node, Stack: a.Stack, KernelDrops: append([]models.KernelDropStat(nil), a.KernelDrops...)}
+		n := models.NodeDropDiagnostics{Node: a.Node, Stack: a.Stack, KernelDrops: append([]models.KernelDropStat(nil), a.KernelDrops...), QdiscStats: append([]models.QdiscStat(nil), a.QdiscStats...)}
 		sort.Slice(n.KernelDrops, func(i, j int) bool { return n.KernelDrops[i].Count > n.KernelDrops[j].Count })
 		if len(n.KernelDrops) > topN {
 			n.KernelDrops = n.KernelDrops[:topN]
@@ -29,6 +29,9 @@ func Build(agents []models.AgentStatus, topN int) models.DropDiagnosticsResponse
 		out.Nodes = append(out.Nodes, n)
 		for _, d := range a.KernelDrops {
 			out.Summary.KernelDropEvents += d.Count
+		}
+		for _, q := range a.QdiscStats {
+			out.Summary.QdiscDrops += q.Drops
 		}
 		out.Summary.SoftnetProcessed += a.Stack.SoftnetProcessed
 		out.Summary.SoftnetDropped += a.Stack.SoftnetDropped
@@ -82,6 +85,12 @@ func anomalies(r models.DropDiagnosticsResponse) []models.NetworkHealthAnomaly {
 			if errs > 0 {
 				out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "interface-error", Subject: n.Node + "/" + it.Name, Message: fmt.Sprintf("interface counters report %d receive/transmit/no-handler errors", errs), Value: float64(errs)})
 			}
+		}
+		for _, q := range n.QdiscStats {
+			if q.Drops == 0 {
+				continue
+			}
+			out = append(out, models.NetworkHealthAnomaly{Severity: "warning", Kind: "qdisc-drop", Subject: n.Node + "/" + q.Interface + "/" + q.Kind, Message: fmt.Sprintf("qdisc %s on %s reports %d drops", q.Kind, q.Interface, q.Drops), Value: float64(q.Drops)})
 		}
 	}
 	order := map[string]int{"critical": 3, "warning": 2, "info": 1}

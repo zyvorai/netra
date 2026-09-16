@@ -101,7 +101,7 @@ export default function Flows() {
       if (filter.pod) q.set('pod', filter.pod);
       q.set('limit', '20');
       const x = await api<any>('/api/v1/drops/explain?' + q);
-      setDrops(x.items || []);
+      setDrops(x.findings || []);
       setDropError('');
     } catch (e) {
       setDropError(String(e));
@@ -225,18 +225,18 @@ export default function Flows() {
 
       <section className="card span3">
         <p className="eyebrow">DROP EXPLAIN</p>
-        <h3>Recent Hubble denials</h3>
+        <h3>Recent drop findings</h3>
         {dropError && <p className="warning">{dropError}</p>}
         {drops.length === 0 && (
-          <p className="empty-state">Use “Explain recent drops” to fetch recent denied flows for the current namespace/pod scope.</p>
+          <p className="empty-state">Use "Explain recent drops" to fetch recent denied flows for the current namespace/pod scope.</p>
         )}
         {drops.map((d, i) => (
           <div className="dropcard" key={i}>
-            <b>{d.summary || 'Dropped flow'}</b>
-            <span>{d.dropReason || 'unknown reason'}</span>
-            {(d.suggestions || []).map((s: string) => (
-              <p key={s}>• {s}</p>
-            ))}
+            <b>{d.explanation || 'Dropped flow'}</b>
+            <span>
+              {d.source} · {d.code || d.reason || 'unknown reason'}
+            </span>
+            {d.suggestion && <p>• {d.suggestion}</p>}
           </div>
         ))}
       </section>

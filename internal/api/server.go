@@ -123,13 +123,13 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.75"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.76"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.75"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.76"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.75"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.76"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -170,7 +170,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /api/v1/flows/stream", s.auth(http.HandlerFunc(s.streamFlows)))
 	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
-	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.explainDrops)))
+	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.ebpfDropExplain)))
 	mux.Handle("GET /api/v1/ebpf/config", s.authOrAgent(http.HandlerFunc(s.ebpfConfig)))
 	mux.Handle("PUT /api/v1/vms/{node}/capture", s.auth(http.HandlerFunc(s.captureStart)))
 	mux.Handle("DELETE /api/v1/vms/{node}/capture", s.auth(http.HandlerFunc(s.captureStop)))
@@ -241,6 +241,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/interfaces", s.auth(http.HandlerFunc(s.ebpfInterfaceFlows)))
 	mux.Handle("GET /api/v1/ebpf/diagnose", s.auth(http.HandlerFunc(s.ebpfDropDetective)))
+	mux.Handle("GET /api/v1/ebpf/explain", s.auth(http.HandlerFunc(s.ebpfDropExplain)))
 	mux.Handle("GET /api/v1/ebpf/l7", s.auth(http.HandlerFunc(s.ebpfL7)))
 	mux.Handle("GET /api/v1/ebpf/capabilities", s.auth(http.HandlerFunc(s.ebpfCapabilities)))
 	mux.Handle("GET /api/v1/insights/summary", s.auth(http.HandlerFunc(s.insightsSummary)))
@@ -391,7 +392,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.75", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.76", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -875,32 +876,53 @@ func (s *Server) streamFlows(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("Hubble stream ended", "error", err)
 	}
 }
-func (s *Server) explainDrops(w http.ResponseWriter, r *http.Request) {
+// ebpfDropExplain is the unified "explain a drop" endpoint: standalone
+// eBPF Drop Detective findings are always computed (primary, Cilium-
+// independent, per docs/standalone-ebpf.md); Hubble flows are appended as
+// an additional Source when Hubble is configured, and are skipped rather
+// than treated as an error when it isn't (the common case) or is
+// unreachable. Served at both GET /api/v1/ebpf/explain and (for backward
+// compatibility of the URL, not the response shape — see docs/drop-explain.md)
+// GET /api/v1/drops/explain.
+func (s *Server) ebpfDropExplain(w http.ResponseWriter, r *http.Request) {
 	limit := 20
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 100 {
 		limit = n
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-	out := make([]map[string]any, 0, limit)
-	filter := hubble.Filter{Verdict: "DROPPED", Namespace: r.URL.Query().Get("namespace"), Pod: r.URL.Query().Get("pod")}
-	err := s.hubble.Stream(ctx, 500, false, filter, func(b []byte) error {
-		if !hubble.MatchFlowJSON(b, filter) {
-			return nil
+	agentLimit := 50
+	if v := r.URL.Query().Get("agentLimit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			agentLimit = n
 		}
-		x := hubble.Explain(b)
-		enrichExplanation(x)
-		out = append(out, x)
-		if len(out) >= limit {
-			return io.EOF
-		}
-		return nil
-	})
-	if err != nil && err != io.EOF {
-		errorJSON(w, 502, err.Error())
-		return
 	}
-	writeJSON(w, 200, map[string]any{"items": out, "count": len(out)})
+	namespace, pod := r.URL.Query().Get("namespace"), r.URL.Query().Get("pod")
+	hubbleFn := func() ([]detective.UnifiedFinding, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		raw := make([]map[string]any, 0, limit)
+		filter := hubble.Filter{Verdict: "DROPPED", Namespace: namespace, Pod: pod}
+		err := s.hubble.Stream(ctx, 500, false, filter, func(b []byte) error {
+			if !hubble.MatchFlowJSON(b, filter) {
+				return nil
+			}
+			x := hubble.Explain(b)
+			enrichExplanation(x)
+			raw = append(raw, x)
+			if len(raw) >= limit {
+				return io.EOF
+			}
+			return nil
+		})
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		return detective.HubbleFindingsFromExplain(raw), nil
+	}
+	out, err := detective.BuildUnified(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), s.store.Config(), agentLimit, hubbleFn)
+	if err != nil {
+		s.log.Debug("hubble explain unavailable; returning standalone findings only", "error", err)
+	}
+	writeJSON(w, 200, out)
 }
 func enrichExplanation(x map[string]any) {
 	reason := strings.ToUpper(fmt.Sprint(x["dropReason"]))

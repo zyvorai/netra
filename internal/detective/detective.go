@@ -30,6 +30,13 @@ var reasonNames = map[uint8]string{
 	9: "netpol-deny",
 }
 
+// ReasonName returns Netra's own name for a policy_drops reason code (1-9),
+// or "" for an unrecognized code. Exported so other packages (e.g.
+// internal/alert, for spike-alert message text) don't duplicate this table.
+func ReasonName(reason uint8) string {
+	return reasonNames[reason]
+}
+
 // Build correlates agent-reported policy drops into detective findings.
 func Build(agents []models.AgentStatus, cfg models.EBPFFastPathConfig, topN int) models.DropDetectiveResponse {
 	if topN <= 0 {
@@ -57,6 +64,10 @@ func Build(agents []models.AgentStatus, cfg models.EBPFFastPathConfig, topN int)
 				Packets:    d.Packets,
 				Bytes:      d.Bytes,
 				Stage:      "netra-policy/" + reasonNames[d.Reason],
+
+				PID: d.PID, Comm: d.Comm, UID: d.UID,
+				Namespace: d.Namespace, Pod: d.Pod,
+				AttributionState: d.AttributionState,
 			}
 			if f.Code == "" {
 				f.Code = fmt.Sprintf("reason-%d", d.Reason)
@@ -117,6 +128,9 @@ func explain(d models.PolicyDropStat, cfg models.EBPFFastPathConfig) string {
 		dir = "ingress"
 	}
 	base := fmt.Sprintf("%s %s traffic matched Netra %s (%d packets).", dir, protoName(d.Protocol), name, d.Packets)
+	if d.AttributionState == "attributed" {
+		base += fmt.Sprintf(" Attributed to %s (pid %d)%s.", d.Comm, d.PID, podSuffix(d.Pod))
+	}
 	switch d.Reason {
 	case 1:
 		return base + " An exact IP deny is configured."
@@ -148,6 +162,13 @@ func suggest(reason uint8) string {
 	default:
 		return "Inspect eBPF config and recent audit events for the matching deny primitive."
 	}
+}
+
+func podSuffix(pod string) string {
+	if pod == "" {
+		return ""
+	}
+	return fmt.Sprintf(" in pod %s", pod)
 }
 
 func protoName(p uint8) string {

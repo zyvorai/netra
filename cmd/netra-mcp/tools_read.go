@@ -215,7 +215,7 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_drops_explain", method: "GET", path: "/api/v1/drops/explain",
-			description: "Recent dropped flows from Hubble with a plain-English summary and remediation suggestions for each.",
+			description: "Unified explain-a-drop findings: Netra's own standalone-eBPF Drop Detective findings (always present) plus Hubble/Cilium findings when Hubble is configured. Each finding's source field distinguishes netra from hubble.",
 			schema: objSchema(map[string]any{
 				"limit":     intProp("Max dropped flows to explain, 1-100. Default 20."),
 				"namespace": strProp("Filter by namespace."),

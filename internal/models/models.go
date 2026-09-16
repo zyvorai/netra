@@ -655,6 +655,7 @@ type PathDiagnosticsResponse struct {
 
 type KernelDropStat struct {
 	Reason     uint32 `json:"reason"`
+	ReasonName string `json:"reasonName,omitempty"`
 	Protocol   string `json:"protocol,omitempty"`
 	Count      uint64 `json:"count"`
 	LastSeenNS uint64 `json:"lastSeenNs"`
@@ -688,6 +689,7 @@ type DropDiagnosticsSummary struct {
 	TXErrors           uint64                 `json:"txErrors"`
 	RXMissed           uint64                 `json:"rxMissed"`
 	RXNoHandler        uint64                 `json:"rxNoHandler"`
+	QdiscDrops         uint64                 `json:"qdiscDrops"`
 	Anomalies          []NetworkHealthAnomaly `json:"anomalies,omitempty"`
 }
 
@@ -695,6 +697,7 @@ type NodeDropDiagnostics struct {
 	Node        string           `json:"node"`
 	KernelDrops []KernelDropStat `json:"kernelDrops,omitempty"`
 	Stack       NodeStackStat    `json:"stack"`
+	QdiscStats  []QdiscStat      `json:"qdiscStats,omitempty"`
 }
 
 type DropDiagnosticsResponse struct {
@@ -831,6 +834,19 @@ type PolicyDropStat struct {
 	Packets   uint64 `json:"packets"`
 	Bytes     uint64 `json:"bytes"`
 	LastNS    uint64 `json:"lastNs,omitempty"`
+
+	// PID/Comm/UID are filled when this egress TCP drop could be correlated
+	// to a still-tracked local socket (see AttributionState). Ingress drops
+	// and non-TCP drops are never attributable: an ingress deny has no
+	// accepted local socket yet, and UDP has no sockops-derived tracking.
+	PID              uint32 `json:"pid,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	UID              uint32 `json:"uid,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+	WorkloadKind     string `json:"workloadKind,omitempty"`
+	WorkloadName     string `json:"workloadName,omitempty"`
+	AttributionState string `json:"attributionState,omitempty"` // attributed|unattributable-ingress|unattributable-protocol|unmatched
 }
 
 type DropDetectiveFinding struct {
@@ -848,6 +864,15 @@ type DropDetectiveFinding struct {
 	Bytes       uint64 `json:"bytes,omitempty"`
 	Explanation string `json:"explanation"`
 	Suggestion  string `json:"suggestion,omitempty"`
+
+	// Process/workload identity, when attributable — see PolicyDropStat's
+	// AttributionState doc: only egress TCP findings can ever carry these.
+	PID              uint32 `json:"pid,omitempty"`
+	Comm             string `json:"comm,omitempty"`
+	UID              uint32 `json:"uid,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+	AttributionState string `json:"attributionState,omitempty"`
 }
 
 type DropDetectiveSummary struct {
@@ -1029,6 +1054,23 @@ type AgentReport struct {
 	Workloads       []WorkloadIdentity `json:"workloads,omitempty"`
 	ScopeMode       string             `json:"scopeMode,omitempty"`
 	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
+	QdiscStats      []QdiscStat        `json:"qdiscStats,omitempty"`
+}
+
+// QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one
+// interface (source: `tc -s qdisc show` equivalent, via netlink — not a BPF
+// map). Not every qdisc kind populates a meaningful Drops counter; a zero
+// value can mean "no drops" or "this qdisc kind doesn't report one," a
+// known, documented limit (see docs/drop-diagnostics.md).
+type QdiscStat struct {
+	Interface  string `json:"interface"`
+	Kind       string `json:"kind"`
+	Handle     string `json:"handle,omitempty"`
+	Drops      uint64 `json:"drops"`
+	Overlimits uint64 `json:"overlimits,omitempty"`
+	Requeues   uint64 `json:"requeues,omitempty"`
+	Bytes      uint64 `json:"bytes,omitempty"`
+	Packets    uint64 `json:"packets,omitempty"`
 }
 
 // ProcessMetaStat is /proc-derived metadata for one process observed on the

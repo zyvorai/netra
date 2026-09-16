@@ -66,6 +66,10 @@ export default function Drops() {
             <b>{s.txDropped || 0}</b>
             <span>interface tx dropped</span>
           </div>
+          <div>
+            <b>{s.qdiscDrops || 0}</b>
+            <span>qdisc drops</span>
+          </div>
         </div>
         <p>{ds.text || ''}</p>
       </section>
@@ -84,6 +88,15 @@ export default function Drops() {
               <small>
                 {f.explanation} {f.suggestion}
               </small>
+              {f.attributionState === 'unattributable-ingress' && (
+                <span style={{ color: 'var(--text-tertiary)' }}>not attributable (ingress)</span>
+              )}
+              {f.attributionState === 'unattributable-protocol' && (
+                <span style={{ color: 'var(--text-tertiary)' }}>not attributable (non-TCP)</span>
+              )}
+              {f.attributionState === 'unmatched' && (
+                <span style={{ color: 'var(--text-tertiary)' }}>process not found</span>
+              )}
               <ExplainFinding page="drops" kind={f.code || 'policy-drop'} subject={`${f.src || ''} → ${f.dst || ''}`} message={`${f.explanation || ''} ${f.suggestion || ''}`} severity={f.confidence === 'exact' ? 'warning' : 'info'} />
             </div>
           ))}
@@ -124,10 +137,34 @@ export default function Drops() {
               </div>
               {(n.kernelDrops || []).map((d: any, i: number) => (
                 <div className="datarow" key={i}>
-                  <span>reason #{d.reason}</span>
+                  <span>{d.reasonName || `reason #${d.reason}`}</span>
                   <span>{d.protocol || 'unknown'}</span>
                   <span>{d.count}</span>
                   <span>{d.lastSeenNs || 0}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ))}
+      {nodes.map((n: any) => (
+        <section className="card span3" key={`${n.node}-qdisc`}>
+          <p className="eyebrow">QDISC DROPS · {n.node}</p>
+          {!(n.qdiscStats || []).length && <p className="empty-state">No qdisc stats available (netlink read failed or empty).</p>}
+          {(n.qdiscStats || []).length > 0 && (
+            <div className="datatable-scroll">
+              <div className="datahead">
+                <span>INTERFACE</span>
+                <span>KIND</span>
+                <span>DROPS</span>
+                <span>OVERLIMITS</span>
+              </div>
+              {(n.qdiscStats || []).map((q: any, i: number) => (
+                <div className="datarow" key={i}>
+                  <span>{q.interface}</span>
+                  <span>{q.kind}</span>
+                  <span>{q.drops}</span>
+                  <span>{q.overlimits || 0}</span>
                 </div>
               ))}
             </div>

@@ -119,6 +119,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_interface_tx_errors", "Aggregate interface transmit error counters across fresh agents.", float64(dropSummary.TXErrors))
 	metricGauge(w, "netra_interface_rx_missed", "Aggregate interface receive missed-error counters across fresh agents.", float64(dropSummary.RXMissed))
 	metricGauge(w, "netra_interface_rx_nohandler", "Aggregate interface receive no-handler counters across fresh agents.", float64(dropSummary.RXNoHandler))
+	metricGauge(w, "netra_qdisc_dropped", "Aggregate tc-qdisc drop counters (via netlink) across fresh agents, all interfaces/qdiscs combined.", float64(dropSummary.QdiscDrops))
 	pathSummary := pathdiag.Build(agents, 10).Summary
 	metricGauge(w, "netra_tcp_connect_established_measured", "TCP active establishments with connect latency measured by Netra.", float64(pathSummary.ConnectionsMeasured))
 	metricGauge(w, "netra_tcp_connect_average_latency_us", "Average measured TCP active connect establishment latency in microseconds.", float64(pathSummary.AverageConnectUS))
