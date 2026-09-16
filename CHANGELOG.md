@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.27.93 — 2026-09-16
+
+- **Shrink the oversized page-hero headings.** Live-cluster feedback: `.page-hero h1` (used on every page's opening headline — "Watch the wire, live.", "Where the stack is under pressure.", etc.) scaled up to 84px, reading as oversized "poster" type rather than a page title. Cut to `clamp(28px, 3.5vw, 48px)` (was `clamp(40px, 6vw, 84px)`), with proportionally loosened line-height/letter-spacing since tight display-type tracking looks cramped at a smaller size. `.hero h1` (Overview only, the single biggest heading in the app) shrunk in proportion, `clamp(32px, 4vw, 56px)` (was `clamp(44px, 7vw, 88px)`), keeping Overview a clear step above the other pages. Both heroes' subtext (`.hero p`/`.page-hero p`) sized down to match.
+- Version bumped to 0.27.93 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.92 — 2026-09-16
 
 - **Roll out the color-coding from Capture/Congestion Map to the rest of the app.** A survey of every dashboard page found the genuine gaps: existing categorical fields (verdict, direction, protocol, blocked counts, rule type, audit action) rendered as flat text elsewhere, while Capture/Congestion Map already colored the same kind of data. Reuses established tokens/classes throughout — no new colors invented.

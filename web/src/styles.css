@@ -597,9 +597,9 @@ main {
   animation: heroDrift 22s ease-in-out infinite alternate;
 }
 .hero h1 {
-  font-size: clamp(44px, 7vw, 88px);
-  line-height: 0.94;
-  letter-spacing: -0.055em;
+  font-size: clamp(32px, 4vw, 56px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
   max-width: 920px;
   margin: 10px 0 18px;
   color: var(--text-primary);
@@ -608,7 +608,7 @@ main {
 .hero p {
   color: var(--text-secondary);
   max-width: 720px;
-  font-size: 21px;
+  font-size: 18px;
   line-height: 1.381;
   font-weight: 400;
   letter-spacing: 0.011em;
@@ -624,29 +624,29 @@ main {
   to { background-position: 6% 4%, -5% -3%; }
 }
 
-/* Page heroes now carry the same structural energy as the Overview hero —
-   their own glow layer and near-hero-scale type — so every page reads as
-   its own "chapter opener" rather than a compact label. Kept a notch under
-   .hero's ceiling (84px vs 88px) so Overview stays the single biggest
-   moment in the app. */
+/* Page heroes carry their own glow layer as a "chapter opener" per page,
+   but at a page-title scale, not display/poster scale — kept a clear step
+   under .hero's ceiling (48px vs 56px) so Overview stays the single
+   biggest moment in the app. Shrunk from an earlier near-hero-scale
+   (84px) treatment that read as oversized on every non-Overview page. */
 .page-hero {
   position: relative;
-  margin: 20px 0 44px;
-  padding: 32px 0 12px;
+  margin: 20px 0 36px;
+  padding: 28px 0 12px;
   max-width: 900px;
   animation: fadeRise 0.45s var(--ease-apple) both;
 }
 .page-hero h1 {
-  font-size: clamp(40px, 6vw, 84px);
-  line-height: 0.98;
-  letter-spacing: -0.05em;
+  font-size: clamp(28px, 3.5vw, 48px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   font-weight: 600;
-  margin: 10px 0 14px;
+  margin: 10px 0 12px;
   color: var(--text-primary);
 }
 .page-hero p {
   color: var(--text-secondary);
-  font-size: 19px;
+  font-size: 17px;
   line-height: 1.42;
   margin: 0;
   max-width: 640px;
