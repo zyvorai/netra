@@ -86,7 +86,7 @@ func TestDrainSkipsEventsAtOrBeforeWatermark(t *testing.T) {
 	sink, mock := newTestSink(t, Config{})
 	sink.lastAt = e1.At // simulate e1 already committed on a prior tick
 
-	mock.ExpectExec("INSERT INTO NETRA_AUDIT").WithArgs(e2.At, e2.Actor, e2.Action, e2.Target, "{}").
+	mock.ExpectExec("INSERT INTO NETRA_AUDIT").WithArgs(e2.At, e2.Actor, e2.Action, e2.Target, auditMessage(e2), "{}").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	sink.drain(context.Background(), func() []models.AuditEvent { return newestFirst([]models.AuditEvent{e1, e2}) })
@@ -132,5 +132,23 @@ func TestDrainWithNoNewEventsSkipsFlush(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestAuditMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		e    models.AuditEvent
+		want string
+	}{
+		{"with target", models.AuditEvent{Action: "mode.set", Target: "enforce"}, "mode.set enforce"},
+		{"without target", models.AuditEvent{Action: "lease.renew"}, "lease.renew"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := auditMessage(tc.e); got != tc.want {
+				t.Fatalf("auditMessage(%+v) = %q, want %q", tc.e, got, tc.want)
+			}
+		})
 	}
 }

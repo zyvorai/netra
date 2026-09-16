@@ -193,7 +193,7 @@ func (s *Sink) flush(ctx context.Context, events []models.AuditEvent) error {
 		return nil
 	}
 	placeholders := make([]string, 0, len(events))
-	args := make([]any, 0, len(events)*5)
+	args := make([]any, 0, len(events)*6)
 	for _, e := range events {
 		details := "{}"
 		if len(e.Details) > 0 {
@@ -203,15 +203,27 @@ func (s *Sink) flush(ctx context.Context, events []models.AuditEvent) error {
 			}
 			details = string(b)
 		}
-		placeholders = append(placeholders, "(?, ?, ?, ?, PARSE_JSON(?))")
-		args = append(args, e.At.UTC(), e.Actor, e.Action, e.Target, details)
+		placeholders = append(placeholders, "(?, ?, ?, ?, ?, PARSE_JSON(?))")
+		args = append(args, e.At.UTC(), e.Actor, e.Action, e.Target, auditMessage(e), details)
 	}
 	stmt := fmt.Sprintf(
-		"INSERT INTO %s (at, actor, action, target, details) VALUES %s",
+		"INSERT INTO %s (at, actor, action, target, message, details) VALUES %s",
 		s.cfg.Table, strings.Join(placeholders, ", "),
 	)
 	_, err := s.db.ExecContext(ctx, stmt, args...)
 	return err
+}
+
+// auditMessage mirrors internal/siem's unexported helper of the same
+// name (record.go) so Snowflake's message column reads the same as the
+// pull export's and syslog forwarder's Record.Message for the same
+// event — duplicated rather than imported because that helper isn't
+// exported across the package boundary.
+func auditMessage(e models.AuditEvent) string {
+	if e.Target == "" {
+		return e.Action
+	}
+	return e.Action + " " + e.Target
 }
 
 // loadPrivateKey reads an unencrypted PEM-encoded RSA key (PKCS#8 or
