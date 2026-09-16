@@ -46,6 +46,7 @@ func Build(agents []models.AgentStatus, topN int) models.SysctlAuditResponse {
 			default:
 				out.Summary.Informational++
 			}
+			out.Summary.Findings++
 
 			key := groupKey{baselineName(e), e.Interface, e.Category}
 			if valueCounts[key] == nil {
@@ -56,10 +57,11 @@ func Build(agents []models.AgentStatus, topN int) models.SysctlAuditResponse {
 		sort.Slice(n.Findings, func(i, j int) bool {
 			return severityRank(n.Findings[i].Severity) > severityRank(n.Findings[j].Severity)
 		})
+		// Summary.Findings/Critical/Warnings/Informational above are true
+		// cluster-wide totals; only the per-node display list is capped.
 		if len(n.Findings) > topN {
 			n.Findings = n.Findings[:topN]
 		}
-		out.Summary.Findings += len(n.Findings)
 		out.Nodes = append(out.Nodes, n)
 	}
 	out.Summary.Nodes = len(out.Nodes)

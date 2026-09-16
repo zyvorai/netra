@@ -50,6 +50,11 @@ func TestBuildCapsFindingsAtTopN(t *testing.T) {
 	if len(got.Nodes[0].Findings) != 3 {
 		t.Fatalf("len(Findings) = %d, want 3 (topN cap)", len(got.Nodes[0].Findings))
 	}
+	// Summary.Findings/Critical are true cluster-wide totals; only the
+	// per-node display list is capped at topN.
+	if got.Summary.Findings != 10 || got.Summary.Critical != 10 {
+		t.Fatalf("Summary = %+v, want Findings=10 Critical=10 (uncapped totals)", got.Summary)
+	}
 }
 
 func TestBuildOutliersFlagDisagreeingNodes(t *testing.T) {
