@@ -6,12 +6,13 @@ export default function Drops() {
   const [data, setData] = useState<any>();
   const [diag, setDiag] = useState<any>();
   const [kernel, setKernel] = useState<any>();
+  const [kernelWindow, setKernelWindow] = useState('5m');
   const [err, setErr] = useState('');
   const load = () =>
     Promise.all([
       api<any>('/api/v1/ebpf/drops?limit=100'),
       api<any>('/api/v1/ebpf/diagnose?limit=50'),
-      api<any>('/api/v1/ebpf/kernel-network'),
+      api<any>(`/api/v1/ebpf/kernel-network?window=${encodeURIComponent(kernelWindow)}`),
     ])
       .then(([d, x, k]) => {
         setData(d);
@@ -24,7 +25,7 @@ export default function Drops() {
     load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [kernelWindow]);
   const s = data?.summary || {};
   const nodes = useMemo(() => data?.nodes || [], [data]);
   const anomalies = s.anomalies || [];
@@ -100,7 +101,20 @@ export default function Drops() {
             <b>{ks.warnings || 0}</b>
             <span>warnings</span>
           </div>
+          <div>
+            <b>{ks.warming || 0}</b>
+            <span>warming nodes</span>
+          </div>
         </div>
+        <label>
+          Diagnostic window
+          <select value={kernelWindow} onChange={(e) => setKernelWindow(e.target.value)}>
+            <option value="1m">1 minute</option>
+            <option value="5m">5 minutes</option>
+            <option value="15m">15 minutes</option>
+            <option value="1h">1 hour</option>
+          </select>
+        </label>
         <p>
           Read-only correlation of sysctls, protocol counters, softnet, NIC, qdisc, and conntrack evidence. Suggested commands are
           temporary canaries; Netra never applies them.
@@ -109,6 +123,25 @@ export default function Drops() {
       {(kernel?.nodes || []).map((n: any) => (
         <section className="card span3" key={`${n.node}-kernel-network`}>
           <p className="eyebrow">KERNEL NETWORK · {n.node}</p>
+          {n.window?.warming && <p className="empty-state">Collecting a second report after startup or counter reset.</p>}
+          {!n.window?.warming && (
+            <p>
+              Current interval: {Math.round(n.window?.seconds || 0)}s · {n.window?.startAt} → {n.window?.endAt}
+            </p>
+          )}
+          {n.window?.resetDetected && (
+            <p className="warning">Counter reset detected: {(n.window?.resetSignals || []).join(', ')}</p>
+          )}
+          {!n.window?.warming && (
+            <small>
+              rates/s: softnet {Number(n.window?.softnetDroppedPerSecond || 0).toFixed(3)} · squeeze{' '}
+              {Number(n.window?.softnetTimeSqueezePerSecond || 0).toFixed(3)} · rx-drop{' '}
+              {Number(n.window?.rxDroppedPerSecond || 0).toFixed(3)} · tx-drop{' '}
+              {Number(n.window?.txDroppedPerSecond || 0).toFixed(3)} · rx-missed{' '}
+              {Number(n.window?.rxMissedPerSecond || 0).toFixed(3)} · qdisc{' '}
+              {Number(n.window?.qdiscDropsPerSecond || 0).toFixed(3)}
+            </small>
+          )}
           <div className="list">
             {!(n.findings || []).length && <p className="empty-state">No current counter evidence requires a buffer recommendation.</p>}
             {(n.findings || []).map((f: any, i: number) => (
@@ -117,6 +150,7 @@ export default function Drops() {
                 <span className={`severity-badge ${f.severity}`}>{f.severity}</span>
                 <span>{f.layer}</span>
                 <small>{(f.evidence || []).join(' · ')}</small>
+                {f.windowSeconds > 0 && <small>Evidence window: {Math.round(f.windowSeconds)} seconds</small>}
                 <small>{f.explanation}</small>
                 <small>{f.recommendation}</small>
                 {f.tunable && (
@@ -146,6 +180,18 @@ export default function Drops() {
                   <b>{t.name}</b>
                   <code>{t.value}</code>
                   <small>{t.source}</small>
+                </div>
+              ))}
+            </div>
+          </details>
+          <details>
+            <summary>Current counter deltas ({(n.window?.counters || []).length})</summary>
+            <div className="list">
+              {(n.window?.counters || []).map((c: any) => (
+                <div className="agent wide" key={c.name}>
+                  <b>{c.name}</b>
+                  <span>Δ {c.delta}</span>
+                  <small>{Number(c.perSecond || 0).toFixed(3)} per second</small>
                 </div>
               ))}
             </div>

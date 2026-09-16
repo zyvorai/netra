@@ -143,13 +143,14 @@ Netra v0.19 adds a dedicated **Drop Diagnostics** surface independent of Cilium.
 
 ## Kernel Network Diagnostics
 
-Netra now correlates Linux network-buffer and congestion sysctls with cumulative
-`/proc/net/snmp` and `/proc/net/netstat` evidence plus the existing softnet,
-interface and qdisc counters. `GET /api/v1/ebpf/kernel-network` and
-`netractl ebpf kernel-network` explain where loss is occurring and provide
+Netra now correlates Linux network-buffer and congestion sysctls with
+windowed deltas from `/proc/net/snmp` and `/proc/net/netstat` plus the existing
+softnet, interface and qdisc counters. `GET /api/v1/ebpf/kernel-network?window=5m`
+and `netractl ebpf kernel-network 5m` explain where loss is occurring and provide
 review-only, reversible canary guidance. The Drops dashboard renders the same
-per-node findings and full collected tunable inventory. Netra never writes a
-sysctl. See `docs/kernel-network-diagnostics.md`.
+per-node findings, rates, reset/warm-up state and full collected tunable
+inventory. Netra never writes a sysctl. See
+`docs/kernel-network-diagnostics.md`.
 
 ## Behavior and Rate Insights
 

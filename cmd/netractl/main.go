@@ -124,7 +124,7 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
@@ -672,7 +672,14 @@ func ebpf() error {
 	case "drops":
 		return request("GET", "/api/v1/ebpf/drops", nil)
 	case "kernel-network", "sysctl":
-		return request("GET", "/api/v1/ebpf/kernel-network", nil)
+		path := "/api/v1/ebpf/kernel-network"
+		if len(os.Args) >= 4 {
+			if _, err := time.ParseDuration(os.Args[3]); err != nil {
+				return fmt.Errorf("window must be a duration such as 5m or 1h: %w", err)
+			}
+			path += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", path, nil)
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":

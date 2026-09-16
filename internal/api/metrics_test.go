@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/store"
@@ -67,5 +68,26 @@ func TestMetricsFastpathGauges(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing metric lines: %v\nbody=%s", want, body)
+	}
+}
+
+func TestMetricsKernelNetworkRates(t *testing.T) {
+	st := store.New()
+	now := time.Now().UTC()
+	boot := now.Add(-time.Hour)
+	st.Report(apiKernelReport(now.Add(-time.Minute), boot, 100))
+	st.Report(apiKernelReport(now, boot, 106))
+	s := &Server{store: st, metricsData: &telemetry{}, agentStaleAfter: 2 * time.Minute}
+	rec := httptest.NewRecorder()
+	s.metrics(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		"netra_kernel_network_findings 1",
+		"netra_kernel_network_warming_nodes 0",
+		"netra_udp_receive_buffer_error_rate 0.100000",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in metrics:\n%s", want, body)
+		}
 	}
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.27.81 — 2026-09-16
+
+- **Add rolling kernel-network deltas and rates.** The controller keeps a
+  bounded two-hour per-node sample history and evaluates the sysctl findings
+  over a selectable `30s..2h` window (default `5m`) instead of assigning
+  current severity from boot-lifetime totals. The API, CLI and Drops dashboard
+  expose deltas, per-second rates, warm-up state and reset signals. Agent
+  restarts and backwards counters suppress false spikes; conntrack utilization
+  remains a current gauge.
+  - `internal/store/kernel_network.go` (new): a bounded (10s min interval, 2h max age, 900 samples/node) per-node sample history, reusing `internal/store/rates.go`'s existing `deltaU64` reset-safe delta helper. `KernelNetworkWindows(window)` computes counter/softnet/interface/qdisc deltas and per-second rates over the requested interval, marking a node `Warming` until two same-process reports exist and `ResetDetected`/`ResetSignals` when a counter or `AgentStartedAt` goes backwards — never converted into a huge unsigned spike.
+  - `internal/kerneldiag/analyze.go`: new `BuildWindow(agents, windows)` evaluates findings against window deltas instead of cumulative totals (severity thresholds scaled to the window length); `Build` (cumulative, unwindowed) is kept for any caller that still wants boot-lifetime totals.
+  - `GET /api/v1/ebpf/kernel-network?window=5m` (clamped `30s..2h`, 400 on an invalid duration), `netractl ebpf kernel-network [1m|5m|15m|1h]`.
+  - New low-cardinality Prometheus rate gauges (`netra_kernel_network_findings`, `_critical_findings`, `_warning_findings`, `_warming_nodes`, `netra_softnet_drop_rate`, `netra_interface_rx_drop_rate`, `netra_qdisc_drop_rate`, `netra_udp_receive_buffer_error_rate`, `netra_tcp_listen_drop_rate`, `netra_tcp_memory_pressure_rate`, `netra_ip_discard_rate`, etc.), all over the fixed 5-minute window, no per-node/counter labels.
+  - Drops dashboard: a window selector (1m/5m/15m/1h), per-node warming/reset-detected banners, per-second rate line, and a "current counter deltas" detail panel, alongside the existing raw tunable inventory.
+  - Merged from an externally authored patch series (`0002-Add-windowed-kernel-network-rates.patch`, 2/2 — 1/2 was `0001-Add-kernel-network-pressure-diagnostics-2.patch`, confirmed byte-identical to the already-merged 0.27.78 patch, so nothing further to apply from that half). Only `CHANGELOG.md`'s hunk conflicted (stale base, predated 0.27.80) and was hand-merged; every other file applied cleanly via `git apply`.
+- Version bumped to 0.27.81 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.80 — 2026-09-16
 
 - **Wire the Ask Netra card and ChatOps `/netra ask` over to the in-process NL graph (`/api/v1/ai/agent`).** 0.27.79 added the graph endpoint itself; this switches its two existing human-facing callers to it instead of `/ai/ask`, so an operator sees the graph's step trace and any preview-only draft in the same round-trip instead of a second `/ai/draft` call.

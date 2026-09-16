@@ -67,6 +67,7 @@ type Store struct {
 	baseline              models.BehaviorBaseline
 	rateBaseline          models.RateBaseline
 	rateSamples           map[string][]rateSample
+	kernelNetworkSamples  map[string][]kernelNetworkSample
 	healthSamples         []models.ClusterHealthSample
 	ruleIndex             map[string]firewallRuleIndex
 	ruleIndexByKey        map[string]string
@@ -87,14 +88,15 @@ type Store struct {
 
 func New() *Store {
 	return &Store{
-		config:         models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
-		agents:         map[string]models.AgentReport{},
-		preflights:     map[string]preflight{},
-		captures:       map[string]models.CaptureSpec{},
-		rateSamples:    map[string][]rateSample{},
-		ruleIndex:      map[string]firewallRuleIndex{},
-		ruleIndexByKey: map[string]string{},
-		nextRuleSeq:    map[string]uint64{},
+		config:               models.EBPFFastPathConfig{Mode: "observe", ScopeMode: "all", Revision: 1},
+		agents:               map[string]models.AgentReport{},
+		preflights:           map[string]preflight{},
+		captures:             map[string]models.CaptureSpec{},
+		rateSamples:          map[string][]rateSample{},
+		kernelNetworkSamples: map[string][]kernelNetworkSample{},
+		ruleIndex:            map[string]firewallRuleIndex{},
+		ruleIndexByKey:       map[string]string{},
+		nextRuleSeq:          map[string]uint64{},
 	}
 }
 
@@ -1568,6 +1570,7 @@ func (s *Store) Report(r models.AgentReport) {
 		}
 	}
 	s.appendRateSampleLocked(r)
+	s.appendKernelNetworkSampleLocked(r)
 	s.agents[r.Node] = r
 }
 

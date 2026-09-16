@@ -5,8 +5,8 @@ cumulative protocol counters, then correlates them with the existing softnet,
 interface, qdisc and eBPF drop evidence.
 
 ```text
-GET /api/v1/ebpf/kernel-network
-netractl ebpf kernel-network
+GET /api/v1/ebpf/kernel-network?window=5m
+netractl ebpf kernel-network 5m
 # alias
 netractl ebpf sysctl
 ```
@@ -15,6 +15,14 @@ Netra does **not** write sysctls. A finding includes the observed value, the
 evidence that made the setting relevant, a conservative canary value where a
 safe numeric suggestion is possible, the apply command, and a rollback command
 that restores the observed value.
+
+The controller retains a bounded two-hour in-memory history and compares two
+reports inside the requested window (default `5m`, clamped to `30s..2h`). The
+response exposes each counter's `delta` and `perSecond` rate. Until two reports
+from the same agent process exist, the node is marked `warming` and cumulative
+drop findings are suppressed. Agent restarts and backwards counters are marked
+as resets and never converted into unsigned spikes. Conntrack utilization is a
+current gauge and remains available while the rate window warms.
 
 ## Where congestion and drops occur
 
@@ -46,10 +54,28 @@ The allow-list is intentionally bounded and contains no secrets:
 Missing settings are omitted because kernel version, build configuration and
 network namespace determine which files exist.
 
+## Prometheus
+
+The default five-minute window exports low-cardinality gauges without node,
+interface, qdisc or counter-name labels:
+
+- `netra_kernel_network_findings`, `_critical_findings`, `_warning_findings`
+  and `_warming_nodes`;
+- `netra_softnet_drop_rate`, `netra_softnet_time_squeeze_rate`;
+- `netra_interface_rx_drop_rate`, `netra_interface_tx_drop_rate`,
+  `netra_interface_rx_missed_rate`, `netra_qdisc_drop_rate`;
+- `netra_udp_receive_buffer_error_rate`,
+  `netra_udp_send_buffer_error_rate`;
+- `netra_tcp_listen_drop_rate`, `netra_tcp_receive_queue_drop_rate`,
+  `netra_tcp_memory_pressure_rate`, `netra_ip_discard_rate`.
+
+These rates are zero while the relevant node window is warming.
+
 ## Interpretation rules
 
-1. Counters are cumulative since boot. Capture two snapshots and compare deltas
-   over a known interval before estimating severity or packets per second.
+1. Agent snapshots are cumulative since boot. The controller endpoint converts
+   them to deltas over the requested interval before estimating current
+   severity. Raw totals remain visible for investigation.
 2. A small sysctl is not, by itself, a defect. Netra creates a recommendation
    only when matching loss/pressure evidence exists.
 3. Increasing a buffer helps absorb bursts; it cannot fix a sustained producer
@@ -62,8 +88,8 @@ network namespace determine which files exist.
 
 ## Suggested rollout
 
-1. Record the API response and node uptime.
-2. Reproduce the traffic window and collect a second response.
+1. Record the API response, selected interval and node uptime.
+2. Wait for window warm-up, then reproduce the traffic window.
 3. Locate the first layer whose counters increased; downstream counters can be
    symptoms of the same event.
 4. Fix CPU, consumer, routing, NIC or qdisc causes before changing buffers.

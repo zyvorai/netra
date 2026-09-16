@@ -3,6 +3,8 @@
 
 package models
 
+import "time"
+
 // KernelTunable is a read-only snapshot of one networking sysctl. Value is
 // deliberately kept as text because several important controls are vectors
 // (tcp_rmem/tcp_wmem/tcp_mem), bitmaps, algorithms, or qdisc names.
@@ -43,11 +45,45 @@ type KernelNetworkFinding struct {
 	ApplyCommand    string   `json:"applyCommand,omitempty"`
 	RollbackCommand string   `json:"rollbackCommand,omitempty"`
 	Risk            string   `json:"risk"`
+	WindowSeconds   float64  `json:"windowSeconds,omitempty"`
+}
+
+type KernelNetworkCounterDelta struct {
+	Name      string  `json:"name"`
+	Delta     uint64  `json:"delta"`
+	PerSecond float64 `json:"perSecond"`
+}
+
+// KernelNetworkWindow is computed by the controller from two agent reports.
+// It turns boot-lifetime counters into interval evidence and explicitly marks
+// restarts/resets instead of interpreting a backwards counter as zero loss.
+type KernelNetworkWindow struct {
+	Node               string                      `json:"node"`
+	StartAt            time.Time                   `json:"startAt,omitempty"`
+	EndAt              time.Time                   `json:"endAt,omitempty"`
+	Seconds            float64                     `json:"seconds,omitempty"`
+	Warming            bool                        `json:"warming"`
+	ResetDetected      bool                        `json:"resetDetected,omitempty"`
+	ResetSignals       []string                    `json:"resetSignals,omitempty"`
+	Counters           []KernelNetworkCounterDelta `json:"counters,omitempty"`
+	SoftnetDropped     uint64                      `json:"softnetDropped"`
+	SoftnetDroppedRate float64                     `json:"softnetDroppedPerSecond"`
+	SoftnetTimeSqueeze uint64                      `json:"softnetTimeSqueeze"`
+	SoftnetSqueezeRate float64                     `json:"softnetTimeSqueezePerSecond"`
+	RXDropped          uint64                      `json:"rxDropped"`
+	RXDroppedRate      float64                     `json:"rxDroppedPerSecond"`
+	TXDropped          uint64                      `json:"txDropped"`
+	TXDroppedRate      float64                     `json:"txDroppedPerSecond"`
+	RXMissed           uint64                      `json:"rxMissed"`
+	RXMissedRate       float64                     `json:"rxMissedPerSecond"`
+	QdiscDrops         uint64                      `json:"qdiscDrops"`
+	QdiscDropsRate     float64                     `json:"qdiscDropsPerSecond"`
 }
 
 type NodeKernelNetworkDiagnostics struct {
 	Node     string                 `json:"node"`
 	Snapshot KernelNetworkSnapshot  `json:"snapshot"`
+	Window   *KernelNetworkWindow   `json:"window,omitempty"`
 	Findings []KernelNetworkFinding `json:"findings,omitempty"`
 }
 
@@ -56,6 +92,7 @@ type KernelNetworkDiagnosticsSummary struct {
 	Findings int `json:"findings"`
 	Critical int `json:"critical"`
 	Warnings int `json:"warnings"`
+	Warming  int `json:"warming"`
 }
 
 type KernelNetworkDiagnosticsResponse struct {

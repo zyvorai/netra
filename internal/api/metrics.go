@@ -13,6 +13,7 @@ import (
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/insights"
+	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/observability"
@@ -120,6 +121,40 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_interface_rx_missed", "Aggregate interface receive missed-error counters across fresh agents.", float64(dropSummary.RXMissed))
 	metricGauge(w, "netra_interface_rx_nohandler", "Aggregate interface receive no-handler counters across fresh agents.", float64(dropSummary.RXNoHandler))
 	metricGauge(w, "netra_qdisc_dropped", "Aggregate tc-qdisc drop counters (via netlink) across fresh agents, all interfaces/qdiscs combined.", float64(dropSummary.QdiscDrops))
+	kernelWindows := s.store.KernelNetworkWindows(5 * time.Minute)
+	kernelDiagnostics := kerneldiag.BuildWindow(agents, kernelWindows)
+	var softnetDropRate, softnetSqueezeRate, rxDropRate, txDropRate, rxMissedRate, qdiscDropRate float64
+	counterRates := map[string]float64{}
+	for _, window := range kernelWindows {
+		if window.Warming {
+			continue
+		}
+		softnetDropRate += window.SoftnetDroppedRate
+		softnetSqueezeRate += window.SoftnetSqueezeRate
+		rxDropRate += window.RXDroppedRate
+		txDropRate += window.TXDroppedRate
+		rxMissedRate += window.RXMissedRate
+		qdiscDropRate += window.QdiscDropsRate
+		for _, counter := range window.Counters {
+			counterRates[counter.Name] += counter.PerSecond
+		}
+	}
+	metricGauge(w, "netra_kernel_network_findings", "Evidence-backed kernel network findings over the current five-minute window.", float64(kernelDiagnostics.Summary.Findings))
+	metricGauge(w, "netra_kernel_network_critical_findings", "Critical kernel network findings over the current five-minute window.", float64(kernelDiagnostics.Summary.Critical))
+	metricGauge(w, "netra_kernel_network_warning_findings", "Warning kernel network findings over the current five-minute window.", float64(kernelDiagnostics.Summary.Warnings))
+	metricGauge(w, "netra_kernel_network_warming_nodes", "Nodes without two same-process reports for kernel network delta analytics.", float64(kernelDiagnostics.Summary.Warming))
+	metricGaugeFloat(w, "netra_softnet_drop_rate", "Linux softnet drops per second over the current five-minute window.", softnetDropRate)
+	metricGaugeFloat(w, "netra_softnet_time_squeeze_rate", "Linux softnet budget exhaustions per second over the current five-minute window.", softnetSqueezeRate)
+	metricGaugeFloat(w, "netra_interface_rx_drop_rate", "Aggregate interface receive drops per second over the current five-minute window.", rxDropRate)
+	metricGaugeFloat(w, "netra_interface_tx_drop_rate", "Aggregate interface transmit drops per second over the current five-minute window.", txDropRate)
+	metricGaugeFloat(w, "netra_interface_rx_missed_rate", "Aggregate interface receive missed packets per second over the current five-minute window.", rxMissedRate)
+	metricGaugeFloat(w, "netra_qdisc_drop_rate", "Aggregate qdisc drops per second over the current five-minute window.", qdiscDropRate)
+	metricGaugeFloat(w, "netra_udp_receive_buffer_error_rate", "UDP receive-buffer errors per second over the current five-minute window.", counterRates["Udp.RcvbufErrors"])
+	metricGaugeFloat(w, "netra_udp_send_buffer_error_rate", "UDP send-buffer errors per second over the current five-minute window.", counterRates["Udp.SndbufErrors"])
+	metricGaugeFloat(w, "netra_tcp_listen_drop_rate", "TCP listen and request-queue drops per second over the current five-minute window.", counterRates["TcpExt.ListenDrops"]+counterRates["TcpExt.ListenOverflows"]+counterRates["TcpExt.TCPReqQFullDrop"]+counterRates["TcpExt.TCPDeferAcceptDrop"])
+	metricGaugeFloat(w, "netra_tcp_receive_queue_drop_rate", "TCP receive/backlog drops per second over the current five-minute window.", counterRates["TcpExt.TCPBacklogDrop"]+counterRates["TcpExt.TCPRcvQDrop"]+counterRates["TcpExt.TCPZeroWindowDrop"])
+	metricGaugeFloat(w, "netra_tcp_memory_pressure_rate", "TCP memory-pressure events per second over the current five-minute window.", counterRates["TcpExt.TCPMemoryPressures"]+counterRates["TcpExt.TCPAbortOnMemory"]+counterRates["TcpExt.TCPWqueueTooBig"])
+	metricGaugeFloat(w, "netra_ip_discard_rate", "IP-layer discards and no-route events per second over the current five-minute window.", counterRates["Ip.InDiscards"]+counterRates["Ip.OutDiscards"]+counterRates["IpExt.InNoRoutes"]+counterRates["IpExt.OutNoRoutes"])
 	pathSummary := pathdiag.Build(agents, 10).Summary
 	metricGauge(w, "netra_tcp_connect_established_measured", "TCP active establishments with connect latency measured by Netra.", float64(pathSummary.ConnectionsMeasured))
 	metricGauge(w, "netra_tcp_connect_average_latency_us", "Average measured TCP active connect establishment latency in microseconds.", float64(pathSummary.AverageConnectUS))
@@ -265,4 +300,8 @@ func metricCounter(w http.ResponseWriter, name, help string, value uint64) {
 }
 func metricGauge(w http.ResponseWriter, name, help string, value float64) {
 	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %.0f\n", name, help, name, name, value)
+}
+
+func metricGaugeFloat(w http.ResponseWriter, name, help string, value float64) {
+	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %.6f\n", name, help, name, name, value)
 }
