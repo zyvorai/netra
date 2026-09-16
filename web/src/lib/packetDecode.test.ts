@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decodeL3L4, decodeDetailed, hexDump } from './packetDecode';
+import { decodeL3L4, decodeDetailed, hexDump, layerClass } from './packetDecode';
 
 function ethIPv4TCP(srcIP: [number, number, number, number], dstIP: [number, number, number, number], srcPort: number, dstPort: number, flags: number): Uint8Array {
   const buf = new Uint8Array(14 + 20 + 20);
@@ -93,5 +93,22 @@ describe('hexDump', () => {
   it('renders bytes as lowercase space-separated hex, capped at max', () => {
     expect(hexDump(new Uint8Array([0, 255, 16]))).toBe('00 ff 10');
     expect(hexDump(new Uint8Array(10).fill(1), 3).split(' ')).toHaveLength(3);
+  });
+});
+
+describe('layerClass', () => {
+  it('maps known layer names to their color class', () => {
+    expect(layerClass('Ethernet II')).toBe('layer-eth');
+    expect(layerClass('Internet Protocol Version 4')).toBe('layer-ip');
+    expect(layerClass('Internet Protocol Version 6')).toBe('layer-ip');
+    expect(layerClass('Transmission Control Protocol')).toBe('layer-tcp');
+    expect(layerClass('User Datagram Protocol')).toBe('layer-udp');
+    expect(layerClass('Internet Control Message Protocol')).toBe('layer-icmp');
+    expect(layerClass('Internet Control Message Protocol v6')).toBe('layer-icmp');
+  });
+
+  it('returns empty string for an unrecognized layer name', () => {
+    expect(layerClass('Frame')).toBe('');
+    expect(layerClass('Workload Attribution')).toBe('');
   });
 });

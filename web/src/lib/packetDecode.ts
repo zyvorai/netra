@@ -182,3 +182,16 @@ export function decodeDetailed(data: Uint8Array): DecodedLayer[] {
 
   return layers;
 }
+
+// layerClass maps a decodeDetailed() layer name to a CSS class that colors
+// it the same hue as its live-view row equivalent (layer-tcp matches
+// proto-tcp, etc.) — see the matching CSS comment in styles.css for why the
+// class needs to combine with ".layer" there rather than stand alone.
+export function layerClass(name: string): string {
+  if (name === 'Ethernet II') return 'layer-eth';
+  if (name.startsWith('Internet Protocol')) return 'layer-ip';
+  if (name.startsWith('Transmission Control')) return 'layer-tcp';
+  if (name.startsWith('User Datagram')) return 'layer-udp';
+  if (name.startsWith('Internet Control Message')) return 'layer-icmp';
+  return '';
+}

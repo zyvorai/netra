@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.91 — 2026-09-16
+
+- **Capture's Wireshark-style packet detail: color each protocol layer, not just the summary row.** Live-cluster feedback on 0.27.87's detail panel: every layer heading (Ethernet II, IP, TCP, …) rendered the same flat white, unlike the already-colored live-view row above it.
+  - New `layerClass()` in `web/src/lib/packetDecode.ts` maps a `decodeDetailed()` layer name to a color class matching its live-view row equivalent (`layer-tcp` = same green as `proto-tcp`, `layer-udp` = same cyan as `proto-udp`, `layer-icmp` = same amber as `proto-icmp`), plus two new hues for layers with no row equivalent (`layer-eth` purple, `layer-ip` blue) and a distinct shade for Netra's own "Workload Attribution" annotation so it doesn't read as a wire-format layer.
+  - `web/src/styles.css`: `.packetdetail .layer.layer-* > b` — needs the two-class selector to outrank `.packetdetail .layer > b`, the same cascade lesson as 0.27.88's `.flowrow .proto-*` fix.
+  - 2 new unit tests in `packetDecode.test.ts`.
+- Version bumped to 0.27.91 across all tracked locations; `web/package-lock.json` regenerated.
+
 ## 0.27.90 — 2026-09-16
 
 - **Congestion Map: color every stage cell by severity, not just critical/warning borders.** `.stage-cell.ok`/`.stage-cell.warming` had no styling at all, so a healthy cluster's grid (the common case) read as flat, monochrome gray boxes. New `--success-bg`/`--success-border`/`--info-bg`/`--info-border` tokens (light + dark) give every one of the four severities (`ok`/`warming`/`warning`/`critical`) a full tinted card background, not just a border-color change.

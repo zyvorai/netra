@@ -4,7 +4,7 @@ import CaptureHistory from '../components/CaptureHistory';
 import TerminalFrame from '../components/TerminalFrame';
 import Sparkline from '../components/Sparkline';
 import { useRoute } from '../hooks/useInvestigation';
-import { decodeDetailed, decodeL3L4, hexDump } from '../lib/packetDecode';
+import { decodeDetailed, decodeL3L4, hexDump, layerClass } from '../lib/packetDecode';
 import { buildIPIndex, labelForIP } from '../lib/workloadAttribution';
 import { bucketRates, toCSV, type ExportRow } from '../lib/captureExport';
 import { loadPresets, savePresets, upsertPreset, removePreset, type CapturePreset } from '../lib/capturePresets';
@@ -513,14 +513,14 @@ export default function Capture() {
                   {expanded === i && (
                     <div className="packetdetail">
                       {(w?.src || w?.dst) && (
-                        <div className="layer">
+                        <div className="layer layer-workload">
                           <b>Workload Attribution</b>
                           {w?.src && <div><span>Source</span><span>{w.src}</span></div>}
                           {w?.dst && <div><span>Destination</span><span>{w.dst}</span></div>}
                         </div>
                       )}
                       {decodeDetailed(f.data).map((layer) => (
-                        <div className="layer" key={layer.name}>
+                        <div className={`layer ${layerClass(layer.name)}`} key={layer.name}>
                           <b>{layer.name}</b>
                           {layer.fields.map((field) => (
                             <div key={field.label}><span>{field.label}</span><span>{field.value}</span></div>

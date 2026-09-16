@@ -1129,6 +1129,17 @@ code {
 .packetdetail .layer > div { display: flex; gap: 8px; line-height: 1.5; }
 .packetdetail .layer > div > span:first-child { min-width: 160px; color: var(--terminal-text-dim); }
 .packetdetail .layer > div > span:last-child { color: var(--terminal-text); overflow-wrap: anywhere; }
+/* Wireshark-style layer coloring — one hue per protocol layer, matching
+   the live-view row colors (proto-tcp/udp/icmp) where a layer has a row
+   equivalent. Needs the extra .layer-* class in the selector to outrank
+   ".packetdetail .layer > b" above (same two-class-beats-one lesson as
+   .flowrow .proto-*: a bare ".layer-tcp > b" would lose that cascade). */
+.packetdetail .layer.layer-eth > b { color: var(--accent-purple); }
+.packetdetail .layer.layer-ip > b { color: var(--apple-blue); }
+.packetdetail .layer.layer-tcp > b { color: var(--accent-green); }
+.packetdetail .layer.layer-udp > b { color: var(--accent-cyan); }
+.packetdetail .layer.layer-icmp > b { color: var(--accent-amber); }
+.packetdetail .layer.layer-workload > b { color: var(--accent-purple-hover); }
 .packetdetail pre {
   margin-top: 10px;
   padding-top: 10px;
