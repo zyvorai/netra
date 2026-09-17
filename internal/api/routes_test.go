@@ -67,6 +67,7 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/ebpf/scan-findings"},
 		{"GET", "/api/v1/ebpf/coverage"},
 		{"GET", "/api/v1/fleet"},
+		{"GET", "/api/v1/node-resources"},
 		{"GET", "/api/v1/handoff"},
 		{"GET", "/api/v1/scorecard"},
 		{"GET", "/api/v1/ebpf/reasons"},

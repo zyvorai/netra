@@ -113,6 +113,12 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_node_resources", method: "GET", path: "/api/v1/node-resources",
+			description: "Per-node CPU/memory/load-average snapshot plus per-workload cgroup v2 CPU/memory usage, top-N by CPU. A \"top\"-like view attributed to Kubernetes workloads rather than raw host PIDs. Observe-only.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max top-CPU workload rows, 1-200. Default 20.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_handoff", method: "GET", path: "/api/v1/handoff",
 			description: "On-call pack: report + playbook + coverage + fleet + audit + drop reasons.",
 			schema:      objSchema(map[string]any{"format": enumProp("Pack encoding.", "markdown", "json")}),

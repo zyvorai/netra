@@ -37,6 +37,7 @@ import (
 	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
+	"github.com/zyvorai/netra/internal/sysres"
 	"github.com/zyvorai/netra/internal/workload"
 )
 
@@ -131,6 +132,15 @@ type Agent struct {
 	prevNetNS map[uint64]uint64
 	// prevExeHash mirrors prevCaps for observe-only exe-hash-change watch.
 	prevExeHash map[uint64]string
+	// prevHostCPU/prevResourceSampleAt hold the host's previous /proc/stat
+	// CPU-jiffies sample and when it was taken — CPU usage is a rate, and
+	// internal/sysres.Build (stateless, per-request) has no store/window
+	// access to diff two samples itself, so the agent keeps its own.
+	prevHostCPU          sysres.HostSample
+	prevResourceSampleAt time.Time
+	// prevWorkloadCPU mirrors prevHostCPU per-workload: cgroup ID -> last
+	// cpu.stat usage_usec sample.
+	prevWorkloadCPU map[uint64]uint64
 	// startedAt is set once here at process boot, reported on every cycle as
 	// AgentReport.AgentStartedAt — lets consumers (internal/capdrift) detect
 	// a recent restart, which resets prevCaps and opens a real blind-spot
@@ -906,6 +916,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	qdiscStats := a.readQdiscStats()
 	kernelNetwork := kerneldiag.Collect("/")
 	sysctlAudit := sysctlaudit.Collect("/")
+	nodeResources := a.readNodeResources()
 	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
 	histJSON := models.NetworkHistogramReport{
 		TCPRetransmissions: models.HistogramSnapshot{
@@ -945,6 +956,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		QdiscStats:         qdiscStats,
 		KernelNetwork:      kernelNetwork,
 		SysctlNetworkAudit: sysctlAudit,
+		NodeResources:      nodeResources,
 	})
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/zyvorai/netra/internal/intel"
 	"github.com/zyvorai/netra/internal/reasons"
 	"github.com/zyvorai/netra/internal/scorecard"
+	"github.com/zyvorai/netra/internal/sysres"
 	"github.com/zyvorai/netra/internal/talkers"
 	"github.com/zyvorai/netra/internal/watchlist"
 )
@@ -21,6 +22,15 @@ import (
 func (s *Server) fleetInventory(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now().UTC()
 	writeJSON(w, 200, fleet.Build(s.store.AgentStatuses(now, s.agentStaleAfter), now))
+}
+
+func (s *Server) nodeResources(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	limit := 20
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 200 {
+		limit = n
+	}
+	writeJSON(w, 200, sysres.Build(s.store.AgentStatuses(now, s.agentStaleAfter), now, limit))
 }
 
 func (s *Server) topTalkers(w http.ResponseWriter, r *http.Request) {

@@ -310,6 +310,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/intel/preview", s.auth(http.HandlerFunc(s.intelPreview)))
 	mux.Handle("GET /api/v1/ebpf/coverage", s.auth(http.HandlerFunc(s.ebpfCoverage)))
 	mux.Handle("GET /api/v1/fleet", s.auth(http.HandlerFunc(s.fleetInventory)))
+	mux.Handle("GET /api/v1/node-resources", s.auth(http.HandlerFunc(s.nodeResources)))
 	mux.Handle("GET /api/v1/handoff", s.auth(http.HandlerFunc(s.operatorHandoff)))
 	mux.Handle("GET /api/v1/scorecard", s.auth(http.HandlerFunc(s.operatorScorecard)))
 	mux.Handle("GET /api/v1/ebpf/reasons", s.auth(http.HandlerFunc(s.dropReasons)))

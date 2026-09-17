@@ -24,6 +24,7 @@ import Traffic from './pages/Traffic';
 import Capture from './pages/Capture';
 import CongestionMap from './pages/CongestionMap';
 import SysctlAudit from './pages/SysctlAudit';
+import NodeResources from './pages/NodeResources';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
@@ -85,6 +86,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     eyebrow: 'Sysctl Audit',
     title: 'Network hardening, checked.',
     lede: 'A flat, baseline-checked inventory of security posture, IPv6, TCP lifecycle, conntrack timeouts, and ARP/bridge sysctls — separate from Congestion Map’s evidence-correlated findings.',
+    tint: 'amber',
+  },
+  'node-resources': {
+    eyebrow: 'Node Resources',
+    title: 'CPU, memory, and load — per node.',
+    lede: 'A "top"-like snapshot of host CPU, memory, and load average, plus per-workload cgroup CPU/memory usage — complements Sysctl Audit (settings) and Congestion Map (network-stack pressure) with raw compute pressure.',
     tint: 'amber',
   },
   l7: {
@@ -214,6 +221,7 @@ export default function App() {
     drops: <Drops />,
     congestion: <CongestionMap />,
     'sysctl-audit': <SysctlAudit />,
+    'node-resources': <NodeResources />,
     l7: <L7 />,
     insights: <Insights />,
     topology: <Topology />,

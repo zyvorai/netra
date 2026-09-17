@@ -16,3 +16,15 @@ func TestBuildSortsAndCounts(t *testing.T) {
 		t.Fatalf("%#v", inv)
 	}
 }
+
+func TestBuildPassesThroughNodeResources(t *testing.T) {
+	inv := Build([]models.AgentStatus{
+		{AgentReport: models.AgentReport{Node: "a", NodeResources: models.NodeResourceSnapshot{
+			Host: models.HostResourceSnapshot{CPUPercent: 55, MemoryUsedBytes: 100, MemoryTotalBytes: 200, LoadAvg1: 1.25},
+		}}},
+	}, time.Now())
+	n := inv.Nodes[0]
+	if n.CPUPercent != 55 || n.MemoryUsedBytes != 100 || n.MemoryTotalBytes != 200 || n.LoadAvg1 != 1.25 {
+		t.Fatalf("resource fields did not pass through from AgentReport.NodeResources.Host: %#v", n)
+	}
+}

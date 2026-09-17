@@ -1113,6 +1113,14 @@ type AgentReport struct {
 	// correlated to observed congestion. Netra never applies these values.
 	// See internal/sysctlaudit.
 	SysctlNetworkAudit SysctlAuditSnapshot `json:"sysctlNetworkAudit,omitempty"`
+	// NodeResources is a per-node "top"-like snapshot: host CPU/memory/load
+	// average plus per-workload cgroup v2 CPU/memory usage, attributed via
+	// each WorkloadIdentity's already-known CgroupPath rather than a full
+	// host PID scan. CPUPercent fields are computed by the agent itself as
+	// a delta against its own previous-tick sample — most values here are
+	// cumulative counters, not current settings, and internal/sysres.Build
+	// has no store/window access to diff them itself. See internal/sysres.
+	NodeResources NodeResourceSnapshot `json:"nodeResources,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

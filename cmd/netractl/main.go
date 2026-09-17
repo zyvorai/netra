@@ -56,6 +56,8 @@ func main() {
 		err = watchlistCmd(os.Args[2:])
 	case "fleet":
 		err = request("GET", "/api/v1/fleet", nil)
+	case "node-resources":
+		err = request("GET", "/api/v1/node-resources", nil)
 	case "handoff":
 		err = handoffCmd(os.Args[2:])
 	case "scorecard":
@@ -107,7 +109,7 @@ func usage() {
   playbooks [--format markdown|json]
   intel preview FILE
   watchlist match FILE
-  fleet | handoff [--format markdown|json] | scorecard | talkers
+  fleet | node-resources | handoff [--format markdown|json] | scorecard | talkers
   namespaces | protocols | baselines | ports | dnsboard | lease
   capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]
   capture stop NODE | capture status

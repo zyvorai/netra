@@ -19,6 +19,17 @@ type Node struct {
 	Workloads    int       `json:"workloads"`
 	Destinations int       `json:"destinations"`
 	Events       int       `json:"events"`
+
+	// Resource fields are an at-a-glance summary from internal/sysres —
+	// see docs/node-resources.md for the full per-workload breakdown.
+	// Zero-valued (and omitted from JSON) if the agent hasn't reported a
+	// sample yet, which is indistinguishable here from "genuinely idle";
+	// callers wanting to tell those apart should use GET
+	// /api/v1/node-resources directly.
+	CPUPercent       float64 `json:"cpuPercent,omitempty"`
+	MemoryUsedBytes  uint64  `json:"memoryUsedBytes,omitempty"`
+	MemoryTotalBytes uint64  `json:"memoryTotalBytes,omitempty"`
+	LoadAvg1         float64 `json:"loadAvg1,omitempty"`
 }
 
 type Inventory struct {
@@ -35,7 +46,12 @@ func Build(agents []models.AgentStatus, now time.Time) Inventory {
 	}
 	inv := Inventory{GeneratedAt: now.UTC(), Nodes: make([]Node, 0, len(agents))}
 	for _, a := range agents {
-		n := Node{Node: a.Node, Mode: a.Mode, Stale: a.Stale, AgeSeconds: a.AgeSeconds, ObservedAt: a.ObservedAt, Hooks: len(a.Hooks), Programs: len(a.Programs), Workloads: len(a.Workloads), Destinations: len(a.Stats), Events: len(a.Events)}
+		n := Node{
+			Node: a.Node, Mode: a.Mode, Stale: a.Stale, AgeSeconds: a.AgeSeconds, ObservedAt: a.ObservedAt,
+			Hooks: len(a.Hooks), Programs: len(a.Programs), Workloads: len(a.Workloads), Destinations: len(a.Stats), Events: len(a.Events),
+			CPUPercent: a.NodeResources.Host.CPUPercent, MemoryUsedBytes: a.NodeResources.Host.MemoryUsedBytes,
+			MemoryTotalBytes: a.NodeResources.Host.MemoryTotalBytes, LoadAvg1: a.NodeResources.Host.LoadAvg1,
+		}
 		for _, p := range a.Programs {
 			if p.Attached {
 				n.Attached++
