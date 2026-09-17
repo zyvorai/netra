@@ -20,6 +20,13 @@ npm run serve   # preview the production build locally
 
 Screenshots and the demo GIF are **not** duplicated into `website/static/` — `docusaurus.config.ts`'s `staticDirectories` serves `../docs/ux` and `../docs/social` in place, so README and this site both reference the same physical files. Add new screenshots to `docs/ux/` in the repo root, not here.
 
+## Sales / buyer downloads
+
+Customer-facing PDFs and editable sources live in `website/static/sales/` and
+are served at `/netra/sales/...`. The Resources page (`/resources`) links them
+for download. Update those files in place when refreshing the perspective or
+brochure.
+
 ## Deployment
 
 Deployment is automatic: `.github/workflows/pages.yml` builds and publishes this site to GitHub Pages on every push to `main` that touches `website/`, `docs/ux/`, or `docs/social/`. There is no manual `npm run deploy` step — don't use Docusaurus's built-in `deploy` script, it targets a `gh-pages` branch this repo doesn't use.

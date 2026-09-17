@@ -73,6 +73,11 @@ const config: Config = {
           label: 'Docs',
         },
         {
+          to: '/resources',
+          label: 'Resources',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/zyvorai/netra',
           label: 'GitHub',
           position: 'right',
@@ -93,6 +98,7 @@ const config: Config = {
             {label: 'Quickstart', to: '/docs/getting-started/quickstart'},
             {label: 'Architecture', to: '/docs/core-concepts/architecture'},
             {label: 'Security', to: '/docs/security'},
+            {label: 'Resources (downloads)', to: '/resources'},
           ],
         },
         {
@@ -114,6 +120,14 @@ const config: Config = {
           items: [
             {label: 'zyvor.dev', href: 'https://zyvor.dev'},
             {label: 'sales@zyvor.dev', href: 'mailto:sales@zyvor.dev'},
+            {
+              label: 'Product Perspective (PDF)',
+              href: 'pathname:///sales/Zyvor-Netra-Product-Perspective.pdf',
+            },
+            {
+              label: 'Product Brochure (PDF)',
+              href: 'pathname:///sales/Zyvor-Netra-Product-Brochure.pdf',
+            },
           ],
         },
       ],

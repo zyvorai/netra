@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Docs site: buyer resources downloads.** Product Perspective (PDF/PPTX) and
+  Product Brochure (PDF/DOCX) served from `website/static/sales/` with a
+  Resources page at `/resources` (navbar + footer + homepage CTA). Live on
+  GitHub Pages after deploy: https://zyvorai.github.io/netra/resources
 - **Docs: auto-capture + veth CI runbooks.** Expanded `docs/capture.md` (env/Helm
   table, artifact download, `scripts/ci-auto-capture-veth.sh` how-to),
   `docs/alerting.md` Helm `autoCapture` example, cross-links from

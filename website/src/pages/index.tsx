@@ -37,6 +37,11 @@ function HomepageHeader() {
               </Link>
               <Link
                 className="button button--outline button--lg button--secondary"
+                to="/resources">
+                Download resources
+              </Link>
+              <Link
+                className="button button--outline button--lg button--secondary"
                 to="https://github.com/zyvorai/netra">
                 View on GitHub
               </Link>
