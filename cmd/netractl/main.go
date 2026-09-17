@@ -29,19 +29,27 @@ func ensureConfig() {
 
 // loadNetraConfig applies ~/.netra defaults for lab/self-signed installs:
 // optional env file, api-key file, and loopback TLS skip-verify when unset.
+//
+// base is only updated when NETRA_URL is set (after dotenv). The package
+// default already covers the unset case — always assigning here would
+// clobber httptest URLs that unit tests set before the first doRequest.
 func loadNetraConfig() {
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
-		loadEnvFile(filepath.Join(home, ".netra", "env"))
-		if os.Getenv("NETRA_API_KEY") == "" {
-			if b, err := os.ReadFile(filepath.Join(home, ".netra", "api-key")); err == nil {
-				if k := strings.TrimSpace(string(b)); k != "" {
-					_ = os.Setenv("NETRA_API_KEY", k)
+	if os.Getenv("NETRA_SKIP_DOTENV") != "1" {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			loadEnvFile(filepath.Join(home, ".netra", "env"))
+			if os.Getenv("NETRA_API_KEY") == "" {
+				if b, err := os.ReadFile(filepath.Join(home, ".netra", "api-key")); err == nil {
+					if k := strings.TrimSpace(string(b)); k != "" {
+						_ = os.Setenv("NETRA_API_KEY", k)
+					}
 				}
 			}
 		}
 	}
-	base = strings.TrimRight(env("NETRA_URL", "https://127.0.0.1:30870"), "/")
+	if v := strings.TrimSpace(os.Getenv("NETRA_URL")); v != "" {
+		base = strings.TrimRight(v, "/")
+	}
 	if os.Getenv("NETRA_TLS_INSECURE") == "" && urlIsLoopback(base) {
 		// Chart default is a self-signed in-pod cert; localhost NodePort
 		// access cannot verify it without installing the CA.

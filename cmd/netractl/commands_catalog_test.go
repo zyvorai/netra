@@ -15,19 +15,11 @@ import (
 )
 
 func TestAllCLICommandsAgainstMock(t *testing.T) {
-	t.Setenv("NETRA_CLI_NO_BANNER", "1")
 	t.Setenv("NETRA_CLI_HELP", "plain")
-	t.Setenv("NO_COLOR", "1")
-	t.Setenv("NETRA_TLS_INSECURE", "true")
 
 	srv := httptest.NewServer(http.HandlerFunc(mockNetraAPI))
 	t.Cleanup(srv.Close)
-
-	t.Setenv("NETRA_URL", srv.URL)
-	ensureConfig() // Once; may have loaded ~/.netra — pin mock base after.
-	oldBase := base
-	base = srv.URL
-	t.Cleanup(func() { base = oldBase })
+	useTestServer(t, srv.URL)
 
 	catalog := allCLICommands()
 	if len(catalog) < 80 {

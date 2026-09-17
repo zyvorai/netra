@@ -22,10 +22,8 @@ func TestDenyImportParsesFileAndPosts(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"applied":3,"failed":0,"results":[]}`))
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	content := "# comment\n\nip 203.0.113.5 egress\ncidr 10.0.0.0/8 ingress\ndns evil.example.com\n"
 	path := filepath.Join(t.TempDir(), "deny.txt")

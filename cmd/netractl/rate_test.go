@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 )
 
@@ -20,11 +19,9 @@ func TestRateSetWithBPSPostsBothFields(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "rate", "set", "10.0.0.9", "500", "5000000"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "rate", "set", "10.0.0.9", "500", "5000000")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -41,11 +38,9 @@ func TestRateSetBPSOnlyWithZeroPPS(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "rate", "set", "10.0.0.10", "0", "2000"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "rate", "set", "10.0.0.10", "0", "2000")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -56,9 +51,7 @@ func TestRateSetBPSOnlyWithZeroPPS(t *testing.T) {
 }
 
 func TestRateSetRejectsZeroPPSWithoutBPS(t *testing.T) {
-	oldArgs := os.Args
-	os.Args = []string{"netractl", "ebpf", "rate", "set", "10.0.0.11", "0"}
-	defer func() { os.Args = oldArgs }()
+	withArgs(t, "ebpf", "rate", "set", "10.0.0.11", "0")
 	if err := ebpf(); err == nil {
 		t.Fatal("expected an error for PPS=0 with no BPS given")
 	}

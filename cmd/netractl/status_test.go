@@ -11,7 +11,7 @@ import (
 func TestFormatStatusReport(t *testing.T) {
 	var buf bytes.Buffer
 	formatStatusReport(&buf, &statusReport{
-		Version:     "0.27.96",
+		Version:     "0.27.97",
 		Datapath:    "standalone-ebpf",
 		Mode:        "observe",
 		Agents:      2,

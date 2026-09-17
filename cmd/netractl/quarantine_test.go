@@ -44,10 +44,8 @@ func TestNetpolQuarantineComposesCallsWithLowRisk(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	err := netpolQuarantine([]string{"--namespace", "prod", "--pod", "api", "--allow-peer", "10.96.0.10:53/UDP", "--lease", "10m"})
 	if err != nil {
@@ -80,10 +78,8 @@ func TestNetpolQuarantineRequiresConfirmRiskWhenCritical(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	if err := netpolQuarantine([]string{"--namespace", "prod"}); err == nil {
 		t.Fatal("expected an error without --confirm-risk")
@@ -113,10 +109,8 @@ func TestNetpolQuarantineBarePeerDefaultsToAnyPort(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		}
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	if err := netpolQuarantine([]string{"--pod", "api", "--namespace", "prod", "--allow-peer", "10.0.0.5"}); err != nil {
 		t.Fatal(err)

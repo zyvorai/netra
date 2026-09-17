@@ -28,10 +28,8 @@ func TestPlanAndApplyUsesReceipt(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 	if err := planAndApply([]byte(`{"kind":"CiliumNetworkPolicy"}`), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +56,8 @@ func TestPlanAndApplyRequiresHighRiskConfirmation(t *testing.T) {
 		}
 		http.NotFound(w, r)
 	}))
-	defer srv.Close()
-	old := base
-	base = srv.URL
-	defer func() { base = old }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 	if err := planAndApply([]byte(`{"kind":"CiliumNetworkPolicy"}`), ""); err == nil {
 		t.Fatal("expected high-risk confirmation error")
 	}
@@ -102,13 +98,11 @@ func TestPolicyArchiveExportImport(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	file := t.TempDir() + "/history.json"
-	os.Args = []string{"netractl", "policy", "archive", "export", file}
+	withArgs(t, "policy", "archive", "export", file)
 	if err := policy(); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +110,7 @@ func TestPolicyArchiveExportImport(t *testing.T) {
 	if err != nil || string(got) != string(archive) {
 		t.Fatalf("got=%s err=%v", got, err)
 	}
-	os.Args = []string{"netractl", "policy", "archive", "import", file, "--mode", "replace"}
+	withArgs(t, "policy", "archive", "import", file, "--mode", "replace")
 	if err := policy(); err != nil {
 		t.Fatal(err)
 	}
@@ -147,16 +141,14 @@ func TestEBPFDNSAndProcessCommands(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
-	os.Args = []string{"netractl", "ebpf", "dns", "add", "telemetry.example.com"}
+	withArgs(t, "ebpf", "dns", "add", "telemetry.example.com")
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
 	}
-	os.Args = []string{"netractl", "ebpf", "process", "add", "curl"}
+	withArgs(t, "ebpf", "process", "add", "curl")
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
 	}
@@ -178,20 +170,18 @@ func TestInsightsRateCommands(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
 
 	for _, args := range [][]string{
-		{"netractl", "insights", "rates", "5m"},
-		{"netractl", "insights", "rate-drift", "5m"},
-		{"netractl", "insights", "exposure", "5m"},
-		{"netractl", "insights", "remediations", "5m"},
-		{"netractl", "insights", "rate-baseline", "capture", "5m"},
-		{"netractl", "insights", "rate-baseline", "clear"},
+		{"insights", "rates", "5m"},
+		{"insights", "rate-drift", "5m"},
+		{"insights", "exposure", "5m"},
+		{"insights", "remediations", "5m"},
+		{"insights", "rate-baseline", "capture", "5m"},
+		{"insights", "rate-baseline", "clear"},
 	} {
-		os.Args = args
+		withArgs(t, args...)
 		if err := insightCmd(); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}

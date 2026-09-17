@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 )
 
@@ -19,11 +18,9 @@ func TestCapabilityAddPostsName(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "capability", "add", "CAP_NET_RAW"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "capability", "add", "CAP_NET_RAW")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -40,11 +37,9 @@ func TestCapabilityDeletePostsToDeletePath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "capability", "del", "CAP_NET_ADMIN"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "capability", "del", "CAP_NET_ADMIN")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)

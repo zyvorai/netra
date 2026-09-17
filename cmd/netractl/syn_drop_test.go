@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 )
 
@@ -19,11 +18,9 @@ func TestSynDropAddPostsAddressAndDirection(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "syn-drop", "add", "203.0.113.9", "egress"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "syn-drop", "add", "203.0.113.9", "egress")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -40,11 +37,9 @@ func TestSynDropDeletePostsToDeletePath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "syn-drop", "del", "203.0.113.9", "ingress"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "syn-drop", "del", "203.0.113.9", "ingress")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -63,11 +58,9 @@ func TestSynDropCIDRAddPostsCIDRAndDirection(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "syn-drop-cidr", "add", "203.0.113.0/24", "egress"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "syn-drop-cidr", "add", "203.0.113.0/24", "egress")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -84,11 +77,9 @@ func TestSynDropCIDRDeletePostsToDeletePath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "syn-drop-cidr", "del", "203.0.113.0/24", "ingress"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "syn-drop-cidr", "del", "203.0.113.0/24", "ingress")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)

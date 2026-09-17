@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 )
 
@@ -20,11 +19,9 @@ func TestConnRateLimitAddPostsSelectorAndPerSecond(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "conn-rate-limit", "add", "--namespace", "payments", "--label", "tier=hot", "--per-second", "50"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "conn-rate-limit", "add", "--namespace", "payments", "--label", "tier=hot", "--per-second", "50")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)
@@ -43,9 +40,7 @@ func TestConnRateLimitAddPostsSelectorAndPerSecond(t *testing.T) {
 }
 
 func TestConnRateLimitAddRejectsZeroPerSecond(t *testing.T) {
-	oldArgs := os.Args
-	os.Args = []string{"netractl", "ebpf", "conn-rate-limit", "add", "--namespace", "payments", "--per-second", "0"}
-	defer func() { os.Args = oldArgs }()
+	withArgs(t, "ebpf", "conn-rate-limit", "add", "--namespace", "payments", "--per-second", "0")
 	if err := ebpf(); err == nil {
 		t.Fatal("expected an error for --per-second 0")
 	}
@@ -61,11 +56,9 @@ func TestConnRateLimitDeleteHitsIDPath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
-	defer srv.Close()
-	oldBase, oldArgs := base, os.Args
-	base = srv.URL
-	os.Args = []string{"netractl", "ebpf", "conn-rate-limit", "del", "connratelimit-3"}
-	defer func() { base, os.Args = oldBase, oldArgs }()
+	t.Cleanup(srv.Close)
+	useTestServer(t, srv.URL)
+	withArgs(t, "ebpf", "conn-rate-limit", "del", "connratelimit-3")
 
 	if err := ebpf(); err != nil {
 		t.Fatal(err)

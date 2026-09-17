@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.27.97 — 2026-09-18
+
+- **Fix: netractl unit tests no longer dial a live controller URL.** `ensureConfig`'s
+  `sync.Once` could load `~/.netra` and overwrite an httptest `base` mid-suite
+  (Unauthorized / wrong host under `-parallel`). Tests now set `NETRA_SKIP_DOTENV`
+  via `useTestServer`; `loadNetraConfig` only assigns `base` when `NETRA_URL` is set.
 - **Docs: map inventory everywhere.** Expanded [`docs/ebpf-maps.md`](docs/ebpf-maps.md);
   cross-links in README, `netractl.md`, `standalone-ebpf.md`, `bpf/README.md`,
   `firewall.md`, `workload-scoping.md`, `features.md`, `p0-p5-surfaces.md`,
@@ -204,6 +210,7 @@
   - `internal/fleet.Node` gained `cpuPercent`/`memoryUsedBytes`/`memoryTotalBytes`/`loadAvg1`, surfaced as an appended summary fragment on the Fleet page's per-node rows — so the existing per-node inventory view benefits too, not just the new dedicated page.
   - Deliberate non-goals for this pass: literal per-process (`ps`/`top`-style) rows, and CPU/memory trend history — see `docs/node-resources.md`'s Limits section.
   - Docs: `docs/node-resources.md`.
+- Version bumped to 0.27.97 across tracked locations; `web/package-lock.json` regenerated.
 
 ## 0.27.96 — 2026-09-17
 
