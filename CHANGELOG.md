@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **netractl: self-signed TLS + `~/.netra` defaults.** Loopback URLs skip
+  TLS verify when `NETRA_TLS_INSECURE` is unset; loads `~/.netra/env` and
+  `~/.netra/api-key` automatically. `deploy-remote.sh` writes `~/.netra/env`.
+  Fixes `x509: certificate signed by unknown authority` on bare
+  `netractl status` after install.
 - **`make install` / PATH CLI.** `make install` and `make uninstall` install
   `netractl` to `$(PREFIX)/bin` (default `/usr/local`). `netractl install`
   and `deploy-remote.sh` also place the CLI on PATH; `netractl install-cli`

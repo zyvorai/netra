@@ -157,6 +157,15 @@ AGENT_XDP_INTERFACES="${AGENT_XDP_INTERFACES_LOCAL}"
 mkdir -p "\$HOME/.netra"
 printf '%s\n' "\$API_KEY" > "\$HOME/.netra/api-key"
 printf '%s\n' "\$AGENT_KEY" > "\$HOME/.netra/agent-key"
+HOST_IP="\$(hostname -I | awk '{print \$1}')"
+cat > "\$HOME/.netra/env" <<ENVEOF
+# Written by deploy-remote.sh — sourced automatically by netractl.
+NETRA_URL=https://\${HOST_IP}:30870
+NETRA_TLS_INSECURE=true
+NETRA_API_KEY=\${API_KEY}
+ENVEOF
+# Also keep a loopback-friendly default for local curls.
+grep -q 'NETRA_TLS_INSECURE' "\$HOME/.netra/env"
 chmod 600 "\$HOME/.netra/"* || true
 
 export GOTOOLCHAIN=auto

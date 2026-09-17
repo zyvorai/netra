@@ -460,10 +460,11 @@ For plain manifests, see `deploy/README.md`. `deploy/rbac-cilium.yaml` is intent
 ## eBPF CLI examples
 
 ```bash
-export NETRA_URL=https://127.0.0.1:30870
-export NETRA_API_KEY='...'
-# Only for the chart-generated self-signed certificate:
-export NETRA_TLS_INSECURE=true
+# After make install / deploy-remote, netractl reads ~/.netra/env + api-key.
+# Chart TLS is self-signed: loopback skips verify automatically; or:
+#   export NETRA_TLS_INSECURE=true
+#   export NETRA_URL=https://<node-ip>:30870
+#   export NETRA_API_KEY=$(cat ~/.netra/api-key)
 
 netractl ebpf summary
 netractl ebpf capabilities

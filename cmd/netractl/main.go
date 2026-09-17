@@ -12,22 +12,109 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var base = strings.TrimRight(env("NETRA_URL", "https://127.0.0.1:30870"), "/")
 
+var configOnce sync.Once
+
+func ensureConfig() {
+	configOnce.Do(loadNetraConfig)
+}
+
+// loadNetraConfig applies ~/.netra defaults for lab/self-signed installs:
+// optional env file, api-key file, and loopback TLS skip-verify when unset.
+func loadNetraConfig() {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		loadEnvFile(filepath.Join(home, ".netra", "env"))
+		if os.Getenv("NETRA_API_KEY") == "" {
+			if b, err := os.ReadFile(filepath.Join(home, ".netra", "api-key")); err == nil {
+				if k := strings.TrimSpace(string(b)); k != "" {
+					_ = os.Setenv("NETRA_API_KEY", k)
+				}
+			}
+		}
+	}
+	base = strings.TrimRight(env("NETRA_URL", "https://127.0.0.1:30870"), "/")
+	if os.Getenv("NETRA_TLS_INSECURE") == "" && urlIsLoopback(base) {
+		// Chart default is a self-signed in-pod cert; localhost NodePort
+		// access cannot verify it without installing the CA.
+		_ = os.Setenv("NETRA_TLS_INSECURE", "true")
+	}
+}
+
+func loadEnvFile(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		v = strings.Trim(v, `"'`)
+		if k == "" || os.Getenv(k) != "" {
+			continue
+		}
+		_ = os.Setenv(k, v)
+	}
+}
+
+func urlIsLoopback(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h == "127.0.0.1" || h == "localhost" || h == "::1"
+}
+
+func tlsInsecure() bool {
+	v := strings.TrimSpace(os.Getenv("NETRA_TLS_INSECURE"))
+	if strings.EqualFold(v, "false") || v == "0" {
+		return false
+	}
+	if strings.EqualFold(v, "true") || v == "1" {
+		return true
+	}
+	return urlIsLoopback(base)
+}
+
 func httpClient(timeout time.Duration) *http.Client {
+	ensureConfig()
 	c := &http.Client{Timeout: timeout}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_TLS_INSECURE")), "true") {
-		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit local/self-signed opt-in
+	if tlsInsecure() {
+		c.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // self-signed / local opt-in
 	}
 	return c
 }
 
+func annotateTLSErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "x509:") || strings.Contains(msg, "certificate") {
+		return fmt.Errorf("%w\nHint: chart TLS is self-signed by default. For NodePort/localhost:\n  export NETRA_TLS_INSECURE=true\n  # or write ~/.netra/env (deploy-remote creates this)\n  export NETRA_URL=https://<node-ip>:30870\n  export NETRA_API_KEY=$(cat ~/.netra/api-key)", err)
+	}
+	return err
+}
+
 func main() {
+	ensureConfig()
 	if len(os.Args) < 2 {
 		usage()
 		return
@@ -1611,6 +1698,7 @@ func requestHeaders(method, p string, b []byte, extra map[string]string) error {
 }
 
 func doRequest(method, p string, b []byte, extra map[string]string) ([]byte, int, error) {
+	ensureConfig()
 	req, err := http.NewRequest(method, base+p, bytes.NewReader(b))
 	if err != nil {
 		return nil, 0, err
@@ -1624,7 +1712,7 @@ func doRequest(method, p string, b []byte, extra map[string]string) ([]byte, int
 	}
 	r, err := httpClient(20 * time.Second).Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, annotateTLSErr(err)
 	}
 	defer r.Body.Close()
 	out, readErr := io.ReadAll(r.Body)
@@ -1634,6 +1722,7 @@ func doRequest(method, p string, b []byte, extra map[string]string) ([]byte, int
 	return out, r.StatusCode, nil
 }
 func stream(p string) error {
+	ensureConfig()
 	req, e := http.NewRequest("GET", base+p, nil)
 	if e != nil {
 		return e
@@ -1641,7 +1730,7 @@ func stream(p string) error {
 	auth(req)
 	r, e := httpClient(0).Do(req)
 	if e != nil {
-		return e
+		return annotateTLSErr(e)
 	}
 	defer r.Body.Close()
 	if r.StatusCode >= 300 {
@@ -1658,6 +1747,7 @@ func stream(p string) error {
 	return s.Err()
 }
 func auth(r *http.Request) {
+	ensureConfig()
 	if k := os.Getenv("NETRA_API_KEY"); k != "" {
 		r.Header.Set("Authorization", "Bearer "+k)
 	}
