@@ -68,6 +68,7 @@ type Server struct {
 	captureHub          *captureHub
 	dnsDetector         *dnsdetect.Detector
 	scanDetector        *scandetect.Detector
+	workloadInventory   *workloadInventoryCache
 }
 
 func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *Server {
@@ -80,7 +81,7 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
 	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
 	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
-	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub()}
+	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub(), workloadInventory: newWorkloadInventoryCache()}
 
 	// ChatOps outbound trust is shared across every provider: every command
 	// is a thin HTTP client of this same process's own /api/v1/* endpoints
@@ -993,9 +994,23 @@ func (s *Server) ebpfConfig(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		items, err := s.kube.ListWorkloads(ctx, node)
 		if err != nil {
-			s.log.Warn("load node workload inventory", "node", node, "error", err)
+			// Fall back to the last successful inventory for this node
+			// rather than letting cfg.Workloads go out empty: an agent
+			// re-resolving its cgroups against an empty pod list doesn't
+			// treat that as "unknown," it treats it as "zero workloads on
+			// this node" (internal/workload.Resolve's documented fail-open
+			// behavior), which blanks out every workload's
+			// Namespace/Pod/WorkloadName until the next successful call.
+			// See workloadInventoryCache's doc comment.
+			if cached, ok := s.workloadInventory.get(node); ok {
+				s.log.Warn("load node workload inventory: using last-known-good", "node", node, "error", err, "cachedWorkloads", len(cached))
+				cfg.Workloads = cached
+			} else {
+				s.log.Warn("load node workload inventory", "node", node, "error", err)
+			}
 		} else {
 			cfg.Workloads = items
+			s.workloadInventory.set(node, items)
 		}
 	}
 	writeJSON(w, 200, cfg)
