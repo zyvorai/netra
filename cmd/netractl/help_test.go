@@ -16,7 +16,7 @@ func TestPrintUsageReadable(t *testing.T) {
 	var buf bytes.Buffer
 	printUsage(&buf)
 	out := stripANSI(buf.String())
-	for _, need := range []string{"Usage", "Cluster", "status", "features", "Environment", "NETRA_URL"} {
+	for _, need := range []string{"Usage", "Cluster", "status", "features", "Environment", "NETRA_URL", "🚀", "🔍"} {
 		if !strings.Contains(out, need) {
 			t.Fatalf("missing %q in help:\n%s", need, out)
 		}

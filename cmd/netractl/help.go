@@ -24,7 +24,7 @@ type helpSection struct {
 func helpSections() []helpSection {
 	return []helpSection{
 		{
-			title: "Cluster",
+			title: "🚀  Cluster",
 			cmds: []helpCmd{
 				{"status [--json] [--wait]", "Cluster health board (agents, hooks, features)"},
 				{"install [flags]", "Helm install (agent+TLS on; installs CLI to PATH)"},
@@ -36,7 +36,7 @@ func helpSections() []helpSection {
 			},
 		},
 		{
-			title: "Investigate",
+			title: "🔍  Investigate",
 			cmds: []helpCmd{
 				{"explain …", "Passive evidence for pod/node/docker/dns/destination"},
 				{"fleet | fleet-clusters | fleet-tenants", "Agent inventory / multi-cluster"},
@@ -47,7 +47,7 @@ func helpSections() []helpSection {
 			},
 		},
 		{
-			title: "Diagnostics",
+			title: "🩺  Diagnostics",
 			cmds: []helpCmd{
 				{"ebpf summary|health|path|drops|l7|…", "Datapath counters and diagnostics"},
 				{"ebpf kernel-network [5m]", "Windowed kernel network pressure"},
@@ -58,7 +58,7 @@ func helpSections() []helpSection {
 			},
 		},
 		{
-			title: "Control (leased)",
+			title: "🛡️  Control (leased)",
 			cmds: []helpCmd{
 				{"ebpf mode observe|enforce [lease]", "Fail-open enforce lease"},
 				{"ebpf deny|allow|cidr|port|dns|sni|…", "Datapath deny/allow lists"},
@@ -68,7 +68,7 @@ func helpSections() []helpSection {
 			},
 		},
 		{
-			title: "Policy (Cilium optional)",
+			title: "📜  Policy (Cilium optional)",
 			cmds: []helpCmd{
 				{"policy list|build|plan|simulate|apply …", "CNP workbench with receipts"},
 				{"policy gitops status|resync …", "Mounted-dir GitOps"},
@@ -77,7 +77,7 @@ func helpSections() []helpSection {
 			},
 		},
 		{
-			title: "Ops & AI",
+			title: "🧰  Ops & AI",
 			cmds: []helpCmd{
 				{"audit | audit summary", "Controller audit trail"},
 				{"export … | report | playbooks", "SIEM export and operator briefs"},
@@ -104,9 +104,9 @@ func printUsage(w io.Writer) {
 	}
 
 	fmt.Fprintln(w, colorize(file, ansiBold+zyvorOrange, "netractl")+" — Netra operator CLI")
-	fmt.Fprintln(w, colorize(file, ansiDim, "observe · diagnose · contain · fail open"))
+	fmt.Fprintln(w, colorize(file, ansiDim, "👁️  observe  ·  🩺  diagnose  ·  🛡️  contain  ·  fail open"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, colorize(file, ansiBold, "Usage"))
+	fmt.Fprintln(w, colorize(file, ansiBold, "📖  Usage"))
 	fmt.Fprintln(w, "  netractl <command> [flags]")
 	fmt.Fprintln(w)
 
@@ -121,7 +121,7 @@ func printUsage(w io.Writer) {
 	}
 	_ = tw.Flush()
 
-	fmt.Fprintln(w, colorize(file, ansiBold, "Environment"))
+	fmt.Fprintln(w, colorize(file, ansiBold, "⚙️  Environment"))
 	envLines := []struct{ k, v string }{
 		{"NETRA_URL", "controller URL (default https://127.0.0.1:30870)"},
 		{"NETRA_API_KEY", "bearer (or ~/.netra/api-key)"},
@@ -136,7 +136,7 @@ func printUsage(w io.Writer) {
 	}
 	_ = tw.Flush()
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, colorize(file, ansiDim, "Docs: docs/netractl.md  ·  make install  ·  netractl status"))
+	fmt.Fprintln(w, colorize(file, ansiDim, "📚  Docs: docs/netractl.md  ·  make install  ·  netractl status"))
 }
 
 // usagePlain is the dense legacy dump for tests / NETRA_CLI_HELP=plain.
