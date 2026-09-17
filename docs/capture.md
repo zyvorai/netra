@@ -62,9 +62,10 @@ time-bounded capture on critical drop/congestion signals:
 | Softnet drops at critical | `dropdiag` / `softnet-drop` |
 
 Defaults: 60s duration, 10m per-node cooldown, protocol `tcp` (policy spikes
-may enrich host/port from the top `PolicyDropStat`), max 1000 PPS, max 5
-concurrent auto sessions. Requestor is tagged `auto-capture:{source}/{kind}`
-in the audit log.
+may enrich host/port from the top `PolicyDropStat`), backend `ebpf` (or
+`afpacket` via `NETRA_AUTO_CAPTURE_BACKEND` / Helm `alerting.autoCapture.backend`),
+max 1000 PPS, max 5 concurrent auto sessions. Requestor is tagged
+`auto-capture:{source}/{kind}` in the audit log.
 
 Frames for auto-capture sessions are written to classic PCAP files under
 `NETRA_AUTO_CAPTURE_DIR` (default `/var/lib/netra/auto-capture`), retained
@@ -73,6 +74,12 @@ with count/size caps, and listed on `GET /api/v1/capture/history` with an
 
 A notify event (`source=auto-capture`, `kind=started`) is published when a
 session begins (delivered through configured alert channels).
+
+**CI smoke:** `scripts/ci-auto-capture-veth.sh` (Linux, root) puts the veth
+peer in a netns (same-netns pairs are short-circuited by the local stack),
+runs iperf3 TCP, posts a synthetic softnet-critical agent report, and feeds
+AF_PACKET frames into the agent capture WebSocket to assert a non-empty PCAP
+under the artifact dir. GitHub Actions job `auto-capture-veth`.
 
 **HA note:** artifact files are local to the leader process unless the
 directory sits on shared RWX storage alongside the state file.

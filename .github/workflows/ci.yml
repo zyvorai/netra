@@ -199,6 +199,14 @@ jobs:
           echo "auto-capture-only render unexpectedly set alert channel env" >&2
           exit 1
         fi
+        # Optional AF_PACKET backend for CI / agentless capture.
+        helm template autocap-be helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set alerting.autoCapture.enabled=true \
+          --set alerting.autoCapture.backend=afpacket \
+          >/tmp/netra-autocapture-be.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_BACKEND' /tmp/netra-autocapture-be.yaml
+        awk '/name: NETRA_AUTO_CAPTURE_BACKEND$/{getline; if ($0 !~ /afpacket/) exit 1}' /tmp/netra-autocapture-be.yaml
     - name: Standalone render must expose workload attribution safely
       run: |
         grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml
@@ -253,3 +261,17 @@ jobs:
       # build/module cache. See bpf/integration/helpers.go's package doc
       # comment.
       run: sudo /tmp/bpfintegration.test -test.v
+  auto-capture-veth:
+    # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +
+    # AF_PACKET feeder → non-empty PCAP under NETRA_AUTO_CAPTURE_DIR.
+    # Softnet trigger is synthetic (≥1000) so CI does not depend on flaky
+    # real softnet counters under GitHub-hosted load.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install iperf3
+      run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
+    - name: Auto-capture veth + iperf3 smoke
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-auto-capture-veth.sh

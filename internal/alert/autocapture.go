@@ -29,6 +29,7 @@ type AutoConfig struct {
 	Duration      time.Duration
 	Cooldown      time.Duration
 	Protocol      string // default "tcp"
+	Backend       string // "" or "ebpf" (default) or "afpacket"
 	MaxPPS        uint32
 	MaxConcurrent int
 }
@@ -45,6 +46,11 @@ func (c *AutoConfig) applyDefaults() {
 	}
 	if c.Protocol == "" {
 		c.Protocol = "tcp"
+	}
+	if b, err := models.NormalizeCaptureBackend(c.Backend); err == nil {
+		c.Backend = b
+	} else {
+		c.Backend = models.CaptureBackendEBPF
 	}
 	if c.MaxPPS == 0 {
 		c.MaxPPS = defaultAutoMaxPPS
@@ -155,7 +161,7 @@ func (a *AutoCapture) MaybeStart(now time.Time, ev notify.Event, agents []models
 
 	spec := models.CaptureSpec{
 		Node:      node,
-		Backend:   models.CaptureBackendEBPF,
+		Backend:   a.cfg.Backend,
 		Protocol:  proto,
 		Host:      host,
 		Port:      port,

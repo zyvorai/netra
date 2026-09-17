@@ -10,9 +10,15 @@
   `NETRA_AUTO_CAPTURE_DIR`, linked from capture history
   (`GET /api/v1/capture/artifacts/{id}`), and announced via a
   `source=auto-capture` notify event. Helm `alerting.autoCapture`; Capture
-  history shows an Auto badge + Download. CI: dedicated auto-capture unit
-  tests, race on `alert`/`capture`, Helm default-off plus enabled env and
-  emptyDir-without-PVC volume gates.
+  history shows an Auto badge + Download. Optional
+  `NETRA_AUTO_CAPTURE_BACKEND=afpacket` for CI without the node agent.
+  CI: unit/race/Helm gates plus privileged Linux
+  `scripts/ci-auto-capture-veth.sh` (iperf3 + veth netns + AF_PACKET feeder)
+  via the `auto-capture-veth` workflow job.
+- **Fix: AF_PACKET capture bound the wrong EtherType on little-endian hosts.**
+  `internal/afcapture` passed `htons(ETH_P_ALL)` into `mdlayher/packet.Listen`,
+  which already host-orders the protocol — the double swap made the socket
+  receive nothing. Listen now uses `unix.ETH_P_ALL` directly.
 - **CI coverage for the Snowflake sink's real network/auth path.** `internal/snowflakesink`'s existing tests all build a `Sink` around an already-open, already-authenticated `*sql.DB` (via sqlmock), so `New`'s own DSN construction, JWT key-pair signing, and the `gosnowflake` driver's real HTTP handshake were never exercised in CI. Added a minimal fake Snowflake REST server (`fake_server_test.go`) implementing just enough of `/session/v1/login-request` and `/queries/v1/query-request` for the real (non-mocked) driver to complete a login and run `ensureTable`'s DDL against it; the new test also parses and verifies the JWT `New()` sends is correctly signed by the configured private key with the exact `iss`/`sub` claim shape Snowflake's key-pair auth expects. `New` gained an unexported `dialTarget` seam (zero value = real Snowflake host, used by the only production caller) so tests can point the DSN at the fake server without touching the public `Config` API.
 - **Multi-channel alerting framework.** Extends the existing alert poller with
   `internal/notify`: typed channels for webhook, SMTP email, Slack (Incoming

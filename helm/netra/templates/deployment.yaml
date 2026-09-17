@@ -242,6 +242,10 @@ spec:
           value: {{ .Values.alerting.autoCapture.cooldown | quote }}
         - name: NETRA_AUTO_CAPTURE_PROTOCOL
           value: {{ .Values.alerting.autoCapture.protocol | quote }}
+        {{- if .Values.alerting.autoCapture.backend }}
+        - name: NETRA_AUTO_CAPTURE_BACKEND
+          value: {{ .Values.alerting.autoCapture.backend | quote }}
+        {{- end }}
         - name: NETRA_AUTO_CAPTURE_MAX_PPS
           value: {{ .Values.alerting.autoCapture.maxPps | quote }}
         - name: NETRA_AUTO_CAPTURE_MAX_CONCURRENT

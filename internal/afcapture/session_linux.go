@@ -97,7 +97,10 @@ func listenInterface(name string, filter []bpf.RawInstruction) (*packet.Conn, er
 	if err != nil {
 		return nil, fmt.Errorf("afcapture: interface %s: %w", name, err)
 	}
-	conn, err := packet.Listen(ifi, packet.Raw, int(htons(unix.ETH_P_ALL)), &packet.Config{Filter: filter})
+	// mdlayher/packet's Listen takes the protocol in host order and performs
+	// the htons itself before bind — passing htons(ETH_P_ALL) double-swaps on
+	// little-endian and binds ETH_P_ALL<<8, which silently receives nothing.
+	conn, err := packet.Listen(ifi, packet.Raw, unix.ETH_P_ALL, &packet.Config{Filter: filter})
 	if err != nil {
 		return nil, fmt.Errorf("afcapture: listen on %s: %w", name, err)
 	}
@@ -178,5 +181,3 @@ func readLoop(ctx context.Context, conn *packet.Conn, out chan<- capture.Frame, 
 		}
 	}
 }
-
-func htons(v uint16) uint16 { return (v << 8) | (v >> 8) }

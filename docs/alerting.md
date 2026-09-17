@@ -126,6 +126,7 @@ signals and persists PCAPs for later diagnosis. See `docs/capture.md`
 | `NETRA_AUTO_CAPTURE_DURATION` | `60s` | max 5m |
 | `NETRA_AUTO_CAPTURE_COOLDOWN` | `10m` | per-node |
 | `NETRA_AUTO_CAPTURE_PROTOCOL` | `tcp` | fallback filter |
+| `NETRA_AUTO_CAPTURE_BACKEND` | `ebpf` | or `afpacket` |
 | `NETRA_AUTO_CAPTURE_MAX_PPS` | `1000` | |
 | `NETRA_AUTO_CAPTURE_MAX_CONCURRENT` | `5` | |
 | `NETRA_AUTO_CAPTURE_DIR` | `/var/lib/netra/auto-capture` | PCAP directory |

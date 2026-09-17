@@ -122,6 +122,8 @@ alerting:
     duration: "60s"
     cooldown: "10m"
     protocol: tcp
+    # ebpf (default) or afpacket — CI smoke uses afpacket without the node agent.
+    backend: ebpf
     maxPps: 1000
     maxConcurrent: 5
     dir: /var/lib/netra/auto-capture
