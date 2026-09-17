@@ -126,7 +126,8 @@ jobs:
           exit 1
         fi
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.tlsfp=off >/tmp/netra-tlsfp-off.yaml
-        awk '/name: NETRA_TLSFP$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-tlsfp-off.yaml    - name: Default render must not enable dns/scan detectors
+        awk '/name: NETRA_TLSFP$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-tlsfp-off.yaml
+    - name: Default render must not enable dns/scan detectors
       run: |
         if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then
           echo "dnsdetect/scandetect env vars unexpectedly rendered when disabled by default" >&2
