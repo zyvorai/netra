@@ -290,6 +290,15 @@ spec:
             {{- end }}
           initialDelaySeconds: 2
           periodSeconds: 3
+          # Kubernetes' 1s default timeoutSeconds is tight for a TLS
+          # handshake under real node CPU pressure (observed on a loaded
+          # host: a 500m-CPU-limited pod's HTTPS probe missing the 1s
+          # default consistently enough to crash-loop a perfectly healthy
+          # server via repeated liveness kills). 5s gives real handshake
+          # variance room without meaningfully slowing genuine failure
+          # detection, since failureThreshold still gates how many misses
+          # are tolerated.
+          timeoutSeconds: 5
           failureThreshold: 2
         livenessProbe:
           httpGet:
@@ -300,6 +309,7 @@ spec:
             {{- end }}
           initialDelaySeconds: 5
           periodSeconds: 10
+          timeoutSeconds: 5
       {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled .Values.alerting.autoCapture.enabled }}
       volumes:
       {{- if .Values.tls.enabled }}

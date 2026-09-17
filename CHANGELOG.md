@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fix: HTTPS readiness/liveness probes could crash-loop a healthy netrad under real CPU contention.** Kubernetes' 1-second default `timeoutSeconds` is tight for a TLS handshake, and on a busy/oversubscribed node it consistently missed, causing kubelet to kill and restart an otherwise-healthy pod indefinitely. Both probes in `helm/netra/templates/deployment.yaml` now set `timeoutSeconds: 5`. Found deploying to a heavily loaded shared host (load average ~30 on 12 cores from unrelated tenants); the probe fix alone doesn't guarantee readiness on a sufficiently starved node — a CPU request bump (`--set resources.requests.cpu=...`) may still be needed there.
 - **Auto-capture on critical drop/congestion.** Opt-in (`NETRA_AUTO_CAPTURE`):
   the alert poller starts a filtered, time-bounded capture when kerneldiag
   critical findings, critical drop-rate spikes, or critical softnet-drops
