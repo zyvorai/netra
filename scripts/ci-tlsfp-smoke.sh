@@ -84,7 +84,7 @@ clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
 cp "${BPF_DIR}/netra_tc.o" /tmp/netra_tc.o
 cp "${BPF_DIR}/netra_tlsfp.o" /tmp/netra_tlsfp.o
 
-echo "==> BPF_PROG_TEST_RUN tlsfp integration tests"
+echo "==> BPF integration tests (load + allow-return; live emit is below)"
 go test -tags=bpfintegration -c -o "${BIN_DIR}/bpfintegration.test" ./bpf/integration/
 NETRA_BPF_TEST_OBJECT=/tmp/netra_tc.o \
 NETRA_BPF_TLSFP_TEST_OBJECT=/tmp/netra_tlsfp.o \

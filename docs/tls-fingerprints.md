@@ -36,7 +36,7 @@ New maps (ABI-additive): `tls_hello_events`, `tls_hello_rate`,
 | Unit | `go test ./internal/tlsfp/...` — parse, GREASE, ECH, risk board, detector LRU |
 | API | `go test ./internal/api/ -run TLSFingerprints` |
 | BPF ABI | `bpf/tests/abi_layout_test.c` (`tls_hello_event` = 276 bytes) |
-| BPF load | CI `ebpf` job compiles `bpf/netra_tlsfp.c`; `bpf/integration` `TestTLSFP*` via `BPF_PROG_TEST_RUN` |
+| BPF load | CI `ebpf` job compiles `bpf/netra_tlsfp.c`; `bpf/integration` `TestTLSFP*` (load + allow-return; emit is not asserted under `PROG_TEST_RUN`) |
 | Live smoke | `scripts/ci-tlsfp-smoke.sh` (GitHub job `tlsfp-smoke`): agent + **openssl** ClientHello + **iperf3** TCP background → `uniqueJa3 > 0` |
 
 ```bash
