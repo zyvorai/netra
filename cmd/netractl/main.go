@@ -119,6 +119,15 @@ func main() {
 		usage()
 		return
 	}
+	switch os.Args[1] {
+	case "-h", "--help", "help":
+		if os.Getenv("NETRA_CLI_HELP") == "plain" {
+			usagePlain(os.Stdout)
+			return
+		}
+		usage()
+		return
+	}
 	var err error
 	switch os.Args[1] {
 	case "explain":
@@ -196,87 +205,15 @@ func main() {
 	case "ai":
 		err = aiCmd()
 	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
 		usage()
+		os.Exit(2)
 		return
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
-}
-func usage() {
-	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
-  status [--json] [--wait]
-  install | upgrade | uninstall --yes | install-cli [--prefix DIR]
-  features list | features enable NAME --yes | features disable NAME --yes
-  audit | audit summary
-  export audit|events|flows|blocks|status [--format json|jsonl|cef|syslog|otlp|otlp-trace] [--limit N] [--include anomaly,incident,audit]
-  report [--format markdown|json]
-  playbooks [--format markdown|json]
-  intel preview FILE
-  watchlist match FILE
-  fleet | fleet-clusters | fleet-tenants | node-resources | handoff [--format markdown|json] | scorecard | talkers
-  namespaces | protocols | baselines | ports | dnsboard | lease
-  capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]
-  capture stop NODE | capture status
-  policy list [namespace] | policy list --namespace NAMESPACE
-  policy build --name NAME --namespace NAMESPACE --selector key=value --kind fqdn|cidr|entity --to DEST [--to DEST] [--port PORT] [--protocol TCP|UDP] [--include-dns]
-  policy plan <file> | policy plan --file FILE
-  policy simulate <file> | policy simulate --file FILE
-  policy apply <file> [--dry-run] [--confirm-risk high|critical] | policy apply --file FILE [--dry-run] [--confirm-risk high|critical]
-  policy gitops status | policy gitops resync <file> [--confirm-risk high|critical]
-  policy history <namespace> <name>
-  policy archive export <file>
-  policy archive import <file> [--mode merge|replace]
-  policy rollback <namespace> <name> <revision> [--dry-run] [--confirm-risk high|critical]
-  policy delete <namespace> <name>
-  flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
-  drops [explain]
-  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | sysctl-audit | dns-findings | scan-findings | ipv6 | shield | interfaces | l7 | capabilities
-  ebpf mode observe | mode enforce [lease]
-  ebpf deny-preview KIND VALUE [direction] [--protocol P] [--port N] [--namespace NS] [--pod POD] [--kind K] [--workload NAME] [--limit N]
-  ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
-  ebpf allow add IP | allow del IP
-  ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
-  ebpf cidr add CIDR [ingress|egress|both] | cidr del CIDR [direction]
-  ebpf syn-drop add IP egress|ingress | syn-drop del IP egress|ingress
-  ebpf syn-drop-cidr add CIDR egress|ingress | syn-drop-cidr del CIDR egress|ingress
-  ebpf port add TCP|UDP|ANY PORT [ingress|egress|both] | port del ...
-  ebpf allow-port add TCP|UDP|ANY PORT [direction] | allow-port del ...
-  ebpf uid add UID | uid del UID
-  ebpf allow-uid add UID | allow-uid del UID
-  ebpf dns add NAME | dns del NAME
-  ebpf process add COMM | process del COMM
-  ebpf capability add CAP_NET_RAW|CAP_NET_ADMIN | capability del CAP_NET_RAW|CAP_NET_ADMIN
-  ebpf allow-process add COMM | allow-process del COMM
-  ebpf sni add NAME | sni del NAME
-  ebpf rate set IP PPS [BPS] | rate del IP
-  ebpf shield [set --mode off|audit|enforce [--protect-all] [--ip IPv4]... [--ip6 IPv6]... [--syn-pps N] [--udp-pps N] [--icmp-pps N] [--other-pps N] [--burst-seconds N]]
-  ebpf netpol enable | disable
-  ebpf netpol v2 enable | disable
-  ebpf netpol rule add (--peer IP | --port N) --action allow|deny [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--port N] [--protocol P] [--direction D]
-  ebpf netpol rule del ID
-  ebpf netpol default-deny plan [--namespace NS] ... [--disable] [--allow-no-rules]
-  ebpf netpol default-deny set --token TOKEN [--confirm-risk RISK] [--namespace NS] ... [--disable] [--lease DURATION]
-  ebpf netpol quarantine [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v] [--allow-peer IP[:PORT[/PROTO]]]... [--lease DURATION] [--confirm-risk RISK] [--allow-no-rules]
-  ebpf conn-rate-limit add --per-second N [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label k=v]
-  ebpf conn-rate-limit del ID
-  ebpf rules list | get ID | patch ID JSON | delete ID | history ID | rollback ID REVISION
-  ebpf workloads [node]
-  ebpf scope show | scope all
-  ebpf scope selected [--namespace NS] [--pod POD] [--kind KIND] [--workload NAME] [--label key=value] [--cgroup ID]
-  ebpf scope set FILE
-  insights summary | dependencies [limit] | drift | recommendations [namespace] [workload]
-  insights baseline show | capture | clear
-  insights rates [window] | rate-drift [window] | exposure [window] | remediations [window]
-  insights blast-radius <root> [hops]
-  insights health-trend [threshold]
-  insights policy-review <recommendationId>
-  insights new-since-start [maxRestarts]
-  insights protocol-downgrades
-  incidents | incidents timeline [since-RFC3339]
-  insights rate-baseline show | capture [window] | clear
-  ai status | brief | digest | suggestions | ask QUESTION... | agent QUESTION... | draft QUESTION... | explain KIND [MESSAGE...]`)
 }
 
 func aiCmd() error {

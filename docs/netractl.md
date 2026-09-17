@@ -22,6 +22,7 @@ itself onto PATH as well; use `--skip-cli` to opt out.
 ## First commands after cluster install
 
 ```bash
+netractl --help           # colorful grouped help on a TTY (NO_COLOR / NETRA_CLI_COLOR=false to disable)
 netractl status
 netractl features list
 netractl features enable dns-detect --yes
@@ -69,6 +70,7 @@ If you see `x509: certificate signed by unknown authority`, set
 | `NETRA_API_KEY` | from `~/.netra/api-key` if present | Bearer token |
 | `NETRA_TLS_INSECURE` | auto on loopback; else false | Skip TLS verify for chart self-signed cert |
 | `NETRA_CLI_NO_BANNER` | unset | Set any value to hide the Zyvor banner |
+| `NETRA_CLI_COLOR` | auto on TTY | `false` / `0` disables color; `NO_COLOR` also disables |
 | `NETRA_CLI_PREFIX` | unset | Default prefix for `install-cli` / post-Helm CLI copy |
 | `NETRA_CHART` | `./helm/netra` | Helm chart path for `install` / `upgrade` / `features` |
 | `NETRA_NAMESPACE` | `netra-system` | Helm / kube namespace |

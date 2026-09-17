@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **netractl: colorful grouped `--help`.** TTY help is sectioned (Cluster,
+  Investigate, Diagnostics, …) with Zyvor orange / cyan / green; respects
+  `NO_COLOR` and `NETRA_CLI_COLOR=false`.
 - **Docs: netractl CLI guide.** [`docs/netractl.md`](docs/netractl.md) and
   website Getting Started cover `make install`, self-signed TLS /
   `~/.netra/env`, status/features, and lifecycle; quickstarts + Helm
