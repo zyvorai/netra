@@ -81,7 +81,7 @@ func TestTLSFPEgressEmitsRateAndRingbuf(t *testing.T) {
 		net.ParseIP("10.0.0.1"), net.ParseIP("1.2.3.4"),
 		12345, 443, tcpACK, minimalClientHello(),
 	)
-	ret, err := prog.Test(pkt)
+	ret, _, err := prog.Test(pkt)
 	if err != nil {
 		t.Fatalf("Program.Test: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestTLSFPEgressEmitsRateAndRingbuf(t *testing.T) {
 		t.Fatal("tls_hello_rate empty after ClientHello PROG_TEST_RUN — sampler did not emit")
 	}
 
-	_ = rd.SetDeadline(time.Now().Add(2 * time.Second))
+	rd.SetDeadline(time.Now().Add(2 * time.Second))
 	rec, err := rd.Read()
 	if err != nil {
 		t.Fatalf("ringbuf read: %v (rate map had %d entries — emit may have raced discard)", err, entries)
@@ -148,7 +148,7 @@ func TestTLSFPIgnoresNonTLS(t *testing.T) {
 		net.ParseIP("10.0.0.1"), net.ParseIP("9.9.9.9"),
 		1111, 80, tcpACK, []byte("GET / HTTP/1.1\r\n\r\n"),
 	)
-	if _, err := prog.Test(pkt); err != nil {
+	if _, _, err := prog.Test(pkt); err != nil {
 		t.Fatal(err)
 	}
 	iter := rateMap.Iterate()
