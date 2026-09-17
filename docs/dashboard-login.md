@@ -26,7 +26,10 @@ bearer before opening the dashboard, so a wrong key fails on the login
 screen instead of bouncing you after a brief flash of the console.
 
 `scripts/deploy-remote.sh` defaults `NETRA_API_KEY` to `Admin@321` so the
-demo pair works after a remote deploy unless you override it.
+demo pair works after a remote deploy unless you override it. The same
+script writes `~/.netra/api-key` and `~/.netra/env` so `netractl status`
+works without hand-exporting TLS or URL settings — see
+[`netractl.md`](netractl.md).
 
 ## What the login actually does
 

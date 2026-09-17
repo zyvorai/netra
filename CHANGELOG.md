@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Docs: netractl CLI guide.** [`docs/netractl.md`](docs/netractl.md) and
+  website Getting Started cover `make install`, self-signed TLS /
+  `~/.netra/env`, status/features, and lifecycle; quickstarts + Helm
+  NOTES + dashboard-login cross-linked.
 - **netractl: self-signed TLS + `~/.netra` defaults.** Loopback URLs skip
   TLS verify when `NETRA_TLS_INSECURE` is unset; loads `~/.netra/env` and
   `~/.netra/api-key` automatically. `deploy-remote.sh` writes `~/.netra/env`.

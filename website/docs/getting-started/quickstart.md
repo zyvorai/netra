@@ -16,6 +16,12 @@ running, Netra will also offer optional Cilium policy management and Hubble
 flow viewing, but nothing here depends on it.
 
 ```bash
+make install   # netractl → /usr/local/bin (or PREFIX=$HOME/.local)
+
+# Preferred — Cilium-style wrapper (agent+TLS on, installs CLI):
+netractl install --namespace netra-system
+
+# or classic Helm:
 helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \
   --set auth.apiKey="$(openssl rand -hex 32)" \
@@ -23,9 +29,13 @@ helm upgrade --install netra ./helm/netra \
 
 kubectl -n netra-system port-forward svc/netra 30870:30870
 curl -skf https://127.0.0.1:30870/livez
+netractl status    # loopback skips self-signed verify automatically
 ```
 
-Open `https://127.0.0.1:30870` (self-signed TLS by default, so expect a browser warning). Sign in with `admin` / `Admin@321` when the controller API key matches that demo token (or paste your `auth.apiKey` as the password). The nav bar: **Overview**, **Pods**, **VMs**, **Network Health**, **Path Diagnostics**, **Drop Diagnostics**, **L7 Metadata**, **Surfaces**, **Insights**, **Firewall**, **Live flows**, **Policies**, **Audit**.
+Open `https://127.0.0.1:30870` (self-signed TLS by default, so expect a browser warning). Sign in with `admin` / `Admin@321` when the controller API key matches that demo token (or paste your `auth.apiKey` as the password). The nav bar: **Overview**, **Pods**, **VMs**, **Network Health**, **Path Diagnostics**, **Drop Diagnostics**, **L7 Metadata**, **Surfaces**, **Features**, **Insights**, **Firewall**, **Live flows**, **Policies**, **Audit**.
+
+See [netractl CLI](./netractl) for PATH install, `~/.netra/env`, and
+`NETRA_TLS_INSECURE` when talking to a NodePort over a non-loopback address.
 
 | Page | What it's for |
 |---|---|
@@ -51,10 +61,12 @@ helm upgrade --install netra ./helm/netra \
 
 ## Path B — Remote full-stack script (K3s + Cilium + Netra)
 
-For a fresh host with nothing installed yet: `scripts/deploy-remote.sh` bootstraps K3s, Cilium with Hubble Relay, then deploys Netra via Helm over SSH. The node agent is built and enabled by default on k3s/k8s profiles.
+For a fresh host with nothing installed yet: `scripts/deploy-remote.sh` bootstraps K3s, Cilium with Hubble Relay, then deploys Netra via Helm over SSH. The node agent is built and enabled by default on k3s/k8s profiles. The script also installs `netractl` onto PATH and writes `~/.netra/env` + `~/.netra/api-key` so bare `netractl status` works against the NodePort (self-signed TLS).
 
 ```bash
 ./scripts/deploy-remote.sh user@HOST --k8s
+# on the host:
+netractl status
 ```
 
 Set `NETRA_AGENT_ENABLED=false` for controller-only, or `NETRA_AGENT_INTERFACES`/`NETRA_AGENT_XDP_INTERFACES` to attach TCX/XDP on specific interfaces. Run without `--quick` to rebuild images from source; with `--quick` to reuse whatever's already built on the host.
@@ -62,8 +74,9 @@ Set `NETRA_AGENT_ENABLED=false` for controller-only, or `NETRA_AGENT_INTERFACES`
 ## Path C — Local binaries (development)
 
 ```bash
+make install
 go run ./cmd/netrad
-NETRA_URL=https://127.0.0.1:30870 go run ./cmd/netractl status
+netractl status   # defaults to https://127.0.0.1:30870; loopback skips self-signed verify
 ```
 
 Requires a reachable Kubernetes API; Hubble is optional (`NETRA_HUBBLE_ADDR`, default `hubble-relay.kube-system.svc:80`).
@@ -88,5 +101,6 @@ netractl ai brief                      # heuristic by default, no config needed 
 
 ## Next steps
 
+- [netractl CLI](./netractl) — PATH install, TLS/`~/.netra`, status and features.
 - [Architecture](../core-concepts/architecture) — how the controller, agent, and eBPF datapath fit together.
 - [Security](../security) — the threat model, fail-open guarantees, and what to review before production.

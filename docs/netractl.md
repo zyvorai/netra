@@ -1,0 +1,121 @@
+# netractl — operator CLI
+
+Cilium-style CLI for Netra: install the cluster, check status, toggle
+features, and drive day-2 observe/enforce workflows.
+
+## Install the CLI onto PATH
+
+```bash
+make install                         # → /usr/local/bin/netractl
+make install PREFIX=$HOME/.local     # → ~/.local/bin/netractl
+make uninstall
+
+# or from an already-built binary:
+netractl install-cli
+netractl install-cli --prefix $HOME/.local
+```
+
+`scripts/deploy-remote.sh` also installs `netractl` to `/usr/local/bin` (or
+`~/.local/bin`) after building. `netractl install` (Helm lifecycle) copies
+itself onto PATH as well; use `--skip-cli` to opt out.
+
+## First commands after cluster install
+
+```bash
+netractl status
+netractl features list
+netractl features enable dns-detect --yes
+```
+
+## Self-signed TLS and `~/.netra`
+
+Helm and plain manifests enable **HTTPS with a self-signed cert by default**.
+Browsers warn; CLI clients must either skip verify or trust the CA.
+
+`netractl` is wired for that default:
+
+| Source | Behavior |
+|--------|----------|
+| `~/.netra/env` | Key=value file loaded automatically (does not override already-set env vars). Written by `deploy-remote.sh`. |
+| `~/.netra/api-key` | Used as `NETRA_API_KEY` when that env var is unset. |
+| Loopback URL | If `NETRA_URL` is `https://127.0.0.1` / `localhost` / `::1` and `NETRA_TLS_INSECURE` is **unset**, skip TLS verify automatically. |
+| Explicit | `NETRA_TLS_INSECURE=false` always verifies. `=true` always skips. |
+
+Example `~/.netra/env` (created by deploy):
+
+```bash
+NETRA_URL=https://212.8.248.187:30870
+NETRA_TLS_INSECURE=true
+NETRA_API_KEY=Admin@321
+```
+
+Manual equivalent:
+
+```bash
+export NETRA_URL=https://<node-ip>:30870
+export NETRA_TLS_INSECURE=true
+export NETRA_API_KEY=$(cat ~/.netra/api-key)
+netractl status
+```
+
+If you see `x509: certificate signed by unknown authority`, set
+`NETRA_TLS_INSECURE=true` (or point `NETRA_URL` at loopback / use `~/.netra/env`).
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NETRA_URL` | `https://127.0.0.1:30870` | Controller base URL |
+| `NETRA_API_KEY` | from `~/.netra/api-key` if present | Bearer token |
+| `NETRA_TLS_INSECURE` | auto on loopback; else false | Skip TLS verify for chart self-signed cert |
+| `NETRA_CLI_NO_BANNER` | unset | Set any value to hide the Zyvor banner |
+| `NETRA_CLI_PREFIX` | unset | Default prefix for `install-cli` / post-Helm CLI copy |
+| `NETRA_CHART` | `./helm/netra` | Helm chart path for `install` / `upgrade` / `features` |
+| `NETRA_NAMESPACE` | `netra-system` | Helm / kube namespace |
+| `NETRA_RELEASE` | `netra` | Helm release name |
+
+## Cluster lifecycle
+
+```bash
+netractl install --namespace netra-system
+netractl upgrade
+netractl uninstall --yes
+```
+
+Defaults on install: `agent.enabled=true`, `tls.enabled=true`, generated
+`auth.apiKey` / `auth.agentKey`, CLI installed onto PATH. Flags:
+`--chart`, `--node-port`, `--api-key`, `--agent-key`, `--cli-prefix`,
+`--skip-cli`, `--set k=v`.
+
+## Status
+
+```bash
+netractl status           # human board + banner on TTY
+netractl status --json
+netractl status --wait    # retry until healthy
+```
+
+Shows version, datapath, mode, Cilium/Hubble, lease, agents, feature
+on/off counts, and per-node hooks.
+
+## Features
+
+See [`features.md`](features.md). Short form:
+
+```bash
+netractl features list
+netractl features enable NAME --yes    # Helm --reuse-values --set …
+netractl features disable NAME --yes
+netractl features enable NAME --yes --api   # live env patch via API
+```
+
+## Dashboard login
+
+Same bearer as the CLI. Demo pair when the key is `Admin@321`:
+`admin` / `Admin@321`. See [`dashboard-login.md`](dashboard-login.md).
+
+## Related
+
+- [`features.md`](features.md) — feature catalog, API, UX
+- [README · Standalone Helm install](../README.md#standalone-helm-install)
+- [README · HTTPS default](../README.md#https-default)

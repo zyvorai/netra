@@ -37,6 +37,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Standalone Helm install](#standalone-helm-install)
+- [netractl CLI](docs/netractl.md)
 - [eBPF CLI examples](#ebpf-cli-examples)
 - [Safety and persistence](#safety-and-persistence)
 - [License](#license)
@@ -232,6 +233,8 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 
 `netrad` listens on `:30870` by default. **Helm and plain manifests enable in-pod HTTPS by default** and generate a self-signed P-256 certificate in an init container. The agent opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true` / `NETRA_TLS_INSECURE=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` (Helm) or remove `NETRA_TLS_CERT`/`NETRA_TLS_KEY` (plain) only when TLS is terminated by a trusted proxy/ingress.
 
+**CLI:** `netractl` skips verify on loopback when `NETRA_TLS_INSECURE` is unset, and loads `~/.netra/env` + `~/.netra/api-key` automatically (`deploy-remote.sh` writes those). For NodePort over a public IP, set `NETRA_TLS_INSECURE=true` or use `~/.netra/env`. See [`docs/netractl.md`](docs/netractl.md).
+
 ## Signing in
 
 The dashboard sits behind a login screen (`admin` / `Admin@321` by default) —
@@ -418,16 +421,16 @@ helm upgrade --install netra ./helm/netra \
 Then:
 
 ```bash
-export NETRA_URL=https://127.0.0.1:30870
-export NETRA_API_KEY='…'          # from install output / Secret
-export NETRA_TLS_INSECURE=true    # chart self-signed cert
+# After make install / deploy-remote, netractl reads ~/.netra/env + api-key.
+# Loopback skips self-signed verify automatically; NodePort needs:
+#   export NETRA_TLS_INSECURE=true   # or use ~/.netra/env from deploy
 netractl status
 netractl features list
 netractl features enable dns-detect --yes
 ```
 
-See [`docs/features.md`](docs/features.md) for the full feature catalog, API,
-and dashboard **Features** page.
+See [`docs/netractl.md`](docs/netractl.md) (CLI, TLS, `~/.netra`) and
+[`docs/features.md`](docs/features.md) (feature catalog / API / UX).
 This uses cgroup hooks and requires neither Cilium nor a configured interface. TCX can be enabled for explicit interfaces or all up non-loopback interfaces:
 
 ```bash

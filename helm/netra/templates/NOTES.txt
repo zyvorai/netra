@@ -16,5 +16,7 @@ Netra {{ .Chart.AppVersion | default .Chart.Version }}
 
 {{- if .Values.tls.enabled }}
   Tip: browsers will warn on the self-signed cert; curl -skf {{ $scheme }}://127.0.0.1:{{ .Values.service.port }}/livez
+  CLI: make install && netractl status
+       (loopback skips verify; or export NETRA_TLS_INSECURE=true / use ~/.netra/env)
   Opt out only with --set tls.enabled=false (trusted ingress/proxy termination).
 {{- end }}

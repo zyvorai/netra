@@ -3,11 +3,15 @@
 Curated install-time and controller/agent capability flags. Distinct from
 Firewall lease / NetPol / Shield toggles (those stay on the Firewall page).
 
+CLI install, TLS/`~/.netra` defaults, and lifecycle commands:
+[`netractl.md`](netractl.md).
+
 ## Operator surfaces
 
 ```bash
-netractl install
-netractl status
+make install              # put netractl on PATH first
+netractl install          # Helm + install CLI (needs ~/.netra or env for TLS)
+netractl status           # works with chart self-signed TLS via ~/.netra/env
 netractl features list
 netractl features enable dns-detect --yes
 netractl features disable automitigate --yes
@@ -54,6 +58,8 @@ datapath, mode, Cilium/Hubble, lease, agents, feature on/off counts, and
 per-node hooks. Flags: `--json`, `--wait`. Exit non-zero when agents are
 missing or all stale (controller-only installs are treated as healthy).
 
+TLS: chart cert is self-signed — see [`netractl.md`](netractl.md#self-signed-tls-and-netra).
+
 ## Install defaults
 
 ```bash
@@ -66,4 +72,5 @@ netractl install-cli            # same, from an already-built binary
 generated API/agent keys, optional `--node-port`, and **also installs this
 CLI onto PATH** (opt out with `--skip-cli`). Chart path: `./helm/netra`,
 `NETRA_CHART`, or `--chart`. Remote deploys via `scripts/deploy-remote.sh`
-install `netractl` to `/usr/local/bin` (or `~/.local/bin`) after the build.
+install `netractl` to `/usr/local/bin` (or `~/.local/bin`) and write
+`~/.netra/env` so bare `netractl status` works against the NodePort.
