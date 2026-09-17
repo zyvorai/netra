@@ -351,6 +351,9 @@ docs/tls-fingerprints.md  JA3/JA4 datapath + encrypted DNS; openssl+iperf3 CI sm
 docs/sales/               buyer PDFs/PPTX/DOCX (Perspective + Brochure) — also on GitHub Pages /resources
 scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)
 scripts/ci-tlsfp-smoke.sh        Linux root smoke for always-on JA3 (GitHub job `tlsfp-smoke`)
+scripts/ci-tlsfp-unit.sh         tlsfp + API JA3 unit/race (GitHub `go` job)
+scripts/ci-p1-p5-unit.sh         P1–P5 surface package unit/race (GitHub `go` job)
+scripts/ci-ebpf-tests.sh         BPF C helpers + clang + PROG_TEST_RUN (GitHub `ebpf` job)
 ```
 
 ## Buyer resources

@@ -14,6 +14,14 @@ jobs:
       with: {go-version: '1.27.1', cache: true}
     - run: go mod tidy
     - run: go test ./...
+    - name: P1–P5 surface unit + race (scripted)
+      # Dedicated gate for the metadata surfaces (tlsfp, encdns, fleet,
+      # shadow-saas, prevention, exfil/lateral/ECH, …) so regressions
+      # cannot hide inside a broad `go test ./...` log. Same command
+      # locally: ./scripts/ci-p1-p5-unit.sh
+      run: ./scripts/ci-p1-p5-unit.sh
+    - name: TLS fingerprint unit + race (scripted)
+      run: ./scripts/ci-tlsfp-unit.sh
     - name: Race-detect HA leader election (no-double-ship push sinks)
       # electionLoop's promote/demote wiring is what both startSyslog and
       # startSnowflake rely on to guarantee only the active leader ever
@@ -237,32 +245,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
-    - name: Test IPv6 extension-header walker
-      run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/ipv6_walk_test.c -o /tmp/netra-ipv6-walk-test && /tmp/netra-ipv6-walk-test
-    - name: Test ICMP error header parser
-      run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/icmp_parse_test.c -o /tmp/netra-icmp-test && /tmp/netra-icmp-test
-    - name: Test L7/DNS byte-level parsers
-      run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/l7_parse_test.c -o /tmp/netra-l7-parse-test && /tmp/netra-l7-parse-test
-    - name: Guard BPF map struct ABI layouts Go decodes by raw byte offset
-      run: cc -std=c11 -O2 -Wall -Wextra -Werror bpf/tests/abi_layout_test.c -o /tmp/netra-abi-layout-test && /tmp/netra-abi-layout-test
-    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -mllvm -bpf-stack-size=1024 -c bpf/netra_tc.c -o /tmp/netra_tc.o
-    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_edge_intel.c -o /tmp/netra_edge_intel.o
-    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_capture.c -o /tmp/netra_capture.o
-    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tlsfp.c -o /tmp/netra_tlsfp.o
     - uses: actions/setup-go@v5
       with: {go-version: '1.27.1', cache: true}
-    - name: Build kernel-level BPF program tests
-      run: go test -tags=bpfintegration -c -o /tmp/bpfintegration.test ./bpf/integration/
-    - name: Run kernel-level BPF program tests (real BPF_PROG_TEST_RUN against the compiled netra_tc.o, not just a compile check)
-      # CAP_BPF/CAP_SYS_ADMIN is required to create real BPF maps/programs and
-      # invoke BPF_PROG_TEST_RUN — the same privilege level any real BPF
-      # loader (including internal/agent's on a live node) always needs, now
-      # exercised in CI instead of only ever by hand on a live cluster. Run
-      # the already-built test binary under sudo directly, rather than `sudo
-      # go test`, so root never needs write access to the runner user's Go
-      # build/module cache. See bpf/integration/helpers.go's package doc
-      # comment.
-      run: sudo NETRA_BPF_TEST_OBJECT=/tmp/netra_tc.o NETRA_BPF_TLSFP_TEST_OBJECT=/tmp/netra_tlsfp.o /tmp/bpfintegration.test -test.v
+    - name: eBPF C helpers + compile + privileged PROG_TEST_RUN (scripted)
+      # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
+      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp, and
+      # bpf/integration (including TestTLSFP*).
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-ebpf-tests.sh
   auto-capture-veth:
     # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +
     # AF_PACKET feeder → non-empty PCAP under NETRA_AUTO_CAPTURE_DIR.

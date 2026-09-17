@@ -43,15 +43,31 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
 ```bash
 make fmt
 go test ./...
+./scripts/ci-tlsfp-unit.sh
+./scripts/ci-p1-p5-unit.sh
 make test-python
 npm --prefix web run test
-# eBPF compile gate from the Makefile / CI ebpf job
+# eBPF compile + PROG_TEST_RUN (Linux root):
+#   sudo ./scripts/ci-ebpf-tests.sh
+# Live smokes (Linux root):
+#   sudo ./scripts/ci-tlsfp-smoke.sh
+#   sudo ./scripts/ci-auto-capture-veth.sh
 ```
 
 CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
-`auto-capture-veth`, `tlsfp-smoke`). The auto-capture smoke needs Linux root
-+ iperf3; run locally with `sudo ./scripts/ci-auto-capture-veth.sh` when
-changing alert/auto-capture or AF_PACKET paths (see `docs/capture.md`).
-The TLSFP smoke needs Linux root + clang + openssl + iperf3; run
-`sudo ./scripts/ci-tlsfp-smoke.sh` when changing `bpf/netra_tlsfp.c` or
-agent JA3 wiring (see `docs/tls-fingerprints.md`).
+`auto-capture-veth`, `tlsfp-smoke`). Scripted gates:
+
+| Script | Job / step |
+|---|---|
+| `scripts/ci-p1-p5-unit.sh` | `go` — P1–P5 package + API surface unit/race |
+| `scripts/ci-tlsfp-unit.sh` | `go` — tlsfp + API JA3 unit/race |
+| `scripts/ci-ebpf-tests.sh` | `ebpf` — C helpers, clang objects, bpfintegration |
+| `scripts/ci-tlsfp-smoke.sh` | `tlsfp-smoke` — agent + openssl + iperf3 |
+| `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 |
+
+The auto-capture smoke needs Linux root + iperf3; run locally with
+`sudo ./scripts/ci-auto-capture-veth.sh` when changing alert/auto-capture
+or AF_PACKET paths (see `docs/capture.md`). The TLSFP smoke needs Linux
+root + clang + openssl + iperf3; run `sudo ./scripts/ci-tlsfp-smoke.sh`
+when changing `bpf/netra_tlsfp.c` or agent JA3 wiring (see
+`docs/tls-fingerprints.md`).

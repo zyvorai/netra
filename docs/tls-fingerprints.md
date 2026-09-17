@@ -33,14 +33,17 @@ New maps (ABI-additive): `tls_hello_events`, `tls_hello_rate`,
 
 | Layer | How |
 |---|---|
-| Unit | `go test ./internal/tlsfp/...` — parse, GREASE, ECH, risk board, detector LRU |
-| API | `go test ./internal/api/ -run TLSFingerprints` |
+| Unit | `./scripts/ci-tlsfp-unit.sh` (also `make test-tlsfp`) — parse, GREASE, ECH, risk, detector, API |
+| P1–P5 suite | `./scripts/ci-p1-p5-unit.sh` (also `make test-p1-p5`) — all surface packages + routes |
 | BPF ABI | `bpf/tests/abi_layout_test.c` (`tls_hello_event` = 276 bytes) |
-| BPF load | CI `ebpf` job compiles `bpf/netra_tlsfp.c`; `bpf/integration` `TestTLSFP*` (load + allow-return; emit is not asserted under `PROG_TEST_RUN`) |
-| Live smoke | `scripts/ci-tlsfp-smoke.sh` (GitHub job `tlsfp-smoke`): agent + **openssl** ClientHello + **iperf3** TCP background → `uniqueJa3 > 0` |
+| BPF load | `sudo ./scripts/ci-ebpf-tests.sh` — compile + `bpf/integration` `TestTLSFP*` |
+| Live smoke | `sudo ./scripts/ci-tlsfp-smoke.sh` (GitHub job `tlsfp-smoke`): agent + **openssl** + **iperf3** → `uniqueJa3 > 0` |
 
 ```bash
-# Privileged Linux (same shape as auto-capture smoke):
+./scripts/ci-tlsfp-unit.sh
+./scripts/ci-p1-p5-unit.sh
+# Privileged Linux:
+sudo ./scripts/ci-ebpf-tests.sh
 sudo ./scripts/ci-tlsfp-smoke.sh
 ```
 

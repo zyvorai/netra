@@ -6,8 +6,10 @@
   - JA3 risk board + ECH detection (`GET /api/v1/ebpf/tls-fingerprints/risk`).
   - **Always-on datapath JA3/JA4** via standalone `bpf/netra_tlsfp.c`
     (`tls_hello_events`, rate-limited `bpf_skb_load_bytes` samples) plus
-    capture frames (`docs/tls-fingerprints.md`). CI: `tlsfp-smoke` job
-    (`scripts/ci-tlsfp-smoke.sh` — openssl ClientHello + iperf3 TCP).
+    capture frames (`docs/tls-fingerprints.md`). CI scripts:
+    `scripts/ci-tlsfp-unit.sh`, `scripts/ci-p1-p5-unit.sh`,
+    `scripts/ci-ebpf-tests.sh`, `scripts/ci-tlsfp-smoke.sh` (openssl +
+    iperf3).
   - ECH / missing-SNI board (`GET /api/v1/insights/ech-blind`).
   - DNS/C2 domain intel (`GET /api/v1/intel/dns-hits`; suffix match + heuristics).
   - Exfil fan-out heuristics (`GET /api/v1/insights/exfil`).
