@@ -245,8 +245,10 @@ jobs:
       run: cc -std=c11 -O2 -Wall -Wextra -Werror -Ibpf bpf/tests/l7_parse_test.c -o /tmp/netra-l7-parse-test && /tmp/netra-l7-parse-test
     - name: Guard BPF map struct ABI layouts Go decodes by raw byte offset
       run: cc -std=c11 -O2 -Wall -Wextra -Werror bpf/tests/abi_layout_test.c -o /tmp/netra-abi-layout-test && /tmp/netra-abi-layout-test
-    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tc.c -o /tmp/netra_tc.o
+    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -mllvm -bpf-stack-size=1024 -c bpf/netra_tc.c -o /tmp/netra_tc.o
     - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_edge_intel.c -o /tmp/netra_edge_intel.o
+    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_capture.c -o /tmp/netra_capture.o
+    - run: clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/x86_64-linux-gnu -c bpf/netra_tlsfp.c -o /tmp/netra_tlsfp.o
     - uses: actions/setup-go@v5
       with: {go-version: '1.27.1', cache: true}
     - name: Build kernel-level BPF program tests
@@ -260,7 +262,7 @@ jobs:
       # go test`, so root never needs write access to the runner user's Go
       # build/module cache. See bpf/integration/helpers.go's package doc
       # comment.
-      run: sudo /tmp/bpfintegration.test -test.v
+      run: sudo NETRA_BPF_TEST_OBJECT=/tmp/netra_tc.o NETRA_BPF_TLSFP_TEST_OBJECT=/tmp/netra_tlsfp.o /tmp/bpfintegration.test -test.v
   auto-capture-veth:
     # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +
     # AF_PACKET feeder → non-empty PCAP under NETRA_AUTO_CAPTURE_DIR.
@@ -275,3 +277,16 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
     - name: Auto-capture veth + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-auto-capture-veth.sh
+  tlsfp-smoke:
+    # Privileged Linux smoke for always-on JA3/JA4: compile netra_tlsfp.o,
+    # BPF_PROG_TEST_RUN sampler tests, then live agent + openssl ClientHello
+    # (+ iperf3 TCP background) → uniqueJa3 > 0 on the controller API.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang, iperf3, openssl
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iperf3 iproute2 openssl
+    - name: TLS fingerprint openssl + iperf3 smoke
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlsfp-smoke.sh

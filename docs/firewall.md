@@ -76,9 +76,9 @@ new validation or detection logic**: every entry is dispatched through the
 exact same per-type validator (`netip.ParseAddr`, `netip.ParsePrefix`,
 `normalizeDNSName`) and store `Add` function the single-rule endpoints
 already use, so an imported entry behaves identically to one added by hand.
-This is a bulk-apply convenience for an operator-supplied file, not a live
-threat-intel subscription — there is no polling, no scoring, and no
-auto-refresh.
+This is a bulk-apply convenience for an operator-supplied file. For a
+**live** threat-intel feed (load once, match continuously, optional leased
+apply), see [`threat-intel.md`](threat-intel.md).
 
 The CLI file format is one `TYPE VALUE [DIRECTION]` entry per line
 (`ip`/`cidr`/`dns`/`sni`), blank lines and `#`-prefixed comments ignored:

@@ -784,7 +784,6 @@ struct {
     __uint(max_entries, 1 << 22);
 } events SEC(".maps");
 
-
 // Conntrack + policy-drop ABI (v0.17). New maps only — existing pinned ABIs unchanged.
 #define NETRA_CT_TCP_TIMEOUT_NS  (3600ULL * 1000000000ULL)
 #define NETRA_CT_UDP_TIMEOUT_NS  (180ULL * 1000000000ULL)

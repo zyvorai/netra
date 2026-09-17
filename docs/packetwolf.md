@@ -75,8 +75,12 @@ Official framing ([zyvor.dev/docs/netra](https://zyvor.dev/docs/netra), [Introdu
 
 Natural join points if product work is prioritized later: PacketWolf partner trust consuming Netra SIEM/health; Netra MCP feeding Forge/Hermes; Axiom console deep-links to both; a single “network” rail that routes Cilium clusters → PacketWolf and others → Netra.
 
+Operator guidance for east-west ownership: `GET /api/v1/insights/microseg` (`docs/microseg.md`).
+
 ## See also
 
+- [competitive-quantum.md](competitive-quantum.md) — perimeter NGFW → Netra fit gaps (internal)
+- [competitive-sse.md](competitive-sse.md) — cloud SSE / Zero Trust → Netra fit gaps (internal)
 - [standalone-ebpf.md](standalone-ebpf.md) — Netra hook/map model
 - [website architecture](../website/docs/core-concepts/architecture.md) — controller + agent layout
 - [zyvor.dev/packetwolf](https://zyvor.dev/packetwolf) — PacketWolf product page

@@ -77,6 +77,28 @@ scandetect:
   maxDestIps: 50
   maxDestPorts: 50
   minAttempts: 20
+# Optional volumetric auto-mitigation (SYN-flood → conn-rate / Shield;
+# high UDP packet deltas → leased deny). Off by default. Requires an
+# active enforce lease; fails open on expiry. Prefer enabling scandetect
+# alongside for the SYN-flood path.
+automitigate:
+  enabled: false
+  interval: 30s
+  connRate: 10
+  udpDelta: 100000
+  shieldSynPps: 10000
+  shieldUdpPps: 20000
+# Optional multi-cluster read-only fleet peers (comma-separated
+# name|url|apikey or name|url|apikey|tenant). Off when empty.
+# See docs/fleet-clusters.md / docs/fleet-tenants.md.
+fleet:
+  clusterName: ""
+  clusterTenant: ""
+  peers: ""
+# Optional sanctioned SaaS hostname suffixes for shadow-SaaS detection
+# (comma-separated). Empty uses built-in enterprise defaults.
+# See docs/shadow-saas.md.
+sanctionedHosts: ""
 # Optional Slack ChatOps slash-commands (/netra ...). Off by default. Needs
 # a Slack app's signing secret to verify inbound requests reached the
 # POST /chatops/slack webhook, and a dedicated API key so a compromised

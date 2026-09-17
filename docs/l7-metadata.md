@@ -14,6 +14,11 @@ Maps:
 
 - `tls_sni_stats`: cgroup + SNI → handshakes / SNI-blocked / last seen.
 - `blocked_sni`: exact normalized hostnames staged by the controller.
+- `tls_hello_events` / `tls_hello_rate`: rate-limited truncated ClientHello
+  handshake samples from standalone `netra_tlsfp` (≤256 bytes, ≤1/2s per
+  destination tuple via `bpf_skb_load_bytes`). Own verifier budget —
+  works when `netra_l7_*` is rejected. Handshake metadata only — not
+  application records. See [`tls-fingerprints.md`](tls-fingerprints.md).
 
 ## Cleartext HTTP/1
 

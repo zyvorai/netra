@@ -79,6 +79,11 @@ v0.8 limitations: no IPv6 extension-header walk, no TCP DNS parser, no DoH/DoT i
 - `http_host_stats`: exact counters keyed by cgroup ID + cleartext HTTP/1 Host + method.
 - `connect_attempts`: cgroup socket-attempt counters keyed by family/protocol/remote IP/remote port.
 - `blocked_sni`: exact normalized TLS SNI emergency deny entries.
+- `tls_hello_events` / `tls_hello_rate` (additive, **standalone**
+  `bpf/netra_tlsfp.c`): rate-limited ClientHello samples via
+  `bpf_skb_load_bytes` + per-CPU scratch for userspace JA3/JA4. Own
+  verifier budget — attaches even when `netra_l7_*` is rejected. See
+  `docs/tls-fingerprints.md`. CI: `scripts/ci-tlsfp-smoke.sh`.
 
 TLS and HTTP parsing is metadata-only and best-effort on a single skb. Netra does not reassemble TCP streams or export payload bytes. SNI-specific enforcement applies only when an ordinary ClientHello hostname is fully parsed; fragmented ClientHello, ECH and QUIC traffic fail open for the SNI rule.
 

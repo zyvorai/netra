@@ -66,7 +66,8 @@ func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, err
 				OwnerReferences []struct{ Kind, Name string } `json:"ownerReferences"`
 			} `json:"metadata"`
 			Spec struct {
-				NodeName string `json:"nodeName"`
+				NodeName           string `json:"nodeName"`
+				ServiceAccountName string `json:"serviceAccountName"`
 			} `json:"spec"`
 			Status struct {
 				Phase, PodIP      string
@@ -86,7 +87,11 @@ func (c *Client) ListPods(ctx context.Context, ns string) ([]models.PodInfo, err
 				break
 			}
 		}
-		p := models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels}
+		p := models.PodInfo{
+			Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase,
+			Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels,
+			ServiceAccountName: it.Spec.ServiceAccountName,
+		}
 		if len(it.Metadata.OwnerReferences) > 0 {
 			p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 			p.OwnerName = it.Metadata.OwnerReferences[0].Name
@@ -110,6 +115,7 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 		} `json:"metadata"`
 		Spec struct {
 			NodeName            string                  `json:"nodeName"`
+			ServiceAccountName  string                  `json:"serviceAccountName"`
 			Containers          []struct{ Name string } `json:"containers"`
 			InitContainers      []struct{ Name string } `json:"initContainers"`
 			EphemeralContainers []struct{ Name string } `json:"ephemeralContainers"`
@@ -140,7 +146,11 @@ func (c *Client) GetPod(ctx context.Context, ns, name string) (*models.PodInfo, 
 		}
 		containers = append(containers, ci)
 	}
-	p := &models.PodInfo{Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase, Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels, Containers: containers}
+	p := &models.PodInfo{
+		Name: it.Metadata.Name, Namespace: it.Metadata.Namespace, Phase: it.Status.Phase,
+		Node: it.Spec.NodeName, PodIP: it.Status.PodIP, Ready: ready, Labels: it.Metadata.Labels,
+		ServiceAccountName: it.Spec.ServiceAccountName, Containers: containers,
+	}
 	if len(it.Metadata.OwnerReferences) > 0 {
 		p.OwnerKind = it.Metadata.OwnerReferences[0].Kind
 		p.OwnerName = it.Metadata.OwnerReferences[0].Name

@@ -38,6 +38,7 @@ import (
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
+	"github.com/zyvorai/netra/internal/tlsfp"
 	"github.com/zyvorai/netra/internal/workload"
 )
 
@@ -86,8 +87,13 @@ type Agent struct {
 	// tick, and captureCancel stops the streaming goroutine on change/stop.
 	captureObject     string
 	captureCollection *ebpf.Collection
-	activeCapture     *models.CaptureSpec
-	captureCancel     context.CancelFunc
+	// tlsfpObject/tlsfpCollection are the standalone ClientHello sampler
+	// (bpf/netra_tlsfp.c) — own verifier budget so JA3 works even when
+	// netra_l7_* fails to load (docs/l7-metadata.md).
+	tlsfpObject     string
+	tlsfpCollection *ebpf.Collection
+	activeCapture   *models.CaptureSpec
+	captureCancel   context.CancelFunc
 	// captureBackendErr records why the most recent applyCapture failed to
 	// start the requested backend (e.g. "afpacket:CAP_NET_RAW", "ebpf:
 	// capture_spec map unavailable"), or "" when the active/most recent
@@ -98,6 +104,8 @@ type Agent struct {
 	// category that field already covers.
 	captureBackendErr string
 	events            chan models.FastPathEvent
+	tlsFP             *tlsfp.Detector
+	tlsFPCgroups      map[string]uint64 // ja3 → last cgroup_id from datapath samples
 	hooks             []string
 	lastRevision      uint64
 	lastSync          time.Time
@@ -162,9 +170,10 @@ func New(log *slog.Logger) *Agent {
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
 		edgeObject:    env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
 		captureObject: env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
+		tlsfpObject:   env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
 		cgroupPath:    env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
-		http: client, events: make(chan models.FastPathEvent, 4096),
+		http: client, events: make(chan models.FastPathEvent, 4096), tlsFP: tlsfp.NewDetector(2048),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
 		procMetaEnabled: envBool("NETRA_PROCMETA_ENABLED", false),
 		attachedProgs:   map[string]bool{},
@@ -184,6 +193,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.lastSync = time.Now()
 	go a.readEvents(ctx)
+	go a.readTLSHelloEvents(ctx)
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
 	for {
@@ -412,6 +422,9 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	if err := a.attachCapture(ifs); err != nil {
+		return err
+	}
+	if err := a.attachTLSFP(); err != nil {
 		return err
 	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
@@ -671,6 +684,76 @@ func (a *Agent) attachCapture(ifs []string) error {
 	return nil
 }
 
+var tlsfpMapNames = []string{"tls_hello_events", "tls_hello_rate"}
+
+// attachTLSFP loads bpf/netra_tlsfp.c — continuous ClientHello sampling with
+// its own verifier budget (works even when netra_l7_* is rejected).
+func (a *Agent) attachTLSFP() error {
+	if !a.cgroupEnabled {
+		return nil
+	}
+	mode := strings.ToLower(env("NETRA_TLSFP", "auto")) // auto|off|required
+	if mode == "off" {
+		a.log.Info("TLS fingerprint sampler skipped by NETRA_TLSFP=off")
+		return nil
+	}
+	spec, err := ebpf.LoadCollectionSpec(a.tlsfpObject)
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load BPF ELF %s (NETRA_TLSFP=required): %w", a.tlsfpObject, err)
+		}
+		a.log.Warn("TLS fingerprint object unavailable; continuing without datapath JA3", "object", a.tlsfpObject, "error", err)
+		return nil
+	}
+	repl := map[string]*ebpf.Map{}
+	for _, name := range tlsfpMapNames {
+		if m, err := ebpf.LoadPinnedMap(filepath.Join(a.pinPath, name), nil); err == nil {
+			repl[name] = m
+			defer m.Close()
+		}
+	}
+	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("load TLS fingerprint BPF collection (NETRA_TLSFP=required): %w", err)
+		}
+		a.log.Warn("TLS fingerprint BPF collection failed to load; continuing without datapath JA3", "error", err)
+		return nil
+	}
+	a.tlsfpCollection = coll
+	for _, name := range tlsfpMapNames {
+		if m := coll.Maps[name]; m != nil {
+			p := filepath.Join(a.pinPath, name)
+			if _, err := os.Stat(p); os.IsNotExist(err) {
+				if err := m.Pin(p); err != nil {
+					a.log.Warn("pin map", "map", name, "error", err)
+				}
+			}
+		}
+	}
+	p := coll.Programs["netra_tlsfp_egress"]
+	if p == nil {
+		if mode == "required" {
+			return fmt.Errorf("BPF program netra_tlsfp_egress missing (NETRA_TLSFP=required)")
+		}
+		a.log.Warn("TLS fingerprint program missing; continuing without datapath JA3")
+		return nil
+	}
+	lnk, err := link.AttachCgroup(link.CgroupOptions{Path: a.cgroupPath, Attach: ebpf.AttachCGroupInetEgress, Program: p})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("attach netra_tlsfp_egress (NETRA_TLSFP=required): %w", err)
+		}
+		a.log.Warn("TLS fingerprint cgroup attach failed; continuing without datapath JA3", "error", err)
+		return nil
+	}
+	a.links = append(a.links, lnk)
+	a.hooks = append(a.hooks, "tlsfp-cgroup-egress")
+	a.markAttached("netra_tlsfp_egress")
+	a.log.Info("TLS fingerprint sampler attached", "object", a.tlsfpObject)
+	return nil
+}
+
 // edgeHistKey/edgeHistValue/edgeCountKey mirror bpf/netra_edge_intel.c's
 // struct edge_hist_key/edge_hist_value/edge_count_key byte-for-byte —
 // cilium/ebpf decodes map entries directly into these via reflection, the
@@ -773,6 +856,9 @@ func (a *Agent) Close() {
 	}
 	if a.captureCollection != nil {
 		a.captureCollection.Close()
+	}
+	if a.tlsfpCollection != nil {
+		a.tlsfpCollection.Close()
 	}
 }
 
@@ -947,7 +1033,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
-		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, HTTPMetadata: httpMeta,
+		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
@@ -2269,6 +2355,98 @@ func (a *Agent) drainEvents(limit int) []models.FastPathEvent {
 	}
 	return out
 }
+
+// tls_hello_event layout (packed): cgroup_id(8) ts_ns(8) copy_len(2) pad(2) data[256]
+const tlsHelloEventSize = 8 + 8 + 2 + 2 + 256
+
+func (a *Agent) readTLSHelloEvents(ctx context.Context) {
+	var m *ebpf.Map
+	if a.tlsfpCollection != nil {
+		m = a.tlsfpCollection.Maps["tls_hello_events"]
+	}
+	if m == nil && a.collection != nil {
+		m = a.collection.Maps["tls_hello_events"]
+	}
+	if m == nil || a.tlsFP == nil {
+		return
+	}
+	rd, err := ringbuf.NewReader(m)
+	if err != nil {
+		a.log.Warn("open tls_hello_events ring buffer", "error", err)
+		return
+	}
+	defer rd.Close()
+	go func() { <-ctx.Done(); _ = rd.Close() }()
+	for {
+		record, err := rd.Read()
+		if err != nil {
+			if ctx.Err() == nil {
+				a.log.Warn("read tls_hello_events", "error", err)
+			}
+			return
+		}
+		b := record.RawSample
+		if len(b) < tlsHelloEventSize {
+			continue
+		}
+		cgroupID := native.Uint64(b[0:8])
+		copyLen := int(native.Uint16(b[16:18]))
+		if copyLen <= 0 || copyLen > 256 {
+			continue
+		}
+		hello := b[20 : 20+copyLen]
+		fp, err := tlsfp.ParseClientHello(hello)
+		if err != nil || fp == nil || fp.JA3 == "" {
+			continue
+		}
+		a.tlsFP.Observe("", *fp)
+		// Stash cgroup on a side channel via Observe is node-only; enrich at drain.
+		a.noteTLSHelloCgroup(fp.JA3, cgroupID)
+	}
+}
+
+func (a *Agent) noteTLSHelloCgroup(ja3 string, cgroupID uint64) {
+	if ja3 == "" || cgroupID == 0 {
+		return
+	}
+	a.workloadMu.Lock()
+	defer a.workloadMu.Unlock()
+	if a.tlsFPCgroups == nil {
+		a.tlsFPCgroups = map[string]uint64{}
+	}
+	a.tlsFPCgroups[ja3] = cgroupID
+}
+
+func (a *Agent) drainTLSFingerprints(limit int) []models.TLSFingerprintStat {
+	if a.tlsFP == nil {
+		return nil
+	}
+	snap := a.tlsFP.Snapshot(limit)
+	if len(snap) == 0 {
+		return nil
+	}
+	a.workloadMu.RLock()
+	cgByJA3 := a.tlsFPCgroups
+	a.workloadMu.RUnlock()
+	out := make([]models.TLSFingerprintStat, 0, len(snap))
+	for _, o := range snap {
+		st := models.TLSFingerprintStat{
+			JA3: o.JA3, JA4: o.JA4, SNI: o.SNI, ECH: o.ECH, Count: o.Count, Source: "datapath",
+		}
+		if cgByJA3 != nil {
+			if cg := cgByJA3[o.JA3]; cg != 0 {
+				st.CgroupID = cg
+				if w, ok := a.workloadIdentity(cg); ok {
+					st.Namespace, st.Pod = w.Namespace, w.Pod
+					st.WorkloadKind, st.WorkloadName = w.WorkloadKind, w.WorkloadName
+				}
+			}
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
 func (a *Agent) readKernelDrops() ([]models.KernelDropStat, error) {
 	m := a.collection.Maps["kernel_drops"]
 	if m == nil {

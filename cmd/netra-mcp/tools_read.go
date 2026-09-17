@@ -113,6 +113,47 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_fleet_clusters", method: "GET", path: "/api/v1/fleet/clusters",
+			description: "Multi-cluster read-only aggregator: local fleet plus optional NETRA_FLEET_PEERS remotes (name|url|key|tenant).",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_fleet_tenants", method: "GET", path: "/api/v1/fleet/tenants",
+			description: "Partner/MSSP tenant rollup from fleet cluster tenant labels. Read-only.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_report_prevention", method: "GET", path: "/api/v1/report/prevention",
+			description: "Threat-prevention-style coverage snapshot: intel hits, lease state, detector findings, AI/DoH/DoT/JA3. Not IPS efficacy %.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_tls_fingerprints", method: "GET", path: "/api/v1/ebpf/tls-fingerprints",
+			description: "JA3/JA4 fingerprints observed from capture-stream ClientHello frames (single-skb). Observe-only.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_tls_fingerprint_risk", method: "GET", path: "/api/v1/ebpf/tls-fingerprints/risk",
+			description: "Rare JA3 / missing-SNI / ECH-extension risk board from capture fingerprints.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max items.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_ebpf_encrypted_dns", method: "GET", path: "/api/v1/ebpf/encrypted-dns",
+			description: "DoT (port 853) and known DoH SaaS destinations from metadata. No decryption.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_app_categories", method: "GET", path: "/api/v1/ebpf/app-categories",
+			description: "Heuristic CDN/SaaS/cloud category labels from SNI/Host/DNS metadata. Not DPI.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_compliance", method: "GET", path: "/api/v1/compliance",
+			description: "CIS-inspired network hardening pack from sysctl-audit. Review-only; Netra never writes sysctls.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_node_resources", method: "GET", path: "/api/v1/node-resources",
 			description: "Per-node CPU/memory/load-average snapshot plus per-workload cgroup v2 CPU/memory usage, top-N by CPU. A \"top\"-like view attributed to Kubernetes workloads rather than raw host PIDs. Observe-only.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max top-CPU workload rows, 1-200. Default 20.")}),
@@ -413,6 +454,78 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit", "namespace", "workload"},
 		},
 		{
+			name: "netra_insights_zero_trust", method: "GET", path: "/api/v1/insights/zero-trust",
+			description: "Identity-aware Zero Trust allow/deny drafts from live workload traffic. Review-only; never applies. Durable NetPol remains PacketWolf/Cilium when present.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max drafts, 1-200. Default 50.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_microseg", method: "GET", path: "/api/v1/insights/microseg",
+			description: "East-west microsegmentation guidance: prefer PacketWolf on Cilium; Netra lease drafts only when Cilium is absent.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max Netra lease drafts when applicable.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_shadow_saas", method: "GET", path: "/api/v1/insights/shadow-saas",
+			description: "Shadow SaaS / unsanctioned destinations from SNI/Host/DNS vs NETRA_SANCTIONED_HOSTS. Observe-only CASB-lite.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max findings.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_experience", method: "GET", path: "/api/v1/insights/experience",
+			description: "Workload digital-experience scorecard from connect latency, TCP retrans/RTO, DNS failures. No endpoint agent.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max workloads.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_destination_risk", method: "GET", path: "/api/v1/insights/destination-risk",
+			description: "Combined destination risk from intel hits, categories, AI/MCP, DoH/DoT, and volume. Observe-only.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max destinations.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_policy_packs", method: "GET", path: "/api/v1/insights/policy-packs",
+			description: "Review-only sanctioned-egress CiliumNetworkPolicy packs from NETRA_SANCTIONED_HOSTS + observed traffic. Prefer PacketWolf to apply.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max packs.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_identity_drafts", method: "GET", path: "/api/v1/insights/identity-drafts",
+			description: "ServiceAccount + label identity drafts with review-only CNP sketches. Never auto-applied.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max drafts.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_ech_blind", method: "GET", path: "/api/v1/insights/ech-blind",
+			description: "ECH / missing-SNI blindness board. Observe-only; no decrypt.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max findings.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_exfil", method: "GET", path: "/api/v1/insights/exfil",
+			description: "Exfil heuristics: destination fan-out, volume, rare hosts. Not DLP.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max findings.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_lateral", method: "GET", path: "/api/v1/insights/lateral",
+			description: "Lateral-movement playbooks from scan findings with review-only lease drafts.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max playbooks.")}),
+			queryParams: []string{"limit"},
+		},
+		{
+			name: "netra_insights_category_deny", method: "GET", path: "/api/v1/insights/category-deny",
+			description: "Review-only leased SNI deny drafts for selected app categories (default social,finance).",
+			schema:      objSchema(map[string]any{"limit": intProp("Max drafts."), "categories": strProp("Comma-separated categories.")}),
+			queryParams: []string{"limit", "categories"},
+		},
+		{
+			name: "netra_intel_dns_hits", method: "GET", path: "/api/v1/intel/dns-hits",
+			description: "DNS/C2-style domain board: intel suffix match + NX/DGA heuristics.",
+			schema:      objSchema(map[string]any{"limit": intProp("Max hits.")}),
+			queryParams: []string{"limit"},
+		},
+		{
 			name: "netra_insights_rates", method: "GET", path: "/api/v1/insights/rates",
 			description: "Current traffic-rate window (packets/bytes per second) across agents.",
 			schema:      objSchema(map[string]any{"window": strProp("Duration string, e.g. \"5m\", between 30s and 2h. Default 5m.")}),
@@ -627,6 +740,18 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 	if err := registerIntelPreview(srv, c); err != nil {
 		return err
 	}
+	if err := registerIntelFeed(srv, c); err != nil {
+		return err
+	}
+	if err := registerIntelHits(srv, c); err != nil {
+		return err
+	}
+	if err := registerAIDestinations(srv, c); err != nil {
+		return err
+	}
+	if err := registerAutoMitigate(srv, c); err != nil {
+		return err
+	}
 	return registerWatchlistMatch(srv, c)
 }
 
@@ -679,6 +804,66 @@ func registerIntelPreview(srv *mcpserver.Server, c *client) error {
 				return fmt.Sprintf("invalid arguments: %v", err), true, nil
 			}
 			out, status, err := c.do(ctx, "POST", "/api/v1/intel/preview", []byte(x.Text), nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerIntelFeed(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_intel_feed_get",
+		Description: "Return the active threat-intel feed status and entries. Loading a feed (PUT) is a separate mutate tool.",
+		InputSchema: emptySchema(),
+		Handler: func(ctx context.Context, _ json.RawMessage) (any, bool, error) {
+			out, status, err := c.do(ctx, "GET", "/api/v1/intel/feed", nil, nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerIntelHits(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_intel_hits",
+		Description: "Match the active threat-intel feed against live agent metadata. Observe-only.",
+		InputSchema: emptySchema(),
+		Handler: func(ctx context.Context, _ json.RawMessage) (any, bool, error) {
+			out, status, err := c.do(ctx, "GET", "/api/v1/intel/hits", nil, nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerAIDestinations(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_ebpf_ai_destinations",
+		Description: "Observe known GenAI/MCP SaaS destinations via SNI/HTTP Host/DNS metadata. No payloads. Applies nothing.",
+		InputSchema: emptySchema(),
+		Handler: func(ctx context.Context, _ json.RawMessage) (any, bool, error) {
+			out, status, err := c.do(ctx, "GET", "/api/v1/ebpf/ai-destinations", nil, nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerAutoMitigate(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_ebpf_auto_mitigate",
+		Description: "Status of optional volumetric auto-mitigation (conn-rate / Shield / leased deny). Observe-only.",
+		InputSchema: emptySchema(),
+		Handler: func(ctx context.Context, _ json.RawMessage) (any, bool, error) {
+			out, status, err := c.do(ctx, "GET", "/api/v1/ebpf/auto-mitigate", nil, nil)
 			if err != nil {
 				return nil, true, err
 			}

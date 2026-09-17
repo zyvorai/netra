@@ -55,8 +55,42 @@ func DraftRule(question string) RuleDraft {
 		return out
 	}
 	ql := strings.ToLower(q)
-	if !containsAny(ql, "deny", "block", "drop", "rate", "limit", "throttle", "ban", "forbid", "allow", "except", "whitelist", "exception") {
+	if !containsAny(ql, "deny", "block", "drop", "rate", "limit", "throttle", "ban", "forbid", "allow", "except", "whitelist", "exception", "category", "conn-rate", "lateral", "exfil") {
 		out.Summary = "That does not look like a deny/rate/allow request. Ask a diagnostic question instead, or say “deny …” / “allow …” / “rate-limit …”."
+		return out
+	}
+
+	// Category deny → point at review-only drafts API.
+	if containsAny(ql, "category", "social", "saas category") && containsAny(ql, "deny", "block", "draft") {
+		out.Understood = true
+		out.Confidence = "medium"
+		out.Kind = "category-deny"
+		out.ApplyMethod = "GET"
+		out.ApplyPath = "/api/v1/insights/category-deny"
+		out.Body = map[string]any{"reviewOnly": true}
+		out.CLI = "netractl insights category-deny"
+		out.Summary = "Category deny drafts (review-only) — pick hosts then apply leased SNI deny"
+		out.Warnings = append(out.Warnings, "This returns drafts only; apply each SNI/DNS deny under an enforce lease after review.")
+		return out
+	}
+	if containsAny(ql, "lateral", "port scan", "fan-out", "fan out") {
+		out.Understood = true
+		out.Confidence = "medium"
+		out.Kind = "lateral-playbook"
+		out.ApplyMethod = "GET"
+		out.ApplyPath = "/api/v1/insights/lateral"
+		out.CLI = "netractl insights lateral"
+		out.Summary = "Lateral-movement playbooks from scan findings (review-only lease drafts)"
+		return out
+	}
+	if containsAny(ql, "exfil", "data exfil", "fanout") {
+		out.Understood = true
+		out.Confidence = "medium"
+		out.Kind = "exfil"
+		out.ApplyMethod = "GET"
+		out.ApplyPath = "/api/v1/insights/exfil"
+		out.CLI = "netractl insights exfil"
+		out.Summary = "Exfil fan-out / volume heuristics board (observe-only)"
 		return out
 	}
 

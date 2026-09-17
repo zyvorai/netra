@@ -51,19 +51,21 @@ func Match(agents []models.AgentStatus, entries []intel.Entry, limit int) Result
 					if len(out.Hits) >= limit {
 						break
 					}
-					if strings.ToLower(strings.TrimSuffix(d.Name, ".")) == want {
+					got := strings.ToLower(strings.TrimSuffix(d.Name, "."))
+					if got == want || strings.HasSuffix(got, "."+want) {
 						hit(&out, e, "dns", a.Node, d.Namespace, d.Pod, d.Name, d.Queries, d.Failures)
 					}
 				}
 			}
 		case "sni":
-			want := strings.ToLower(e.Value)
+			want := strings.ToLower(strings.TrimSuffix(e.Value, "."))
 			for _, a := range agents {
 				for _, t := range a.TLSMetadata {
 					if len(out.Hits) >= limit {
 						break
 					}
-					if strings.EqualFold(t.SNI, want) {
+					got := strings.ToLower(strings.TrimSuffix(t.SNI, "."))
+					if got == want || strings.HasSuffix(got, "."+want) {
 						hit(&out, e, "sni", a.Node, t.Namespace, t.Pod, t.SNI, t.Handshakes, t.Blocked)
 					}
 				}

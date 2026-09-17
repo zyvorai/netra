@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zyvorai/netra/internal/automitigate"
 	"github.com/zyvorai/netra/internal/capdrift"
 	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/chatops"
@@ -33,6 +34,7 @@ import (
 	"github.com/zyvorai/netra/internal/health"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/insights"
+	"github.com/zyvorai/netra/internal/intel"
 	"github.com/zyvorai/netra/internal/ipv6diag"
 	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/kube"
@@ -46,6 +48,7 @@ import (
 	"github.com/zyvorai/netra/internal/shielddiag"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
+	"github.com/zyvorai/netra/internal/tlsfp"
 	"github.com/zyvorai/netra/internal/workload"
 )
 
@@ -70,6 +73,9 @@ type Server struct {
 	artifacts           *capture.ArtifactStore
 	dnsDetector         *dnsdetect.Detector
 	scanDetector        *scandetect.Detector
+	intelFeed           *intel.Feed
+	autoMitigate        *automitigate.Engine
+	tlsFP               *tlsfp.Detector
 	workloadInventory   *workloadInventoryCache
 }
 
@@ -83,7 +89,7 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	requirePreflight := !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_REQUIRE_PREFLIGHT")), "false")
 	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
 	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
-	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub(), workloadInventory: newWorkloadInventoryCache()}
+	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub(), intelFeed: &intel.Feed{}, tlsFP: tlsfp.NewDetector(2048), workloadInventory: newWorkloadInventoryCache()}
 
 	// ChatOps outbound trust is shared across every provider: every command
 	// is a thin HTTP client of this same process's own /api/v1/* endpoints
@@ -146,6 +152,14 @@ func (s *Server) WithDNSDetect(d *dnsdetect.Detector) *Server {
 // WithDNSDetect. Returns s for chaining onto New(...).
 func (s *Server) WithScanDetect(d *scandetect.Detector) *Server {
 	s.scanDetector = d
+	return s
+}
+
+// WithAutoMitigate attaches the optional volumetric auto-mitigation engine
+// (NETRA_AUTOMITIGATE_ENABLED). Status-only from the API; the engine runs
+// in cmd/netrad. Returns s for chaining.
+func (s *Server) WithAutoMitigate(e *automitigate.Engine) *Server {
+	s.autoMitigate = e
 	return s
 }
 
@@ -296,6 +310,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/insights/baseline", s.auth(http.HandlerFunc(s.insightsBaselineClear)))
 	mux.Handle("GET /api/v1/insights/drift", s.auth(http.HandlerFunc(s.insightsDrift)))
 	mux.Handle("GET /api/v1/insights/recommendations", s.auth(http.HandlerFunc(s.insightsRecommendations)))
+	mux.Handle("GET /api/v1/insights/zero-trust", s.auth(http.HandlerFunc(s.insightsZeroTrust)))
+	mux.Handle("GET /api/v1/insights/microseg", s.auth(http.HandlerFunc(s.insightsMicroseg)))
+	mux.Handle("GET /api/v1/insights/shadow-saas", s.auth(http.HandlerFunc(s.insightsShadowSaaS)))
+	mux.Handle("GET /api/v1/insights/experience", s.auth(http.HandlerFunc(s.insightsExperience)))
+	mux.Handle("GET /api/v1/insights/destination-risk", s.auth(http.HandlerFunc(s.insightsDestinationRisk)))
+	mux.Handle("GET /api/v1/insights/policy-packs", s.auth(http.HandlerFunc(s.insightsPolicyPacks)))
+	mux.Handle("GET /api/v1/insights/identity-drafts", s.auth(http.HandlerFunc(s.insightsIdentityDrafts)))
+	mux.Handle("GET /api/v1/insights/ech-blind", s.auth(http.HandlerFunc(s.insightsECHBlind)))
+	mux.Handle("GET /api/v1/insights/exfil", s.auth(http.HandlerFunc(s.insightsExfil)))
+	mux.Handle("GET /api/v1/insights/lateral", s.auth(http.HandlerFunc(s.insightsLateral)))
+	mux.Handle("GET /api/v1/insights/category-deny", s.auth(http.HandlerFunc(s.insightsCategoryDeny)))
 	mux.Handle("GET /api/v1/insights/rates", s.auth(http.HandlerFunc(s.insightsRates)))
 	mux.Handle("GET /api/v1/insights/rate-baseline", s.auth(http.HandlerFunc(s.insightsRateBaselineGet)))
 	mux.Handle("POST /api/v1/insights/rate-baseline", s.auth(http.HandlerFunc(s.insightsRateBaselineCapture)))
@@ -319,8 +344,25 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/playbooks", s.auth(http.HandlerFunc(s.playbooks)))
 	mux.Handle("GET /api/v1/audit/summary", s.auth(http.HandlerFunc(s.auditSummary)))
 	mux.Handle("POST /api/v1/intel/preview", s.auth(http.HandlerFunc(s.intelPreview)))
+	mux.Handle("GET /api/v1/intel/feed", s.auth(http.HandlerFunc(s.intelFeedGet)))
+	mux.Handle("PUT /api/v1/intel/feed", s.auth(http.HandlerFunc(s.intelFeedPut)))
+	mux.Handle("DELETE /api/v1/intel/feed", s.auth(http.HandlerFunc(s.intelFeedDelete)))
+	mux.Handle("GET /api/v1/intel/hits", s.auth(http.HandlerFunc(s.intelHits)))
+	mux.Handle("GET /api/v1/intel/dns-hits", s.auth(http.HandlerFunc(s.intelDNSHits)))
+	mux.Handle("POST /api/v1/intel/apply", s.auth(http.HandlerFunc(s.intelApply)))
+	mux.Handle("GET /api/v1/ebpf/ai-destinations", s.auth(http.HandlerFunc(s.aiDestinations)))
+	mux.Handle("POST /api/v1/ebpf/ai-destinations/deny", s.auth(http.HandlerFunc(s.aiDestinationsDeny)))
+	mux.Handle("GET /api/v1/ebpf/app-categories", s.auth(http.HandlerFunc(s.appCategories)))
+	mux.Handle("GET /api/v1/ebpf/auto-mitigate", s.auth(http.HandlerFunc(s.autoMitigateStatus)))
+	mux.Handle("GET /api/v1/compliance", s.auth(http.HandlerFunc(s.complianceReport)))
 	mux.Handle("GET /api/v1/ebpf/coverage", s.auth(http.HandlerFunc(s.ebpfCoverage)))
 	mux.Handle("GET /api/v1/fleet", s.auth(http.HandlerFunc(s.fleetInventory)))
+	mux.Handle("GET /api/v1/fleet/clusters", s.auth(http.HandlerFunc(s.fleetClusters)))
+	mux.Handle("GET /api/v1/fleet/tenants", s.auth(http.HandlerFunc(s.fleetTenants)))
+	mux.Handle("GET /api/v1/ebpf/tls-fingerprints", s.auth(http.HandlerFunc(s.tlsFingerprints)))
+	mux.Handle("GET /api/v1/ebpf/tls-fingerprints/risk", s.auth(http.HandlerFunc(s.tlsFingerprintRisk)))
+	mux.Handle("GET /api/v1/ebpf/encrypted-dns", s.auth(http.HandlerFunc(s.encDNS)))
+	mux.Handle("GET /api/v1/report/prevention", s.auth(http.HandlerFunc(s.preventionReport)))
 	mux.Handle("GET /api/v1/node-resources", s.auth(http.HandlerFunc(s.nodeResources)))
 	mux.Handle("GET /api/v1/handoff", s.auth(http.HandlerFunc(s.operatorHandoff)))
 	mux.Handle("GET /api/v1/scorecard", s.auth(http.HandlerFunc(s.operatorScorecard)))
@@ -2673,6 +2715,16 @@ func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 	}
 	s.store.Report(x)
 	s.metricsData.agentReports.Add(1)
+	if s.tlsFP != nil {
+		for _, fp := range x.TLSFingerprints {
+			if fp.JA3 == "" {
+				continue
+			}
+			s.tlsFP.Observe(x.Node, tlsfp.Fingerprint{
+				JA3: fp.JA3, JA4: fp.JA4, SNI: fp.SNI, ECH: fp.ECH,
+			})
+		}
+	}
 	writeJSON(w, 202, map[string]any{"accepted": true})
 }
 

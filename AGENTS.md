@@ -49,6 +49,9 @@ npm --prefix web run test
 ```
 
 CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
-`auto-capture-veth`). The auto-capture smoke needs Linux root + iperf3;
-run locally with `sudo ./scripts/ci-auto-capture-veth.sh` when changing
-alert/auto-capture or AF_PACKET paths (see `docs/capture.md`).
+`auto-capture-veth`, `tlsfp-smoke`). The auto-capture smoke needs Linux root
++ iperf3; run locally with `sudo ./scripts/ci-auto-capture-veth.sh` when
+changing alert/auto-capture or AF_PACKET paths (see `docs/capture.md`).
+The TLSFP smoke needs Linux root + clang + openssl + iperf3; run
+`sudo ./scripts/ci-tlsfp-smoke.sh` when changing `bpf/netra_tlsfp.c` or
+agent JA3 wiring (see `docs/tls-fingerprints.md`).

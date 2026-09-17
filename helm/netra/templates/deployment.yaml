@@ -178,6 +178,36 @@ spec:
         - name: NETRA_SCANDETECT_MIN_ATTEMPTS
           value: {{ .Values.scandetect.minAttempts | quote }}
         {{- end }}
+        {{- if .Values.automitigate.enabled }}
+        - name: NETRA_AUTOMITIGATE_ENABLED
+          value: "true"
+        - name: NETRA_AUTOMITIGATE_INTERVAL
+          value: {{ .Values.automitigate.interval | quote }}
+        - name: NETRA_AUTOMITIGATE_CONN_RATE
+          value: {{ .Values.automitigate.connRate | quote }}
+        - name: NETRA_AUTOMITIGATE_UDP_DELTA
+          value: {{ .Values.automitigate.udpDelta | quote }}
+        - name: NETRA_AUTOMITIGATE_SHIELD_SYN_PPS
+          value: {{ .Values.automitigate.shieldSynPps | quote }}
+        - name: NETRA_AUTOMITIGATE_SHIELD_UDP_PPS
+          value: {{ .Values.automitigate.shieldUdpPps | quote }}
+        {{- end }}
+        {{- if .Values.fleet.clusterName }}
+        - name: NETRA_CLUSTER_NAME
+          value: {{ .Values.fleet.clusterName | quote }}
+        {{- end }}
+        {{- if .Values.fleet.clusterTenant }}
+        - name: NETRA_CLUSTER_TENANT
+          value: {{ .Values.fleet.clusterTenant | quote }}
+        {{- end }}
+        {{- if .Values.fleet.peers }}
+        - name: NETRA_FLEET_PEERS
+          value: {{ .Values.fleet.peers | quote }}
+        {{- end }}
+        {{- if .Values.sanctionedHosts }}
+        - name: NETRA_SANCTIONED_HOSTS
+          value: {{ .Values.sanctionedHosts | quote }}
+        {{- end }}
         {{- if .Values.chatops.enabled }}
         - name: NETRA_CHATOPS_ALLOW_MUTATIONS
           value: {{ .Values.chatops.allowMutations | quote }}

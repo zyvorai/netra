@@ -1,0 +1,40 @@
+// Copyright 2026 Zyvor AI Labs · https://zyvor.dev
+// SPDX-License-Identifier: Apache-2.0
+package ainet
+
+import (
+	"testing"
+
+	"github.com/zyvorai/netra/internal/models"
+)
+
+func TestLookupLongestSuffix(t *testing.T) {
+	e, ok := lookup(DefaultCatalog(), "api.openai.com")
+	if !ok || e.Label != "OpenAI API" {
+		t.Fatalf("got %+v ok=%v", e, ok)
+	}
+	e, ok = lookup(DefaultCatalog(), "foo.smithery.ai")
+	if !ok || e.Category != CatMCP {
+		t.Fatalf("got %+v ok=%v", e, ok)
+	}
+	if _, ok := lookup(DefaultCatalog(), "example.com"); ok {
+		t.Fatal("unexpected match")
+	}
+}
+
+func TestMatchSNI(t *testing.T) {
+	agents := []models.AgentStatus{{
+		AgentReport: models.AgentReport{
+			Node: "n1",
+			TLSMetadata: []models.TLSMetadataStat{{SNI: "api.anthropic.com", Handshakes: 3, Namespace: "ns", Pod: "p"}},
+		},
+	}}
+	res := Match(agents, nil, 50)
+	if res.Count != 1 || res.Hits[0].Kind != "sni" {
+		t.Fatalf("%+v", res)
+	}
+	ents := DenyEntries(res.Hits)
+	if len(ents) != 1 || ents[0].Type != "sni" {
+		t.Fatalf("%+v", ents)
+	}
+}

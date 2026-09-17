@@ -135,6 +135,16 @@ struct shield_source_hit_value {
 _Static_assert(sizeof(struct shield_source_hit_value) == 24, "shield_source_hit_value must stay 24 bytes to match internal/agent readShieldSourceHits()'s value struct");
 _Static_assert(offsetof(struct shield_source_hit_value, attempts) == 16, "attempts must be the third field to match internal/agent readShieldSourceHits()'s value struct order");
 
+/* Continuous TLS hello ringbuf event (new map; not a resize of tls_sni_stats). */
+struct tls_hello_event {
+    uint64_t cgroup_id;
+    uint64_t ts_ns;
+    uint16_t copy_len;
+    uint16_t pad;
+    uint8_t data[256];
+} __attribute__((packed));
+_Static_assert(sizeof(struct tls_hello_event) == 276, "tls_hello_event must stay 276 bytes to match internal/agent readTLSHelloEvents");
+
 int main(void)
 {
     puts("netra ABI layout guard: ok");

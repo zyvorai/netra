@@ -158,7 +158,8 @@ func (c *Client) ListWorkloads(ctx context.Context, node string) ([]models.Workl
 				} `json:"ownerReferences"`
 			} `json:"metadata"`
 			Spec struct {
-				NodeName string `json:"nodeName"`
+				NodeName           string `json:"nodeName"`
+				ServiceAccountName string `json:"serviceAccountName"`
 			} `json:"spec"`
 		} `json:"items"`
 	}
@@ -167,7 +168,11 @@ func (c *Client) ListWorkloads(ctx context.Context, node string) ([]models.Workl
 	}
 	out := make([]models.WorkloadIdentity, 0, len(list.Items))
 	for _, pod := range list.Items {
-		w := models.WorkloadIdentity{UID: pod.Metadata.UID, Namespace: pod.Metadata.Namespace, Pod: pod.Metadata.Name, Node: pod.Spec.NodeName, Labels: pod.Metadata.Labels}
+		w := models.WorkloadIdentity{
+			UID: pod.Metadata.UID, Namespace: pod.Metadata.Namespace, Pod: pod.Metadata.Name,
+			Node: pod.Spec.NodeName, Labels: pod.Metadata.Labels,
+			ServiceAccountName: pod.Spec.ServiceAccountName,
+		}
 		for _, owner := range pod.Metadata.Owners {
 			if owner.Controller || w.WorkloadKind == "" {
 				w.WorkloadKind, w.WorkloadName = owner.Kind, owner.Name

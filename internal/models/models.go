@@ -67,16 +67,17 @@ type EBPFRateLimit struct {
 }
 
 type WorkloadIdentity struct {
-	UID          string            `json:"uid"`
-	Namespace    string            `json:"namespace"`
-	Pod          string            `json:"pod"`
-	Node         string            `json:"node,omitempty"`
-	WorkloadKind string            `json:"workloadKind,omitempty"`
-	WorkloadName string            `json:"workloadName,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	CgroupID     uint64            `json:"cgroupId,omitempty"`
-	ContainerID  string            `json:"containerId,omitempty"`
-	CgroupPath   string            `json:"cgroupPath,omitempty"`
+	UID                string            `json:"uid"`
+	Namespace          string            `json:"namespace"`
+	Pod                string            `json:"pod"`
+	Node               string            `json:"node,omitempty"`
+	WorkloadKind       string            `json:"workloadKind,omitempty"`
+	WorkloadName       string            `json:"workloadName,omitempty"`
+	ServiceAccountName string            `json:"serviceAccountName,omitempty"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	CgroupID           uint64            `json:"cgroupId,omitempty"`
+	ContainerID        string            `json:"containerId,omitempty"`
+	CgroupPath         string            `json:"cgroupPath,omitempty"`
 }
 
 type EBPFWorkloadScope struct {
@@ -294,6 +295,22 @@ type TLSMetadataStat struct {
 	Pod          string `json:"pod,omitempty"`
 	WorkloadKind string `json:"workloadKind,omitempty"`
 	WorkloadName string `json:"workloadName,omitempty"`
+}
+
+// TLSFingerprintStat is a JA3/JA4 observation from continuous L7 ClientHello
+// sampling (tls_hello_events) or capture frames. Observe-only.
+type TLSFingerprintStat struct {
+	JA3          string `json:"ja3"`
+	JA4          string `json:"ja4,omitempty"`
+	SNI          string `json:"sni,omitempty"`
+	ECH          bool   `json:"ech,omitempty"`
+	Count        uint64 `json:"count"`
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+	Source       string `json:"source,omitempty"` // datapath | capture
 }
 
 type HTTPMetadataStat struct {
@@ -1055,6 +1072,7 @@ type AgentReport struct {
 	TCPSignals         []TCPSignalStat         `json:"tcpSignals,omitempty"`
 	DNSHealth          []DNSHealthStat         `json:"dnsHealth,omitempty"`
 	TLSMetadata        []TLSMetadataStat       `json:"tlsMetadata,omitempty"`
+	TLSFingerprints    []TLSFingerprintStat    `json:"tlsFingerprints,omitempty"`
 	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
@@ -1311,16 +1329,17 @@ type ContainerInfo struct {
 
 // PodInfo is the operator-facing Kubernetes pod inventory record.
 type PodInfo struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Phase      string            `json:"phase"`
-	Node       string            `json:"node,omitempty"`
-	PodIP      string            `json:"podIP,omitempty"`
-	Ready      bool              `json:"ready"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	OwnerKind  string            `json:"ownerKind,omitempty"`
-	OwnerName  string            `json:"ownerName,omitempty"`
-	Containers []ContainerInfo   `json:"containers,omitempty"`
+	Name               string            `json:"name"`
+	Namespace          string            `json:"namespace"`
+	Phase              string            `json:"phase"`
+	Node               string            `json:"node,omitempty"`
+	PodIP              string            `json:"podIP,omitempty"`
+	Ready              bool              `json:"ready"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	ServiceAccountName string            `json:"serviceAccountName,omitempty"`
+	OwnerKind          string            `json:"ownerKind,omitempty"`
+	OwnerName          string            `json:"ownerName,omitempty"`
+	Containers         []ContainerInfo   `json:"containers,omitempty"`
 	// Started is the most recent containerStatuses[].state.running.startedAt
 	// across this pod's containers (nil if none are currently running) —
 	// pod-level convenience so callers don't have to scan Containers

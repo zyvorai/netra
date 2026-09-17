@@ -56,6 +56,12 @@ func main() {
 		err = watchlistCmd(os.Args[2:])
 	case "fleet":
 		err = request("GET", "/api/v1/fleet", nil)
+	case "fleet-clusters":
+		err = request("GET", "/api/v1/fleet/clusters", nil)
+	case "fleet-tenants":
+		err = request("GET", "/api/v1/fleet/tenants", nil)
+	case "compliance":
+		err = request("GET", "/api/v1/compliance", nil)
 	case "node-resources":
 		err = request("GET", "/api/v1/node-resources", nil)
 	case "handoff":
@@ -109,7 +115,7 @@ func usage() {
   playbooks [--format markdown|json]
   intel preview FILE
   watchlist match FILE
-  fleet | node-resources | handoff [--format markdown|json] | scorecard | talkers
+  fleet | fleet-clusters | fleet-tenants | node-resources | handoff [--format markdown|json] | scorecard | talkers
   namespaces | protocols | baselines | ports | dnsboard | lease
   capture start NODE [--protocol tcp|udp|icmp|icmpv6] [--host IP] [--port N] [--snaplen N] [--max-pps N] [--duration 60s]
   capture stop NODE | capture status
@@ -689,6 +695,18 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/dns-findings", nil)
 	case "scan-findings":
 		return request("GET", "/api/v1/ebpf/scan-findings", nil)
+	case "ai-destinations":
+		return request("GET", "/api/v1/ebpf/ai-destinations", nil)
+	case "app-categories":
+		return request("GET", "/api/v1/ebpf/app-categories", nil)
+	case "auto-mitigate":
+		return request("GET", "/api/v1/ebpf/auto-mitigate", nil)
+	case "tls-fingerprints":
+		return request("GET", "/api/v1/ebpf/tls-fingerprints", nil)
+	case "tls-fingerprint-risk":
+		return request("GET", "/api/v1/ebpf/tls-fingerprints/risk", nil)
+	case "encrypted-dns":
+		return request("GET", "/api/v1/ebpf/encrypted-dns", nil)
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":
@@ -1500,6 +1518,28 @@ func insightCmd() error {
 			p += "?" + enc
 		}
 		return request("GET", p, nil)
+	case "zero-trust":
+		return request("GET", "/api/v1/insights/zero-trust", nil)
+	case "microseg":
+		return request("GET", "/api/v1/insights/microseg", nil)
+	case "shadow-saas":
+		return request("GET", "/api/v1/insights/shadow-saas", nil)
+	case "experience":
+		return request("GET", "/api/v1/insights/experience", nil)
+	case "destination-risk":
+		return request("GET", "/api/v1/insights/destination-risk", nil)
+	case "policy-packs":
+		return request("GET", "/api/v1/insights/policy-packs", nil)
+	case "identity-drafts":
+		return request("GET", "/api/v1/insights/identity-drafts", nil)
+	case "ech-blind":
+		return request("GET", "/api/v1/insights/ech-blind", nil)
+	case "exfil":
+		return request("GET", "/api/v1/insights/exfil", nil)
+	case "lateral":
+		return request("GET", "/api/v1/insights/lateral", nil)
+	case "category-deny":
+		return request("GET", "/api/v1/insights/category-deny", nil)
 	case "baseline":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("baseline show|capture|clear")

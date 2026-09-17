@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zyvorai/netra/internal/intel"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/store"
 )
@@ -26,6 +27,7 @@ func testExportServer(t *testing.T) *Server {
 		store:       st,
 		apiKey:      "ci-test-token",
 		metricsData: &telemetry{},
+		intelFeed:   &intel.Feed{},
 	}
 }
 

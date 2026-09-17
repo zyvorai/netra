@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+- **P5 residual SSE/NGFW metadata surfaces.**
+  - JA3 risk board + ECH detection (`GET /api/v1/ebpf/tls-fingerprints/risk`).
+  - **Always-on datapath JA3/JA4** via standalone `bpf/netra_tlsfp.c`
+    (`tls_hello_events`, rate-limited `bpf_skb_load_bytes` samples) plus
+    capture frames (`docs/tls-fingerprints.md`). CI: `tlsfp-smoke` job
+    (`scripts/ci-tlsfp-smoke.sh` — openssl ClientHello + iperf3 TCP).
+  - ECH / missing-SNI board (`GET /api/v1/insights/ech-blind`).
+  - DNS/C2 domain intel (`GET /api/v1/intel/dns-hits`; suffix match + heuristics).
+  - Exfil fan-out heuristics (`GET /api/v1/insights/exfil`).
+  - Lateral playbooks (`GET /api/v1/insights/lateral`).
+  - Category deny drafts (`GET /api/v1/insights/category-deny`).
+  - Fleet tenant risk scores; expanded app catalog; DX SLO breaches;
+    prevention `coverageScore`; auto-mitigate on fan-out/lateral/port-scan.
+  - Docs: [`docs/p5-surfaces.md`](docs/p5-surfaces.md).
+- **P4 SSE/ZT differentiation surfaces (review-only).**
+  - Sanctioned-app policy packs (`GET /api/v1/insights/policy-packs`;
+    `docs/policy-packs.md`).
+  - Partner/MSSP fleet tenant rollup (`GET /api/v1/fleet/tenants`,
+    `NETRA_CLUSTER_TENANT` + peer `name|url|key|tenant`;
+    `docs/fleet-tenants.md`).
+  - ServiceAccount identity drafts (`GET /api/v1/insights/identity-drafts`;
+    `docs/identity-drafts.md`).
+- **P3 SSE/ZT fit surfaces (cloud SSE class, no decrypt).**
+  - Shadow SaaS board (`GET /api/v1/insights/shadow-saas`,
+    `NETRA_SANCTIONED_HOSTS`; `docs/shadow-saas.md`).
+  - Workload DX scorecard (`GET /api/v1/insights/experience`;
+    `docs/experience.md`).
+  - Destination risk ranking (`GET /api/v1/insights/destination-risk`;
+    `docs/destination-risk.md`).
+- **Docs: cloud SSE / Zero Trust → Netra fit map.** Internal
+  [`docs/competitive-sse.md`](docs/competitive-sse.md) (shadow SaaS, workload
+  DX scorecard, destination risk — no SWG/ZTNA/DLP clone); linked from
+  packetwolf + NGFW competitive docs.
+- **P2 perimeter-NGFW fit surfaces.**
+  - Heuristic app/category labels (`GET /api/v1/ebpf/app-categories`;
+    `docs/app-categories.md`).
+  - CIS-inspired compliance pack from sysctl-audit (`GET /api/v1/compliance`;
+    `docs/compliance.md`).
+  - East-west microseg guidance (`GET /api/v1/insights/microseg`;
+    PacketWolf preferred on Cilium; `docs/microseg.md`).
+- **P1 perimeter-NGFW fit surfaces.**
+  - TLS JA3/JA4 from capture-stream ClientHello + DoT/DoH metadata observe
+    (`GET /api/v1/ebpf/tls-fingerprints`, `/encrypted-dns`; `docs/tls-fingerprints.md`).
+  - Multi-cluster read-only fleet aggregator (`GET /api/v1/fleet/clusters`,
+    `NETRA_FLEET_PEERS`; `docs/fleet-clusters.md`).
+  - Identity-aware Zero Trust drafts (`GET /api/v1/insights/zero-trust`;
+    `docs/zero-trust.md`).
+  - Prevention coverage report (`GET /api/v1/report/prevention`;
+    `docs/prevention-report.md`).
+- **Perimeter NGFW fit gaps (P0).** Internal strategy doc
+  [`docs/competitive-quantum.md`](docs/competitive-quantum.md) (no vendor
+  branding) plus three Netra-fit capabilities:
+  - **Live threat-intel pipeline** — `PUT/GET/DELETE /api/v1/intel/feed`,
+    `GET /api/v1/intel/hits`, leased `POST /api/v1/intel/apply`
+    (`docs/threat-intel.md`); CLI `netractl intel feed|hits|apply`; MCP
+    `netra_intel_feed_*` / `netra_intel_hits` / `netra_intel_apply`.
+  - **AI/MCP SaaS destination observe** — `GET /api/v1/ebpf/ai-destinations`
+    (+ leased deny); catalog in `internal/ainet` (`docs/ai-destinations.md`).
+  - **Volumetric auto-mitigation** — opt-in `NETRA_AUTOMITIGATE_ENABLED`
+    (SYN-flood → conn-rate / Shield; UDP amplify → leased deny);
+    `GET /api/v1/ebpf/auto-mitigate` (`docs/auto-mitigate.md`); Helm
+    `automitigate:`.
 - **Docs site: buyer resources downloads.** Product Perspective (PDF/PPTX) and
   Product Brochure (PDF/DOCX) in `docs/sales/` (repo browse) and
   `website/static/sales/` (GitHub Pages `/sales/`), with Resources page at

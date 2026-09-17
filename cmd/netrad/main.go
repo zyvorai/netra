@@ -17,6 +17,7 @@ import (
 
 	"github.com/zyvorai/netra/internal/alert"
 	"github.com/zyvorai/netra/internal/api"
+	"github.com/zyvorai/netra/internal/automitigate"
 	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/dnsdetect"
 	"github.com/zyvorai/netra/internal/gitops"
@@ -92,7 +93,8 @@ func main() {
 	}
 	dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 	scanDet, scanInterval, scanEnabled := buildScanDetect()
-	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithArtifacts(artifacts).Handler()
+	autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
+	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
 
 	if shouldRunAlertPoller(dispatcher) {
 		var pollerWG sync.WaitGroup
@@ -150,6 +152,18 @@ func main() {
 			scanDet.Run(sctx, scanInterval, func() []models.AgentStatus { return st.AgentStatuses(time.Now(), staleAfter) })
 		}()
 		defer scanWG.Wait()
+	}
+	if autoEnabled {
+		var autoWG sync.WaitGroup
+		actx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		autoWG.Add(1)
+		go func() {
+			defer autoWG.Done()
+			log.Info("auto-mitigate started")
+			autoEng.Run(actx, func() []models.AgentStatus { return st.AgentStatuses(time.Now(), staleAfter) })
+		}()
+		defer autoWG.Wait()
 	}
 
 	runHTTP(ctx, log, handler, st.Persistent(), false)
@@ -462,6 +476,43 @@ func buildScanDetect() (*scandetect.Detector, time.Duration, bool) {
 	return scandetect.New(cfg), interval, true
 }
 
+// buildAutoMitigate wires optional lease-bounded volumetric mitigation.
+func buildAutoMitigate(log *slog.Logger, st *store.Store, scan *scandetect.Detector) (*automitigate.Engine, bool) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_AUTOMITIGATE_ENABLED")), "true") {
+		return nil, false
+	}
+	cfg := automitigate.DefaultConfig()
+	cfg.Enabled = true
+	if v := envDuration("NETRA_AUTOMITIGATE_INTERVAL", 0); v > 0 {
+		cfg.Interval = v
+	}
+	if v := envUint32("NETRA_AUTOMITIGATE_CONN_RATE", 0); v > 0 {
+		cfg.ConnRatePerSecond = v
+	}
+	if v := envUint64("NETRA_AUTOMITIGATE_UDP_DELTA", 0); v > 0 {
+		cfg.UDPPacketDelta = v
+	}
+	if v := envUint32("NETRA_AUTOMITIGATE_SHIELD_UDP_PPS", 0); v > 0 {
+		cfg.ShieldUDPPPS = v
+	}
+	if v := envUint32("NETRA_AUTOMITIGATE_SHIELD_SYN_PPS", 0); v > 0 {
+		cfg.ShieldSynPPS = v
+	}
+	return automitigate.New(log, st, scan, cfg), true
+}
+
+func envUint32(key string, def uint32) uint32 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return def
+	}
+	return uint32(n)
+}
+
 func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *notify.Dispatcher, alertCfg alert.Config, artifacts *capture.ArtifactStore, gitopsCfg gitops.Config, gitopsEnabled bool) {
 	identity := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
 	if identity == "" {
@@ -528,6 +579,8 @@ func electionLoop(
 	var dnsDetectWG sync.WaitGroup
 	var scanDetectCancel func()
 	var scanDetectWG sync.WaitGroup
+	var autoMitigateCancel func()
+	var autoMitigateWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
@@ -563,6 +616,11 @@ func electionLoop(
 			scanDetectCancel()
 			scanDetectWG.Wait()
 			scanDetectCancel = nil
+		}
+		if autoMitigateCancel != nil {
+			autoMitigateCancel()
+			autoMitigateWG.Wait()
+			autoMitigateCancel = nil
 		}
 		if st != nil {
 			if err := st.Close(); err != nil {
@@ -616,7 +674,8 @@ func electionLoop(
 		}
 		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 		scanDet, scanInterval, scanEnabled := buildScanDetect()
-		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithArtifacts(artifacts).Handler())
+		autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
+		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler())
 		if shouldRunAlertPoller(dispatcher) {
 			pctx, cancel := context.WithCancel(ctx)
 			pollerCancel = cancel
@@ -665,6 +724,15 @@ func electionLoop(
 			go func() {
 				defer scanDetectWG.Done()
 				scanDet.Run(sctx, scanInterval, func() []models.AgentStatus { return leaderSt.AgentStatuses(time.Now(), staleAfter) })
+			}()
+		}
+		if autoEnabled {
+			actx, acancel := context.WithCancel(ctx)
+			autoMitigateCancel = acancel
+			autoMitigateWG.Add(1)
+			go func() {
+				defer autoMitigateWG.Done()
+				autoEng.Run(actx, func() []models.AgentStatus { return leaderSt.AgentStatuses(time.Now(), staleAfter) })
 			}()
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)

@@ -66,6 +66,9 @@ func exportCmd(args []string) error {
 }
 
 func reportCmd(args []string) error {
+	if len(args) > 0 && args[0] == "prevention" {
+		return request("GET", "/api/v1/report/prevention", nil)
+	}
 	format := "markdown"
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -108,14 +111,45 @@ func playbooksCmd(args []string) error {
 }
 
 func intelCmd(args []string) error {
-	if len(args) < 2 || args[0] != "preview" {
-		return fmt.Errorf("intel preview FILE")
+	if len(args) < 1 {
+		return fmt.Errorf("intel preview|feed|hits|dns-hits|apply|clear [FILE] [--matched-only]")
 	}
-	body, err := os.ReadFile(args[1])
-	if err != nil {
-		return err
+	switch args[0] {
+	case "preview":
+		if len(args) < 2 {
+			return fmt.Errorf("intel preview FILE")
+		}
+		body, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		return request("POST", "/api/v1/intel/preview", body)
+	case "feed":
+		if len(args) < 2 {
+			return request("GET", "/api/v1/intel/feed", nil)
+		}
+		body, err := os.ReadFile(args[1])
+		if err != nil {
+			return err
+		}
+		return request("PUT", "/api/v1/intel/feed", body)
+	case "hits":
+		return request("GET", "/api/v1/intel/hits", nil)
+	case "dns-hits":
+		return request("GET", "/api/v1/intel/dns-hits", nil)
+	case "clear":
+		return request("DELETE", "/api/v1/intel/feed", nil)
+	case "apply":
+		path := "/api/v1/intel/apply"
+		for _, a := range args[1:] {
+			if a == "--matched-only" {
+				path += "?matchedOnly=true"
+			}
+		}
+		return requestHeaders("POST", path, nil, map[string]string{"X-Netra-Confirm-Risk": "high"})
+	default:
+		return fmt.Errorf("intel preview|feed|hits|dns-hits|apply|clear [FILE] [--matched-only]")
 	}
-	return request("POST", "/api/v1/intel/preview", body)
 }
 
 func watchlistCmd(args []string) error {

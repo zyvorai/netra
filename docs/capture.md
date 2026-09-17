@@ -117,6 +117,10 @@ sudo ./scripts/ci-auto-capture-veth.sh
 For manual traffic against a live capture (not CI), see
 `scripts/iperf3-traffic-gen.sh`.
 
+Related: always-on JA3/JA4 datapath smoke (`scripts/ci-tlsfp-smoke.sh`,
+GitHub job `tlsfp-smoke`) also uses **iperf3** for background TCP while
+**openssl** generates ClientHellos — see [`tls-fingerprints.md`](tls-fingerprints.md).
+
 **HA note:** artifact files are local to the leader process unless the
 directory sits on shared RWX storage alongside the state file.
 

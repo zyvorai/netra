@@ -291,6 +291,9 @@ func (s *Server) agentCaptureStream(w http.ResponseWriter, r *http.Request) {
 		}
 		if mt == websocket.BinaryMessage {
 			sess.broadcast(data)
+			if s.tlsFP != nil {
+				s.tlsFP.ObserveFrame(node, data)
+			}
 			if s.artifacts != nil && !startedAt.IsZero() {
 				s.artifacts.WriteFrame(node, data)
 			}

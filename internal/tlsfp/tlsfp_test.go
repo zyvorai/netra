@@ -18,6 +18,7 @@ type helloOpts struct {
 	groups       []uint16
 	sigAlgs      []uint16
 	suppVersions []uint16
+	ech          bool
 	noExtensions bool
 }
 
@@ -83,6 +84,10 @@ func buildClientHello(o helloOpts) []byte {
 				list = append(list, u16be(v)...)
 			}
 			exts = append(exts, extension(extSupportedVersions, list)...)
+		}
+		if o.ech {
+			// encrypted_client_hello (0xfe0d) — opaque payload is enough for the flag.
+			exts = append(exts, extension(extECH, []byte{0x00, 0x00, 0x01, 0x00})...)
 		}
 		body = append(body, u16be(uint16(len(exts)))...)
 		body = append(body, exts...)

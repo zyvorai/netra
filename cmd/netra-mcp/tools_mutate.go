@@ -456,7 +456,93 @@ func registerMutateTools(srv *mcpserver.Server, c *client) error {
 	if err := registerNetPolDefaultDenySet(srv, c); err != nil {
 		return err
 	}
+	if err := registerIntelFeedPut(srv, c); err != nil {
+		return err
+	}
+	if err := registerIntelApply(srv, c); err != nil {
+		return err
+	}
+	if err := registerAIDestinationsDeny(srv, c); err != nil {
+		return err
+	}
 	return registerPolicyGitOpsResync(srv, c)
+}
+
+func registerIntelFeedPut(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_intel_feed_put",
+		Description: "Replace the active threat-intel feed (JSON/CSV/bare list). Does not apply denies; use netra_intel_apply under an enforce lease.",
+		InputSchema: objSchema(map[string]any{
+			"text": strProp("Feed body: JSON, CSV, or newline-separated IPs/CIDRs/names."),
+		}, "text"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			out, status, err := c.do(ctx, "PUT", "/api/v1/intel/feed", []byte(x.Text), nil)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerIntelApply(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_intel_apply",
+		Description: "Import the active threat-intel feed into deny maps. Requires mode=enforce with an active lease and confirm_risk=high. Optional matched_only imports only currently observed hits.",
+		InputSchema: objSchema(map[string]any{
+			"confirm_risk": enumProp("Must be high.", "high"),
+			"matched_only": map[string]any{"type": "boolean", "description": "When true, only apply entries that currently match live traffic."},
+		}, "confirm_risk"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				ConfirmRisk string `json:"confirm_risk"`
+				MatchedOnly bool   `json:"matched_only"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			path := "/api/v1/intel/apply"
+			if x.MatchedOnly {
+				path += "?matchedOnly=true"
+			}
+			extra := map[string]string{"X-Netra-Confirm-Risk": x.ConfirmRisk}
+			out, status, err := c.do(ctx, "POST", path, nil, extra)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
+}
+
+func registerAIDestinationsDeny(srv *mcpserver.Server, c *client) error {
+	return srv.Register(mcpserver.Tool{
+		Name:        "netra_ebpf_ai_destinations_deny",
+		Description: "Lease-deny currently observed GenAI/MCP SaaS SNI hosts. Requires mode=enforce with an active lease and confirm_risk=high. Metadata only.",
+		InputSchema: objSchema(map[string]any{
+			"confirm_risk": enumProp("Must be high.", "high"),
+		}, "confirm_risk"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (any, bool, error) {
+			var x struct {
+				ConfirmRisk string `json:"confirm_risk"`
+			}
+			if err := json.Unmarshal(raw, &x); err != nil {
+				return fmt.Sprintf("invalid arguments: %v", err), true, nil
+			}
+			extra := map[string]string{"X-Netra-Confirm-Risk": x.ConfirmRisk}
+			out, status, err := c.do(ctx, "POST", "/api/v1/ebpf/ai-destinations/deny", nil, extra)
+			if err != nil {
+				return nil, true, err
+			}
+			return httpResultToToolResult(out, status)
+		},
+	})
 }
 
 // registerNetPolDefaultDenySet wraps PUT /api/v1/ebpf/netpol/default-deny.

@@ -17,4 +17,7 @@ web:
 	npm --prefix web run build
 
 bpf:
-	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_tc.c -o bpf/netra_tc.o
+	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -mllvm -bpf-stack-size=1024 -c bpf/netra_tc.c -o bpf/netra_tc.o
+	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_edge_intel.c -o bpf/netra_edge_intel.o
+	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_capture.c -o bpf/netra_capture.o
+	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_tlsfp.c -o bpf/netra_tlsfp.o

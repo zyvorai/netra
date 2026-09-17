@@ -44,6 +44,7 @@ type Fingerprint struct {
 	Curves  []uint16 `json:"curves"`
 	SigAlgs []uint16 `json:"sigAlgs"`
 	QUIC    bool     `json:"quic,omitempty"`
+	ECH     bool     `json:"ech,omitempty"` // ClientHello carried encrypted_client_hello ext
 }
 
 const (
@@ -55,6 +56,7 @@ const (
 	extSignatureAlgorithms   = 13
 	extSupportedGroups       = 10
 	extECPointFormats        = 11
+	extECH                   = 0xfe0d // encrypted_client_hello
 )
 
 // ParseClientHello parses a TLS record and returns a Fingerprint.
@@ -173,6 +175,8 @@ func ParseClientHello(data []byte) (*Fingerprint, error) {
 		case extECPointFormats:
 			// Not needed for JA4 but useful for JA3.
 			_ = parseU8List(extData)
+		case extECH:
+			fp.ECH = true
 		}
 		p.pos += int(extLen)
 	}
