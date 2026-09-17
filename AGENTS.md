@@ -48,4 +48,7 @@ npm --prefix web run test
 # eBPF compile gate from the Makefile / CI ebpf job
 ```
 
-CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`).
+CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
+`auto-capture-veth`). The auto-capture smoke needs Linux root + iperf3;
+run locally with `sudo ./scripts/ci-auto-capture-veth.sh` when changing
+alert/auto-capture or AF_PACKET paths (see `docs/capture.md`).

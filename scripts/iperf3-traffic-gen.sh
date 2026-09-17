@@ -7,6 +7,9 @@
 # suite: it needs a real reachable target and (for the client role) a
 # running `iperf3 -s` on that target.
 #
+# For the automated Linux CI smoke (veth netns + auto-capture PCAP assert),
+# use scripts/ci-auto-capture-veth.sh instead (GitHub job auto-capture-veth).
+#
 #   # On the node you'll capture from, start a receiver:
 #   ./scripts/iperf3-traffic-gen.sh --server --port 5201
 #

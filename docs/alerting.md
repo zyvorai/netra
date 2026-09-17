@@ -100,6 +100,15 @@ alerting:
   existingSecret: netra-alerting   # key: channels-json
   # or inline (prefer Secret for tokens):
   # channelsJson: '[{"type":"slack",...}]'
+  autoCapture:
+    enabled: false                 # opt-in; can be true with channels unset
+    duration: "60s"
+    cooldown: "10m"
+    protocol: tcp
+    backend: ebpf                  # or afpacket
+    maxPps: 1000
+    maxConcurrent: 5
+    dir: /var/lib/netra/auto-capture
 ```
 
 ## Severity and cooldown
@@ -135,7 +144,9 @@ signals and persists PCAPs for later diagnosis. See `docs/capture.md`
 | `NETRA_AUTO_CAPTURE_MAX_SESSION_MB` | `50` | stop writing beyond this |
 
 Helm: `alerting.autoCapture.*`. Auto-capture can run even when no notify
-channels are configured (the poller still evaluates findings).
+channels are configured (the poller still evaluates findings). Full trigger
+list, artifact download API, and the Linux `scripts/ci-auto-capture-veth.sh`
+/ GitHub `auto-capture-veth` smoke live in `docs/capture.md`.
 
 ## Not included
 

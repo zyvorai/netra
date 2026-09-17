@@ -65,6 +65,8 @@ A pictorial, cluster-wide view lays out the layers above as stage cards across i
 
 Each per-node finding in the drill-down has a "Capture on {node}" button that jumps to the Capture page with that node pre-selected — see `docs/capture.md`'s Congestion Map integration section for the other half of that link (the Capture page also polls this same `GET /api/v1/ebpf/kernel-network` endpoint to suggest a capture on a node with a live critical finding).
 
+With opt-in auto-capture (`NETRA_AUTO_CAPTURE` / Helm `alerting.autoCapture`), a **critical** Congestion Map finding also starts that capture automatically and writes a PCAP under `NETRA_AUTO_CAPTURE_DIR` — see `docs/capture.md` (Auto-capture).
+
 ## Prometheus
 
 The default five-minute window exports low-cardinality gauges without node,

@@ -193,7 +193,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_ports` | `GET /api/v1/ports` | `limit` (1-200, default 30) | Top destination ports by packet count |
 | `netra_dns_board` | `GET /api/v1/dns/board` | `limit` (1-200, default 30) | DNS names ranked by failure count |
 | `netra_lease` | `GET /api/v1/lease` | — | Enforce-mode lease clock: remaining seconds, expired, or none |
-| `netra_capture_status` | `GET /api/v1/capture/status` | — | Every node with an active packet-capture session. Never returns captured packets |
+| `netra_capture_status` | `GET /api/v1/capture/status` | — | Every node with an active packet-capture session (includes `backend` and auto-capture `requestor`). Never returns captured packets |
 | `netra_export_status` | `GET /api/v1/export/status` | — | Whether syslog push is configured |
 | `netra_ebpf_coverage` | `GET /api/v1/ebpf/coverage` | — | Per-node hook/program coverage matrix |
 | `netra_intel_preview` | `POST /api/v1/intel/preview` | `text` (raw feed body) | Parse JSON/CSV/bare IPs into deny-import entries. Applies nothing |
@@ -321,7 +321,7 @@ Every eBPF mutating tool returns the full updated `EBPFFastPathConfig` on succes
 
 | Tool | Endpoint | Parameters | Notes |
 |---|---|---|---|
-| `netra_capture_start` | `PUT /api/v1/vms/{node}/capture` | `node` **(required)**, at least one of `protocol`/`host`/`port` **(required — no unfiltered captures)**, `snapLen`, `maxPps`, `durationSeconds` (1-300, default 60) | Captures full packet bytes by default, which can include cleartext application secrets — prefer a narrow filter. Auto-expires; live packets stream to the Capture dashboard page, not through this tool |
+| `netra_capture_start` | `PUT /api/v1/vms/{node}/capture` | `node` **(required)**, at least one of `protocol`/`host`/`port` **(required — no unfiltered captures)**, `backend` (`ebpf`\|`afpacket`, default `ebpf`), `snapLen`, `maxPps`, `durationSeconds` (1-300, default 60) | Captures full packet bytes by default, which can include cleartext application secrets — prefer a narrow filter. Auto-expires; live packets stream to the Capture dashboard page, not through this tool. Controller-side opt-in auto-capture on critical drops is separate (`NETRA_AUTO_CAPTURE`, see `docs/capture.md`) and is not started via this tool |
 | `netra_capture_stop` | `DELETE /api/v1/vms/{node}/capture` | `node` **(required)** | Stops an active session before its duration expires |
 
 ### Insights — mutating (`NETRA_MCP_ALLOW_MUTATIONS=true`)

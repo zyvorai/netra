@@ -87,7 +87,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Stale-agent detection and per-node hook coverage in the dashboard.
 - Kernel skb drop-reason counters through an optional raw `kfree_skb` tracepoint, plus Linux softnet and interface drop/error counters.
 - Prometheus control-plane/aggregate metrics at `/metrics`.
-- Optional interval-driven anomaly alerting via HMAC-signed webhook sinks, with severity-escalation-aware cooldown deduplication and concurrent per-sink delivery. Off by default; HA-aware (leader-only). Each poll also builds an AI on-call digest (`source=ai`) — quiet clusters emit nothing; a non-info severity or a changed incident fingerprint notifies through the same dedup/delivery path as every other finding. See `docs/alerting.md`.
+- Optional interval-driven anomaly alerting via multi-channel notify (webhook, email, Slack, Teams, Twilio SMS/WhatsApp, HTTP bridge), with severity-escalation-aware cooldown deduplication and concurrent per-channel delivery. Off by default; HA-aware (leader-only). Opt-in auto-capture on critical softnet/congestion/drop-spike signals persists PCAPs for download. See `docs/alerting.md` and `docs/capture.md`.
 - Pull-based SIEM export of audit events, health anomalies, and incident clusters as JSON, JSONL, ArcSight CEF, RFC5424 syslog, or OTLP/HTTP JSON Logs (`GET /api/v1/export/audit`, `GET /api/v1/export/events`). Observe-only, stdlib-only, no payloads. See `docs/siem-export.md`.
 - Point-in-time operator briefing (`GET /api/v1/report`, `netractl report`) combining health, drift, exposure, incidents, and recent audit into markdown or JSON for a ticket/handoff.
 - Importable Grafana dashboard over the existing `/metrics` gauges (`deploy/grafana/netra-dashboard.json`).
@@ -162,7 +162,9 @@ The **Congestion Map** dashboard page turns this into a pictorial, cluster-wide 
 
 ## Packet Capture
 
-The **Capture** dashboard page starts a filtered, time-bounded packet capture on one node or, in one click, a bulk capture across many — streamed live as a macOS-terminal-styled feed, color-coded by protocol and direction. Click any packet for a Wireshark-style layered breakdown (Ethernet II / IP / TCP or UDP or ICMP, each its own color) plus a hex dump, all decoded client-side. Endpoints are labeled automatically when they match a known pod or VM IP, filterable alongside protocol/direction/text. A live packets/sec and bytes/sec sparkline, named filter presets, `.json`/`.csv` export next to the existing `.pcap` download, ended-session history, and a direct line from the Congestion Map (either a manual "Capture on {node}" click or an automatic "Suggested capture" banner when a node has a live critical finding) round it out. See `docs/capture.md`.
+The **Capture** dashboard page starts a filtered, time-bounded packet capture on one node or, in one click, a bulk capture across many — streamed live as a macOS-terminal-styled feed, color-coded by protocol and direction. Click any packet for a Wireshark-style layered breakdown (Ethernet II / IP / TCP or UDP or ICMP, each its own color) plus a hex dump, all decoded client-side. Endpoints are labeled automatically when they match a known pod or VM IP, filterable alongside protocol/direction/text. A live packets/sec and bytes/sec sparkline, named filter presets, `.json`/`.csv` export next to the existing `.pcap` download, ended-session history, and a direct line from the Congestion Map (either a manual "Capture on {node}" click or an automatic "Suggested capture" banner when a node has a live critical finding) round it out.
+
+Opt-in **auto-capture** (`NETRA_AUTO_CAPTURE` / Helm `alerting.autoCapture`) starts the same filtered capture automatically on critical softnet drops, Congestion Map findings, and drop-rate spikes, and persists classic PCAPs under `NETRA_AUTO_CAPTURE_DIR` with Download links in capture history. See `docs/capture.md` (backends, auto-capture, and the Linux `scripts/ci-auto-capture-veth.sh` / GitHub `auto-capture-veth` smoke).
 
 ![Capture Live View — color-coded terminal feed with pod/VM attribution](docs/ux/10-capture-live.jpg)
 
@@ -330,7 +332,7 @@ docs/kernel-network-diagnostics.md sysctl/counter correlation and safe tuning wo
 docs/tcx-and-shield.md    TCX modes + XDP Shield
 docs/native-netpol.md     optional native NetPol maps: v1 deny-list + v2 allow-list/default-deny
 docs/fluxvm-borrow-backlog.md deferred FluxVM eBPF patterns
-docs/alerting.md          webhook alert dispatcher + poller runbook
+docs/alerting.md          multi-channel notify + alert poller; opt-in auto-capture env
 docs/siem-export.md       pull-based SIEM encodings + operator report
 deploy/grafana/           Prometheus dashboard JSON for the existing /metrics gauges
 docs/process-metadata.md  optional /proc-derived process metadata (agent-side, hostPID opt-in)
@@ -342,7 +344,8 @@ docs/chatops.md           Slack ChatOps: slash commands, confirmation flow, Ask 
 docs/chatops-teams.md     Microsoft Teams ChatOps: bot setup, confirm-by-reply flow, validation status
 docs/syn-drop.md          SYN-drop mode: exact-IP and CIDR variants, kernel-verified CI coverage
 docs/edge-tcp-intel.md    standalone TCX edge observer: handshake/RTT histograms, retransmit/RST/FIN counters
-docs/capture.md           packet capture: eBPF vs AF_PACKET backend choice and tradeoffs
+docs/capture.md           packet capture: eBPF vs AF_PACKET, auto-capture PCAPs, veth+iperf3 CI smoke
+scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)
 ```
 
 ## Prerequisites

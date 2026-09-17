@@ -12,6 +12,8 @@ All controller replicas mount the same state directory. The volume must:
 
 CephFS, NFS implementations with working locking, or another Kubernetes RWX filesystem are typical choices. Object-store FUSE mounts that do not provide coherent filesystem locks are not appropriate for the Netra state file.
 
+If auto-capture is enabled (`alerting.autoCapture` / `NETRA_AUTO_CAPTURE`), PCAP artifacts under `NETRA_AUTO_CAPTURE_DIR` are written by the **leader** only. Put that directory on the same RWX volume as the state file (the chart mounts it under the state PVC when persistence is enabled) so a failover does not orphan in-flight PCAPs on the old leader's local disk. See `docs/capture.md`.
+
 ## Election defaults
 
 | Setting | Default |

@@ -42,7 +42,7 @@ When a session explicitly requests a backend the node can't provide (an AF_PACKE
 
 Everything below is client-side on top of the API/wire format above — none of it requires a backend change to add, since every buffered frame already carries full Ethernet-through-L4 bytes.
 
-- **History.** Ended sessions (metadata only — node, protocol/host/port, backend, start/end time, requestor, stop reason — never packet bytes) are recorded server-side (`GET /api/v1/capture/history`) and persisted the same way the audit log is, so they survive a controller restart. A "Repeat" button on each row pre-fills the start-capture form.
+- **History.** Ended sessions (metadata only — node, protocol/host/port, backend, start/end time, requestor, stop reason — never packet bytes) are recorded server-side (`GET /api/v1/capture/history`) and persisted the same way the audit log is, so they survive a controller restart. A "Repeat" button on each row pre-fills the start-capture form. Auto-capture rows show an **Auto** badge; when a PCAP was recorded, a **Download** control hits `GET /api/v1/capture/artifacts/{id}`.
 - **Live inspection.** The live view is a macOS-terminal-styled feed (dark background, traffic-light title bar) with each row color-coded by protocol (TCP/UDP/ICMP/ICMPv6) and direction, plus a filter/search toolbar (protocol, direction, free text, pod/VM). Clicking a row expands a Wireshark-style layered breakdown (Ethernet II / IPv4 or IPv6 / TCP or UDP or ICMP, each its own color) plus a hex dump — all decoded client-side from bytes already in the browser, no new wire format.
 - **Workload attribution.** A captured packet's src/dst IP is matched against `GET /api/v1/pods` and `GET /api/v1/vms` (both already expose `podIP`) to label endpoints `pod ns/name` / `vm ns/name`, filterable via the "Pod / VM" field. This is IP-based only — **there is no process/PID attribution**, since that would require `bpf/netra_capture.c` itself to record cgroup/PID context at capture time, a kernel-side change distinct from anything documented above.
 - **Multi-node.** Adding more than one node before starting a capture calls `POST /api/v1/capture/bulk` instead of the single-node `PUT`, starting the same filtered capture on every selected node independently (capture is already a per-node, pull-based agent primitive, so this needs no new coordination) and reporting per-node success/failure.
@@ -59,27 +59,63 @@ time-bounded capture on critical drop/congestion signals:
 |---------|----------------|
 | Congestion Map critical finding | `kerneldiag` / layer |
 | Kernel or policy drop-rate spike (critical) | `dropdiag-baseline` / `kernel-drop-spike` or `policy-drop-spike` |
-| Softnet drops at critical | `dropdiag` / `softnet-drop` |
+| Softnet drops at critical (≥1000) | `dropdiag` / `softnet-drop` |
 
-Defaults: 60s duration, 10m per-node cooldown, protocol `tcp` (policy spikes
-may enrich host/port from the top `PolicyDropStat`), backend `ebpf` (or
-`afpacket` via `NETRA_AUTO_CAPTURE_BACKEND` / Helm `alerting.autoCapture.backend`),
-max 1000 PPS, max 5 concurrent auto sessions. Requestor is tagged
-`auto-capture:{source}/{kind}` in the audit log.
+| Env / Helm | Default | Notes |
+|---|---|---|
+| `NETRA_AUTO_CAPTURE` / `alerting.autoCapture.enabled` | off | `true` enables |
+| `NETRA_AUTO_CAPTURE_DURATION` / `.duration` | `60s` | max 5m |
+| `NETRA_AUTO_CAPTURE_COOLDOWN` / `.cooldown` | `10m` | per-node |
+| `NETRA_AUTO_CAPTURE_PROTOCOL` / `.protocol` | `tcp` | fallback filter; policy spikes may enrich host/port from the top `PolicyDropStat` |
+| `NETRA_AUTO_CAPTURE_BACKEND` / `.backend` | `ebpf` | or `afpacket` (useful without the node agent / eBPF capture object) |
+| `NETRA_AUTO_CAPTURE_MAX_PPS` / `.maxPps` | `1000` | |
+| `NETRA_AUTO_CAPTURE_MAX_CONCURRENT` / `.maxConcurrent` | `5` | |
+| `NETRA_AUTO_CAPTURE_DIR` / `.dir` | `/var/lib/netra/auto-capture` | PCAP directory (PVC path when persistence is on; emptyDir when not) |
+| `NETRA_AUTO_CAPTURE_MAX_ARTIFACTS` / `.maxArtifacts` | `50` | prune oldest |
+| `NETRA_AUTO_CAPTURE_MAX_TOTAL_MB` / `.maxTotalMb` | `1024` | |
+| `NETRA_AUTO_CAPTURE_MAX_SESSION_MB` / `.maxSessionMb` | `50` | stop writing beyond this |
+
+Requestor is tagged `auto-capture:{source}/{kind}` in the audit log and
+capture history (UI shows an **Auto** badge). Auto-capture can run even when
+no notify channels are configured — the poller still evaluates findings when
+`NETRA_AUTO_CAPTURE=true`.
 
 Frames for auto-capture sessions are written to classic PCAP files under
-`NETRA_AUTO_CAPTURE_DIR` (default `/var/lib/netra/auto-capture`), retained
-with count/size caps, and listed on `GET /api/v1/capture/history` with an
-`artifactId`. Download: `GET /api/v1/capture/artifacts/{id}`.
+`NETRA_AUTO_CAPTURE_DIR`, retained with count/size caps, and listed on
+`GET /api/v1/capture/history` with `artifactId` / `artifactFrames` /
+`artifactBytes`. Download: `GET /api/v1/capture/artifacts/{id}` (UI **Download**
+badge). Empty (header-only) PCAPs are discarded on finalize.
 
 A notify event (`source=auto-capture`, `kind=started`) is published when a
-session begins (delivered through configured alert channels).
+session begins (delivered through configured alert channels when present).
 
-**CI smoke:** `scripts/ci-auto-capture-veth.sh` (Linux, root) puts the veth
-peer in a netns (same-netns pairs are short-circuited by the local stack),
-runs iperf3 TCP, posts a synthetic softnet-critical agent report, and feeds
-AF_PACKET frames into the agent capture WebSocket to assert a non-empty PCAP
-under the artifact dir. GitHub Actions job `auto-capture-veth`.
+### CI / local smoke (iperf3 + veth)
+
+`scripts/ci-auto-capture-veth.sh` (Linux, **root**) proves the path without
+the full node agent:
+
+1. Creates a veth pair with the peer in a dedicated netns (same-netns pairs
+   are short-circuited by the local stack and never appear on AF_PACKET).
+2. Starts `netrad` with `NETRA_AUTO_CAPTURE=true` and
+   `NETRA_AUTO_CAPTURE_BACKEND=afpacket`.
+3. POSTs a synthetic agent report with `softnetDropped ≥ 1000` (reliable
+   trigger; real softnet counters are too flaky under CI load alone).
+4. Runs `cmd/netra-ci-feeder` to stream AF_PACKET frames from the veth into
+   `/api/v1/agents/capture/stream`, while `iperf3` generates TCP across the
+   pair.
+5. Asserts a non-empty classic PCAP under the artifact dir and a history
+   entry with `artifactId` + `artifactFrames > 0`.
+
+GitHub Actions job: `auto-capture-veth` in `.github/workflows/ci.yml`.
+
+```bash
+# On a Linux host with go, iperf3, iproute2, curl, python3:
+sudo ./scripts/ci-auto-capture-veth.sh
+# Optional: CONTROLLER_PORT=31970 CAPTURE_DURATION=12s sudo -E ./scripts/ci-auto-capture-veth.sh
+```
+
+For manual traffic against a live capture (not CI), see
+`scripts/iperf3-traffic-gen.sh`.
 
 **HA note:** artifact files are local to the leader process unless the
 directory sits on shared RWX storage alongside the state file.

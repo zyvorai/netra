@@ -45,10 +45,13 @@ cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
 cmd/netra-mcp/          MCP server: controller API as stdio tools + prompts + resources for AI agents
+cmd/netra-ci-feeder/    Linux CI helper: AF_PACKET → agent capture WebSocket (auto-capture smoke)
 internal/agent/         BPF loading, hook attachment and reporting
 internal/doctor/        host readiness checks used by netra-doctor
 internal/observability/ standalone eBPF summaries and workload topology
 internal/health/        TCP/DNS/connect health scoring and anomaly signals
+internal/alert/         anomaly poller, notify fan-out, opt-in auto-capture
+internal/capture/       frame encode + auto-capture PCAP artifact store
 internal/ai/            heuristic briefs + optional OpenAI-compatible rewrite
 bpf/netra_tc.c           the eBPF program itself
 ```
