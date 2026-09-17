@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **CI: full netractl command catalog gate.** `./scripts/ci-netractl-commands.sh`
+  (`make test-netractl-commands`) runs every catalogued CLI argv against an
+  httptest mock. Live lab full-detail suite (not smoke):
+  `./scripts/ci-netractl-remote.sh`. Catalog lives in
+  `cmd/netractl/commands_catalog.go`.
 - **netractl: colorful grouped `--help`.** TTY help is sectioned (Cluster,
   Investigate, Diagnostics, …) with Zyvor orange / cyan / green; respects
   `NO_COLOR` and `NETRA_CLI_COLOR=false`.

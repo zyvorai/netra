@@ -1,4 +1,4 @@
-.PHONY: test build build-cli web bpf fmt test-python test-tlsfp test-p1-p5 test-features install uninstall
+.PHONY: test build build-cli web bpf fmt test-python test-tlsfp test-p1-p5 test-features test-netractl-commands install uninstall
 
 # Destination for `make install` (override: make install PREFIX=$HOME/.local).
 PREFIX ?= /usr/local
@@ -19,6 +19,9 @@ test-p1-p5:
 
 test-features:
 	./scripts/ci-features-unit.sh
+
+test-netractl-commands:
+	./scripts/ci-netractl-commands.sh
 
 # Optional companion; no pip packages required for the linear runner.
 test-python:

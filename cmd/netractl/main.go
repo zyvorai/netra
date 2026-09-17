@@ -115,104 +115,108 @@ func annotateTLSErr(err error) error {
 
 func main() {
 	ensureConfig()
-	if len(os.Args) < 2 {
-		usage()
-		return
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
 	}
-	switch os.Args[1] {
+}
+
+// run executes netractl with args (without the binary name). Used by main and CI.
+func run(args []string) error {
+	if len(args) < 1 {
+		usage()
+		return nil
+	}
+	switch args[0] {
 	case "-h", "--help", "help":
 		if os.Getenv("NETRA_CLI_HELP") == "plain" {
 			usagePlain(os.Stdout)
-			return
+			return nil
 		}
 		usage()
-		return
+		return nil
 	}
-	var err error
-	switch os.Args[1] {
+
+	oldArgs := os.Args
+	os.Args = append([]string{"netractl"}, args...)
+	defer func() { os.Args = oldArgs }()
+
+	switch args[0] {
 	case "explain":
-		err = explainCmd(os.Args[2:], os.Stdout)
+		return explainCmd(args[1:], os.Stdout)
 	case "status":
-		err = statusCmd(os.Args[2:], os.Stdout)
+		return statusCmd(args[1:], os.Stdout)
 	case "install":
-		err = installCmd(os.Args[2:])
+		return installCmd(args[1:])
 	case "install-cli":
-		err = installCLICmd(os.Args[2:])
+		return installCLICmd(args[1:])
 	case "upgrade":
-		err = upgradeCmd(os.Args[2:])
+		return upgradeCmd(args[1:])
 	case "uninstall":
-		err = uninstallCmd(os.Args[2:])
+		return uninstallCmd(args[1:])
 	case "features":
-		err = featuresCmd(os.Args[2:])
+		return featuresCmd(args[1:])
 	case "audit":
-		if len(os.Args) >= 3 && os.Args[2] == "summary" {
-			err = request("GET", "/api/v1/audit/summary", nil)
-		} else {
-			err = request("GET", "/api/v1/audit?limit=100", nil)
+		if len(args) >= 2 && args[1] == "summary" {
+			return request("GET", "/api/v1/audit/summary", nil)
 		}
+		return request("GET", "/api/v1/audit?limit=100", nil)
 	case "export":
-		err = exportCmd(os.Args[2:])
+		return exportCmd(args[1:])
 	case "report":
-		err = reportCmd(os.Args[2:])
+		return reportCmd(args[1:])
 	case "playbooks", "playbook":
-		err = playbooksCmd(os.Args[2:])
+		return playbooksCmd(args[1:])
 	case "intel":
-		err = intelCmd(os.Args[2:])
+		return intelCmd(args[1:])
 	case "watchlist":
-		err = watchlistCmd(os.Args[2:])
+		return watchlistCmd(args[1:])
 	case "fleet":
-		err = request("GET", "/api/v1/fleet", nil)
+		return request("GET", "/api/v1/fleet", nil)
 	case "fleet-clusters":
-		err = request("GET", "/api/v1/fleet/clusters", nil)
+		return request("GET", "/api/v1/fleet/clusters", nil)
 	case "fleet-tenants":
-		err = request("GET", "/api/v1/fleet/tenants", nil)
+		return request("GET", "/api/v1/fleet/tenants", nil)
 	case "compliance":
-		err = request("GET", "/api/v1/compliance", nil)
+		return request("GET", "/api/v1/compliance", nil)
 	case "node-resources":
-		err = request("GET", "/api/v1/node-resources", nil)
+		return request("GET", "/api/v1/node-resources", nil)
 	case "handoff":
-		err = handoffCmd(os.Args[2:])
+		return handoffCmd(args[1:])
 	case "scorecard":
-		err = request("GET", "/api/v1/scorecard", nil)
+		return request("GET", "/api/v1/scorecard", nil)
 	case "talkers":
-		err = request("GET", "/api/v1/talkers", nil)
+		return request("GET", "/api/v1/talkers", nil)
 	case "namespaces", "heat":
-		err = request("GET", "/api/v1/namespaces/heat", nil)
+		return request("GET", "/api/v1/namespaces/heat", nil)
 	case "protocols":
-		err = request("GET", "/api/v1/protocols", nil)
+		return request("GET", "/api/v1/protocols", nil)
 	case "baselines":
-		err = request("GET", "/api/v1/baselines", nil)
+		return request("GET", "/api/v1/baselines", nil)
 	case "ports":
-		err = request("GET", "/api/v1/ports", nil)
+		return request("GET", "/api/v1/ports", nil)
 	case "dnsboard":
-		err = request("GET", "/api/v1/dns/board", nil)
+		return request("GET", "/api/v1/dns/board", nil)
 	case "lease":
-		err = request("GET", "/api/v1/lease", nil)
+		return request("GET", "/api/v1/lease", nil)
 	case "capture":
-		err = captureCmd(os.Args[2:])
+		return captureCmd(args[1:])
 	case "policy":
-		err = policy()
+		return policy()
 	case "flows":
-		err = flows()
+		return flows()
 	case "drops":
-		err = request("GET", "/api/v1/drops/explain", nil)
+		return request("GET", "/api/v1/drops/explain", nil)
 	case "ebpf":
-		err = ebpf()
+		return ebpf()
 	case "insights":
-		err = insightCmd()
+		return insightCmd()
 	case "incidents":
-		err = incidentsCmd()
+		return incidentsCmd()
 	case "ai":
-		err = aiCmd()
+		return aiCmd()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
-		usage()
-		os.Exit(2)
-		return
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return fmt.Errorf("unknown command %q (try: netractl --help)", args[0])
 	}
 }
 

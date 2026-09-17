@@ -47,6 +47,8 @@ make fmt
 go test ./...
 ./scripts/ci-tlsfp-unit.sh
 ./scripts/ci-p1-p5-unit.sh
+make test-features
+make test-netractl-commands
 make test-python
 npm --prefix web run test
 # eBPF compile + PROG_TEST_RUN (Linux root):
@@ -54,6 +56,8 @@ npm --prefix web run test
 # Live smokes (Linux root):
 #   sudo ./scripts/ci-tlsfp-smoke.sh
 #   sudo ./scripts/ci-auto-capture-veth.sh
+# Live lab full netractl command board (not smoke):
+#   ./scripts/ci-netractl-remote.sh
 ```
 
 CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,

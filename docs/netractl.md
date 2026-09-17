@@ -116,6 +116,27 @@ netractl features enable NAME --yes --api   # live env patch via API
 Same bearer as the CLI. Demo pair when the key is `Admin@321`:
 `admin` / `Admin@321`. See [`dashboard-login.md`](dashboard-login.md).
 
+## CI and full remote verification
+
+Every catalogued `netractl` command (read paths plus representative mutates)
+is exercised against an httptest mock in CI:
+
+```bash
+./scripts/ci-netractl-commands.sh   # or: make test-netractl-commands
+```
+
+Against a live lab (full detail board with response snippets — not a short
+smoke), after `~/.netra/env` or `NETRA_URL` / `NETRA_API_KEY` /
+`NETRA_TLS_INSECURE` are set:
+
+```bash
+./scripts/ci-netractl-remote.sh
+# optional: NETRA_CLI_ALLOW_MUTATE=1 ./scripts/ci-netractl-remote.sh
+```
+
+Mutating examples are skipped on the remote suite by default so the lab
+stays observe-first.
+
 ## Related
 
 - [`features.md`](features.md) — feature catalog, API, UX
