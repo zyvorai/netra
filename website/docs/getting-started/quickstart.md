@@ -92,6 +92,7 @@ curl -skf https://HOST:30870/api/v1/insights/summary | head
 
 ```bash
 netractl ebpf health
+netractl ebpf maps                 # desired deny/allow/rate inventory
 netractl ebpf l7
 netractl flows summary --direction EGRESS
 netractl insights summary

@@ -14,7 +14,7 @@ Official framing ([zyvor.dev/docs/netra](https://zyvor.dev/docs/netra), [Introdu
 |---|---|---|
 | License / place | Apache-2.0 community | Suite flagship |
 | CNI assumption | Any CNI / none | Cilium required |
-| Datapath | Own maps under `/sys/fs/bpf/netra` (never touches Cilium maps) | Hubble + Cilium maps + custom eBPF |
+| Datapath | Own maps under `/sys/fs/bpf/netra` (never touches Cilium maps); inspect desired contents with `netractl ebpf maps` | Hubble + Cilium maps + custom eBPF |
 | Core job | Observe + Path/Drop/Congestion diagnostics + leased emergency deny | Observe + AutoPolicy + healer + root-cause + containment |
 | Policy posture | Review-only drafts; enforce is time-leased and fails open | Learns and operates Cilium policy at platform depth |
 | Surfaces | Web UI, `netractl`, `netra-mcp`, ChatOps | Web UI, TUI, `netpred`, CRDs/operator |

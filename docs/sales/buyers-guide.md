@@ -94,6 +94,7 @@ Workloads (pods / VMs / host)
 eBPF hooks (cgroup skb · connect · sockops · optional TCX/XDP)
         ↓
 Netra maps under /sys/fs/bpf/netra  (agent-owned; never Cilium maps)
+Inspect desired contents:  netractl ebpf maps   (docs/ebpf-maps.md)
         ↓
 netra-agent → reports, capture stream, lease sync
         ↓

@@ -60,9 +60,15 @@ netractl uninstall --yes
 netractl features list
 netractl features enable dns-detect --yes
 netractl ebpf summary
+netractl ebpf maps              # datapath map inventory (human)
+netractl ebpf maps --json
+netractl ebpf census            # counts only
+netractl ebpf coverage
 netractl ai brief
 ```
 
+Map inventory details:
+[`docs/ebpf-maps.md`](https://github.com/zyvorai/netra/blob/main/docs/ebpf-maps.md).
 Full feature catalog and dashboard toggles: see the repo doc
 [`docs/features.md`](https://github.com/zyvorai/netra/blob/main/docs/features.md).
 Dashboard sign-in: `admin` / `Admin@321` when the API key matches that demo

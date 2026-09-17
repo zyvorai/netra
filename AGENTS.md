@@ -37,6 +37,9 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
   stdlib-only) and the optional Python companion `python/netra_langgraph/`
   (LangGraph extra). Docs: `docs/ai.md`, `docs/langgraph.md`,
   `docs/mcp-integration.md`.
+- Datapath map inventory (read-only): `docs/ebpf-maps.md`,
+  `netractl ebpf maps [--json]`, `GET /api/v1/ebpf/maps`, MCP
+  `netra_ebpf_maps`.
 - AI endpoints are read-only. Do not wire them to mode/rule/policy apply.
   Do not import LangGraph/LangChain into Go.
 

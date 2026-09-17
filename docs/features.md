@@ -15,6 +15,7 @@ netractl status           # works with chart self-signed TLS via ~/.netra/env
 netractl features list
 netractl features enable dns-detect --yes
 netractl features disable automitigate --yes
+netractl ebpf maps        # datapath map inventory (see ebpf-maps.md)
 netractl upgrade
 netractl uninstall --yes
 ```

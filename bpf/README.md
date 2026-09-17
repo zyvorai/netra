@@ -17,6 +17,11 @@ Netra owns these programs and maps independently of Cilium. It does not read, mu
 
 All pin-compatible state is owned below `/sys/fs/bpf/netra`.
 
+**Operator inventory (desired control-plane contents):** use
+`netractl ebpf maps` / `GET /api/v1/ebpf/maps` — see [`docs/ebpf-maps.md`](../docs/ebpf-maps.md).
+That view lists deny/allow/rate/policy entries the controller pushes; it is
+not a substitute for `bpftool map dump` of counter/observability maps.
+
 - `flow_stats`: global exact IPv4/IPv6 tuple counters retained for pin compatibility and TCX/XDP visibility.
 - `workload_flow_stats`: exact cgroup-attributed tuple counters used for namespace/pod/workload topology.
 - `dest_stats`: legacy v0.x egress destination counter retained for map compatibility.

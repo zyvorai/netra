@@ -198,6 +198,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			schema:      emptySchema(),
 		},
 		{
+			name: "netra_ebpf_maps", method: "GET", path: "/api/v1/ebpf/maps",
+			description: "Read-only inventory of datapath map contents (controller desired state under /sys/fs/bpf/netra): deny/allow/rate/policy entries with human labels, counts, and limits. Not a raw bpftool dump. See docs/ebpf-maps.md.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_baselines", method: "GET", path: "/api/v1/baselines",
 			description: "Whether behavior and rate baselines exist and how old they are.",
 			schema:      emptySchema(),

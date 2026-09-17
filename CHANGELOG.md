@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Docs: map inventory everywhere.** Expanded [`docs/ebpf-maps.md`](docs/ebpf-maps.md);
+  cross-links in README, `netractl.md`, `standalone-ebpf.md`, `bpf/README.md`,
+  `firewall.md`, `workload-scoping.md`, `features.md`, `p0-p5-surfaces.md`,
+  website getting-started/architecture, and MCP (`netra_ebpf_maps`, 107 read /
+  52 mutate / 159 total).
 - **Read-only datapath map inventory.** `GET /api/v1/ebpf/maps` and
   `netractl ebpf maps [--json]` show controller desired map contents
   (deny/allow/rate/policy/…) in a human board or JSON. Docs:

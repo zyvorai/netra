@@ -5,6 +5,19 @@ place to see, edit, and audit every eBPF-enforced rule, including the
 per-workload NetPol v2 allow-list/default-deny engine (see
 `docs/native-netpol.md` for the full kernel-side model).
 
+## CLI map inventory
+
+Before or after editing rules in the UI, operators can dump the same desired
+state from the CLI:
+
+```bash
+netractl ebpf maps          # human board
+netractl ebpf maps --json
+```
+
+This is the controller inventory under `/sys/fs/bpf/netra` (not a raw
+`bpftool` dump). Full reference: [`ebpf-maps.md`](ebpf-maps.md).
+
 ## Unified rules table
 
 The table at the top of the page flattens every rule type into one view:

@@ -21,6 +21,17 @@ The controller fetches each node's Pod inventory fresh on every agent sync (`GET
 
 Rules are staged in controller state and synchronized to every agent. Observe mode keeps maps populated but returns allow verdicts. Enforce mode is always leased.
 
+To inspect the staged inventory (deny/allow/rate/policy entries with human
+labels) without dumping kernel maps:
+
+```bash
+netractl ebpf maps
+netractl ebpf maps --json   # GET /api/v1/ebpf/maps
+```
+
+See [`ebpf-maps.md`](ebpf-maps.md). For counts only: `netractl ebpf census`.
+For pin/program health per node: `netractl ebpf coverage`.
+
 | Control | IPv4 | IPv6 | ingress | egress | process-aware |
 |---|---:|---:|---:|---:|---:|
 | exact IP | ✅ | ✅ | ✅ | ✅ | socket hook can apply egress |

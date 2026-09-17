@@ -35,6 +35,12 @@ Netra has two workloads: a controller (`netrad`) that serves the API/UI and hold
 
 The agent owns its own programs and maps below `/sys/fs/bpf/netra` and attaches to Linux cgroup v2 for CNI-independent workload coverage — it does not touch `cilium_host`, Cilium's own maps, or assume any particular CNI is present. Cilium and Hubble are read as optional data sources, never a dependency.
 
+Operators inspect **desired** map contents (deny/allow/rate/policy) with
+`netractl ebpf maps` / `GET /api/v1/ebpf/maps` — see the repo doc
+[ebpf-maps.md](https://github.com/zyvorai/netra/blob/main/docs/ebpf-maps.md).
+That is the control-plane inventory agents reconcile; it is not a raw
+kernel `bpftool` dump.
+
 Netra’s place next to PacketWolf (suite counterparts, not a wired pipeline) is documented in [Suite placement (PacketWolf)](./packetwolf.md).
 
 ## Repository layout

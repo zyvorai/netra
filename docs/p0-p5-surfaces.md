@@ -16,7 +16,7 @@ Strategy maps: [`competitive-quantum.md`](competitive-quantum.md) (NGFW),
 | No decrypt | TLS is ClientHello metadata (SNI, JA3/JA4, ECH flag). No HTTPS break. |
 | No payloads | No bodies, argv/cmdline, or Secret contents. |
 | Lease for apply | Any deny/rate/Shield write still needs `mode=enforce` + active lease + risk confirm, and fails open when the lease ends. |
-| Map isolation | Agent owns `/sys/fs/bpf/netra` only — never Cilium-owned maps. |
+| Map isolation | Agent owns `/sys/fs/bpf/netra` only — never Cilium-owned maps. Operators inspect desired contents with `netractl ebpf maps` (`docs/ebpf-maps.md`). |
 
 ## Console UX
 

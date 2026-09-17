@@ -13,7 +13,7 @@ Netra’s mandate (observe-first eBPF + leased emergency deny) and what
 | | **Perimeter NGFW (class)** | **Netra (today)** |
 |---|---|---|
 | Job | Perimeter / hybrid firewall + threat prevention + SD-WAN/SASE | **CNI-independent** eBPF observe + stack diagnostics + **leased** emergency deny |
-| Datapath | Appliance / virtual / cloud gateway, L1–7 DPI | Host cgroup/TCX/XDP maps under `/sys/fs/bpf/netra` |
+| Datapath | Appliance / virtual / cloud gateway, L1–7 DPI | Host cgroup/TCX/XDP maps under `/sys/fs/bpf/netra` (inventory: `netractl ebpf maps`) |
 | Default posture | Block threats (prevention-first) | Observe-first; enforce time-bounded and fails open |
 | Payload | HTTPS inspection / malware / sandbox | Explicitly **no** payloads, argv, Secrets |
 | Suite mate | Vendor console / MSSP portal | PacketWolf = Cilium-first platform depth |

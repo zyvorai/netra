@@ -33,6 +33,15 @@ All supplied fields within one scope are ANDed. Multiple scopes are ORed.
 
 In selected mode, traffic that cannot be attributed to a selected cgroup is allowed by the custom Netra enforcement layer. TCX/XDP continue collecting visibility but do **not** block because those hooks do not provide a trustworthy workload cgroup identity for this implementation.
 
+Inspect the active scope from the map inventory:
+
+```bash
+netractl ebpf maps          # SCOPE section shows mode= + selectors
+netractl ebpf scope show    # raw config JSON
+```
+
+See also [`ebpf-maps.md`](ebpf-maps.md).
+
 ## Preview before enforcement
 
 Preview is metadata-based: it shows which Kubernetes Pods match the requested scope. Actual enforceable cgroup coverage is resolved independently on each node and is visible through agent status (`selectedCgroups`) and the dashboard node-coverage view.

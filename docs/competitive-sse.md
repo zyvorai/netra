@@ -12,7 +12,7 @@ Netra should **not** become a cloud SWG, ZTNA broker, or remote-user agent.
 | | **Cloud SSE / ZT (class)** | **Netra (today)** |
 |---|---|---|
 | Job | Inline cloud broker: users/devices/branches → apps with decrypt + policy | **CNI-independent** host eBPF observe + stack diagnostics + **leased** emergency deny |
-| Datapath | Global PoPs, client agents, app connectors | Node maps under `/sys/fs/bpf/netra` |
+| Datapath | Global PoPs, client agents, app connectors | Node maps under `/sys/fs/bpf/netra` (`netractl ebpf maps`) |
 | Trust model | Identity + device posture → app (not network) | Workload/cgroup identity on the node; lease fails open |
 | Payload | TLS intercept, DLP, CASB, sandbox | Explicitly **no** payloads, argv, Secrets |
 | Suite mate | Full SASE (often + SD-WAN) | PacketWolf = Cilium-first durable microseg |

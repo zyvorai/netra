@@ -116,6 +116,25 @@ netractl features enable NAME --yes --api   # live env patch via API
 Same bearer as the CLI. Demo pair when the key is `Admin@321`:
 `admin` / `Admin@321`. See [`dashboard-login.md`](dashboard-login.md).
 
+## Datapath maps
+
+Inspect what the controller has staged into Netra’s BPF maps (desired state
+agents sync under `/sys/fs/bpf/netra`):
+
+```bash
+netractl ebpf maps          # human board (deny / allow / rate / policy / …)
+netractl ebpf maps --json
+```
+
+Full reference: [`ebpf-maps.md`](ebpf-maps.md). Related:
+
+```bash
+netractl ebpf census        # counts only
+netractl ebpf coverage      # programs + missing pins per node
+netractl ebpf scope show    # raw config JSON
+netractl ebpf rules list    # durable rule IDs
+```
+
 ## CI and full remote verification
 
 Every catalogued `netractl` command (read paths plus representative mutates)
