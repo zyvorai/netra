@@ -9,6 +9,10 @@ Linux/Kubernetes. Observe-first. Custom enforcement is lease-bounded and
 fails open to observe. The node agent owns programs under
 `/sys/fs/bpf/netra`. Cilium/Hubble are optional.
 
+Suite counterpart to PacketWolf (Cilium-first flagship): same eBPF territory
+from the opposite direction — not a dependency, agent, or API consumer of
+PacketWolf. Co-existence rules: `docs/packetwolf.md`.
+
 ## Hard boundaries
 
 - Never modify or pin over Cilium-owned BPF maps.
@@ -17,6 +21,8 @@ fails open to observe. The node agent owns programs under
   `internal/ai` are stdlib-only.
 - Mutating MCP tools must stay behind `NETRA_MCP_ALLOW_MUTATIONS`.
 - Policy apply stays plan-token + risk confirm. Enforce stays leased.
+- Do not wire a PacketWolf↔Netra control-plane sync unless product work
+  explicitly requests it (today they export sideways only).
 - New source files need the Apache-2.0 SPDX header used everywhere else.
 
 ## AI surface

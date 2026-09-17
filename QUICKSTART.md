@@ -76,3 +76,8 @@ netractl insights summary
 netractl explain --all --format json   # passive, read-only — see docs/explain.md
 netractl ai brief                      # heuristic by default, no config needed — see docs/ai.md
 ```
+
+## Suite note
+
+Netra is the Apache-2.0 standalone counterpart to PacketWolf (Cilium-first flagship).
+They are not a required pair and do not sync APIs. See [docs/packetwolf.md](docs/packetwolf.md).

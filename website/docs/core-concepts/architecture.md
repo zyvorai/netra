@@ -35,6 +35,8 @@ Netra has two workloads: a controller (`netrad`) that serves the API/UI and hold
 
 The agent owns its own programs and maps below `/sys/fs/bpf/netra` and attaches to Linux cgroup v2 for CNI-independent workload coverage — it does not touch `cilium_host`, Cilium's own maps, or assume any particular CNI is present. Cilium and Hubble are read as optional data sources, never a dependency.
 
+Netra’s place next to PacketWolf (suite counterparts, not a wired pipeline) is documented in [Suite placement (PacketWolf)](./packetwolf.md).
+
 ## Repository layout
 
 ```text
