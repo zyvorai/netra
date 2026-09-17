@@ -41,6 +41,22 @@ type Sink struct {
 // ensures the target table exists. It does not start polling — call
 // Run for that.
 func New(ctx context.Context, cfg Config, log *slog.Logger) (*Sink, error) {
+	return newWithDialTarget(ctx, cfg, log, dialTarget{})
+}
+
+// dialTarget overrides the real Snowflake account host with a fake REST
+// server, letting tests exercise the actual gosnowflake DSN/JWT/HTTP
+// path end to end without a live Snowflake account. The zero value
+// (every field empty) means "use the real Snowflake host," exactly as
+// gosnowflake itself defaults when sf.Config's Host/Port/Protocol are
+// unset — so New (the only production caller) is unaffected.
+type dialTarget struct {
+	host     string
+	port     int
+	protocol string
+}
+
+func newWithDialTarget(ctx context.Context, cfg Config, log *slog.Logger, dial dialTarget) (*Sink, error) {
 	if err := cfg.applyDefaults(); err != nil {
 		return nil, err
 	}
@@ -59,6 +75,9 @@ func New(ctx context.Context, cfg Config, log *slog.Logger) (*Sink, error) {
 		Warehouse:     cfg.Warehouse,
 		Database:      cfg.Database,
 		Schema:        cfg.Schema,
+		Host:          dial.host,
+		Port:          dial.port,
+		Protocol:      dial.protocol,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("snowflakesink: build dsn: %w", err)
