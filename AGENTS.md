@@ -24,6 +24,8 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
 - Do not wire a PacketWolf↔Netra control-plane sync unless product work
   explicitly requests it (today they export sideways only).
 - New source files need the Apache-2.0 SPDX header used everywhere else.
+- P0–P5 observe surfaces catalog: `docs/p0-p5-surfaces.md`. Buyer narrative:
+  `docs/sales/buyers-guide.md`.
 
 ## AI surface
 

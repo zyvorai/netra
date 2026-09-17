@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Docs: P0–P5 feature catalog + buyers guide.** Detailed
+  [`docs/p0-p5-surfaces.md`](docs/p0-p5-surfaces.md) (what each surface does,
+  how it works, API/CLI/UX, boundaries) and customer
+  [`docs/sales/buyers-guide.md`](docs/sales/buyers-guide.md). Expanded
+  per-feature runbooks (TLSFP, shadow SaaS, experience, destination risk,
+  fleet, policy packs, P5 boards, …), investigation UX Surfaces note,
+  competitive cross-links, and updated Product Perspective / Brochure decks.
 - **UX: P1–P5 surfaces in the console.** New **Surfaces** page (Diagnostics +
   Security nav) boards all observe-only APIs (JA3, encrypted DNS, shadow SaaS,
   exfil/lateral, compliance, fleet tenants, …). L7 shows JA3 + DoT/DoH

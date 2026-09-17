@@ -2,12 +2,20 @@
 
 This release connects Overview, native Connections, and observed Workloads using existing read-only APIs. Cilium and Hubble are not required for these views. Existing inventory, console, firewall, and policy tools remain accessible.
 
+**Surfaces** (Diagnostics + Security) boards every P0–P5 observe API — JA3,
+encrypted DNS, shadow SaaS, destination risk, exfil/lateral, compliance,
+fleet tenants, prevention coverage, and more. See
+[`p0-p5-surfaces.md`](p0-p5-surfaces.md) and the
+[buyers guide](sales/buyers-guide.md). L7, Fleet, and Report deep-link into
+the same boards.
+
 ## Workflow
 
 1. Overview shows requested protection mode, independent Shield mode, reporting-agent coverage, health signals, and behavior drift. Actions open the corresponding workspace.
 2. Connections filters recent agent events by exact namespace/pod/node, protocol, direction, outcome, or a case-insensitive text search. URLs preserve filters across reload and browser history; Copy view link includes no authentication token.
 3. Explain connection opens a keyboard-accessible modal with source/destination, process metadata when reported, observation hook, timestamps, reported outcome, and reason. Escape closes it and restores focus. This is a per-row, client-heuristic explanation of one already-displayed event — distinct from the dashboard's separate **Explain** nav page (`docs/explain.md`), which runs the same selector-based, multi-finding diagnostic as `netractl explain` against live agent reports.
 4. Open workload shows agent-reported identity, owner, node freshness/mode, and matching native events. Existing Pods/VMs inventory also links to this view.
+5. Surfaces groups Encrypted / Fit / Threat / Ops / Fleet boards; each tab polls its read-only API every ~20s and lists severity-ranked rows (observe-only — no apply from this page).
 
 Polling runs every 10 seconds, serially, with cancellation on unmount. Connections can pause polling. Failed refreshes retain the last successful snapshot with a visible warning. Tables render at most 50 event rows per page; workload cards are capped at 100 with a narrowing prompt.
 

@@ -28,4 +28,8 @@ netractl intel apply [--matched-only]
 
 Fails open when the lease expires (same as every other deny).
 
-See also: [competitive-quantum.md](competitive-quantum.md), [firewall.md](firewall.md).
+**UX:** Surfaces → Threat intel feed / DNS intel hits. Parent catalog:
+[`p0-p5-surfaces.md`](p0-p5-surfaces.md).
+
+See also: [competitive-quantum.md](competitive-quantum.md), [firewall.md](firewall.md),
+[buyers guide](sales/buyers-guide.md).

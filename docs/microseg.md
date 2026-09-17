@@ -5,6 +5,10 @@ GET /api/v1/insights/microseg
 netractl insights microseg
 ```
 
+Parent: [`p0-p5-surfaces.md`](p0-p5-surfaces.md).
+
+## How it works
+
 | Cluster | Guidance |
 |---|---|
 | Cilium present / enabled | Prefer **PacketWolf** for durable east-west NetPol; Netra = diagnostics + short-lease emergency |
@@ -12,4 +16,7 @@ netractl insights microseg
 
 Never applies policy. Co-existence: [packetwolf.md](packetwolf.md).
 
-See [competitive-quantum.md](competitive-quantum.md), [zero-trust.md](zero-trust.md).
+**UX:** Surfaces → Microseg.
+
+See [competitive-quantum.md](competitive-quantum.md), [zero-trust.md](zero-trust.md),
+[buyers guide](sales/buyers-guide.md).

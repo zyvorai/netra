@@ -66,7 +66,7 @@ flowchart TB
 | Live threat feeds | Intel feed + hits + leased apply | Shipped |
 | Prevention insights | Prevention coverage report | Shipped |
 | App control without DPI | App categories | Shipped (heuristic) |
-| Encrypted traffic intel | JA3/JA4 + DoH/DoT | Shipped (capture JA3) |
+| Encrypted traffic intel | JA3/JA4 + DoH/DoT | Shipped (datapath + capture JA3) |
 | IoT/OT | Only if Linux OT hosts appear | Non-goal for ICS DPI |
 
 ## Prioritized Netra-fit backlog
@@ -102,6 +102,8 @@ flowchart TB
 
 ## See also
 
+- [p0-p5-surfaces.md](p0-p5-surfaces.md) — full feature catalog + UX wiring  
+- [sales/buyers-guide.md](sales/buyers-guide.md) — buyer evaluation narrative  
 - [competitive-quantum.md](competitive-quantum.md) — perimeter NGFW fit  
 - [packetwolf.md](packetwolf.md) — durable microseg ownership  
 - [ai-destinations.md](ai-destinations.md), [app-categories.md](app-categories.md), [microseg.md](microseg.md)

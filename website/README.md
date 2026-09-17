@@ -23,11 +23,15 @@ Screenshots and the demo GIF are **not** duplicated into `website/static/` — `
 ## Sales / buyer downloads
 
 Canonical copies for **GitHub repo browsing** live in [`docs/sales/`](../docs/sales/)
-(README + PDF/PPTX/DOCX). The same binaries are also under `website/static/sales/`
-so GitHub Pages can serve them at `/netra/sales/...`. The Resources page
-(`/resources`) links the Pages URLs for download. Update both directories when
-refreshing the perspective or brochure (or copy from `docs/sales/` into
-`website/static/sales/`).
+(buyers guide markdown + PDF/PPTX/DOCX). The same binaries are also under
+`website/static/sales/` so GitHub Pages can serve them at `/netra/sales/...`.
+The Resources page (`/resources`) links the Pages URLs for download.
+Update both directories when refreshing the perspective, brochure, or
+buyers guide (or copy from `docs/sales/` into `website/static/sales/`).
+
+Feature catalog for engineers: [`docs/p0-p5-surfaces.md`](../docs/p0-p5-surfaces.md).
+Buyer narrative: [`docs/sales/buyers-guide.md`](../docs/sales/buyers-guide.md)
+(also served at `/sales/buyers-guide.md` on Pages).
 
 ## Deployment
 

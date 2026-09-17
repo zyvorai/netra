@@ -4,17 +4,23 @@ Customer-facing Netra materials (Zyvor perspective visual system).
 
 | Document | Formats | Description |
 |----------|---------|-------------|
-| **Product Perspective** | [PDF](./Zyvor-Netra-Product-Perspective.pdf) · [PPTX](./Zyvor-Netra-Product-Perspective.pptx) | 14-page executive deck (Netra-only) |
-| **Product Brochure** | [PDF](./Zyvor-Netra-Product-Brochure.pdf) · [DOCX](./Zyvor-Netra-Product-Brochure.docx) | Longer brochure + PacketWolf suite placement |
+| **Buyers guide** | [Markdown](./buyers-guide.md) | Evaluation narrative: who should buy, P0–P5 observe surfaces, how Netra works, checklist |
+| **Product Perspective** | [PDF](./Zyvor-Netra-Product-Perspective.pdf) · [PPTX](./Zyvor-Netra-Product-Perspective.pptx) | Executive deck (Netra-only) including Surfaces / encrypted-traffic boards |
+| **Product Brochure** | [PDF](./Zyvor-Netra-Product-Brochure.pdf) · [DOCX](./Zyvor-Netra-Product-Brochure.docx) | Longer brochure + PacketWolf suite placement + P0–P5 feature map |
+
+Technical depth for the same features: [`../p0-p5-surfaces.md`](../p0-p5-surfaces.md).
 
 ## Download on the web
 
-Same files are published on GitHub Pages:
+Same binary files are published on GitHub Pages:
 
 - https://zyvorai.github.io/netra/resources
 - https://zyvorai.github.io/netra/sales/
 
 (The Pages copies live under `website/static/sales/` so URLs stay under `/sales/`.)
+
+The buyers guide is also downloadable from Resources as `/sales/buyers-guide.md`
+(keep `docs/sales/` and `website/static/sales/` in sync).
 
 ## Browse on GitHub
 

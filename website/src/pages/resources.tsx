@@ -14,10 +14,19 @@ type Asset = {
 
 const ASSETS: Asset[] = [
   {
+    title: 'Netra Buyers Guide',
+    blurb:
+      'Evaluation narrative: who should buy, how observe → diagnose → contain works, and the full P0–P5 metadata surface map (JA3, shadow SaaS, fleet tenants, …) without decrypt.',
+    pages: 'Markdown',
+    files: [
+      {label: 'Download Markdown', href: '/sales/buyers-guide.md'},
+    ],
+  },
+  {
     title: 'Netra Product Perspective',
     blurb:
-      '14-page executive deck: how Netra observes, diagnoses, and contains — with pictorial diagrams. Netra-only buyer view.',
-    pages: '14 pages · PPTX + PDF',
+      'Executive deck: how Netra observes, diagnoses, and contains — plus Surfaces / encrypted-traffic boards. Netra-only buyer view.',
+    pages: 'PPTX + PDF',
     files: [
       {label: 'Download PDF', href: '/sales/Zyvor-Netra-Product-Perspective.pdf'},
       {label: 'Download PPTX', href: '/sales/Zyvor-Netra-Product-Perspective.pptx'},
@@ -26,8 +35,8 @@ const ASSETS: Asset[] = [
   {
     title: 'Netra Product Brochure',
     blurb:
-      'Longer brochure covering every major capability, lab UI examples, and Zyvor suite placement next to PacketWolf.',
-    pages: '12 pages · DOCX + PDF',
+      'Longer brochure covering every major capability, P0–P5 feature map, lab UI examples, and Zyvor suite placement next to PacketWolf.',
+    pages: 'DOCX + PDF',
     files: [
       {label: 'Download PDF', href: '/sales/Zyvor-Netra-Product-Brochure.pdf'},
       {label: 'Download DOCX', href: '/sales/Zyvor-Netra-Product-Brochure.docx'},
@@ -67,7 +76,7 @@ export default function Resources(): ReactNode {
   return (
     <Layout
       title="Resources"
-      description="Download Netra product perspective and brochure PDFs for buyers and operators.">
+      description="Netra buyers guide, product perspective, and brochure for evaluation and sales handoffs.">
       <main className="container margin-vert--lg">
         <header className={styles.header}>
           <Heading as="h1">Resources</Heading>

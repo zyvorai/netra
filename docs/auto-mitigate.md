@@ -28,4 +28,8 @@ netractl ebpf auto-mitigate
 
 Needs `NETRA_SCANDETECT_ENABLED=true` for the SYN-flood path.
 
-See also: [scan-detect.md](scan-detect.md), [tcx-and-shield.md](tcx-and-shield.md), [competitive-quantum.md](competitive-quantum.md).
+**UX:** Surfaces → Auto-mitigate. Parent catalog:
+[`p0-p5-surfaces.md`](p0-p5-surfaces.md).
+
+See also: [scan-detect.md](scan-detect.md), [tcx-and-shield.md](tcx-and-shield.md),
+[competitive-quantum.md](competitive-quantum.md), [buyers guide](sales/buyers-guide.md).

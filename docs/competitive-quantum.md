@@ -45,7 +45,7 @@ Netra’s mandate (observe-first eBPF + leased emergency deny) and what
 
 ### P1 — Differentiation without becoming an NGFW (implemented)
 
-4. **TLS fingerprinting (JA3/JA4) + DoH/DoT visibility** — capture-stream JA3/JA4; DoT port 853 + DoH host catalog. See [`tls-fingerprints.md`](tls-fingerprints.md).
+4. **TLS fingerprinting (JA3/JA4) + DoH/DoT visibility** — always-on datapath (`bpf/netra_tlsfp.c`) + capture-stream JA3/JA4; DoT port 853 + DoH host catalog. See [`tls-fingerprints.md`](tls-fingerprints.md).
 5. **Fleet / multi-cluster Netra** — `GET /api/v1/fleet/clusters` + `NETRA_FLEET_PEERS`. See [`fleet-clusters.md`](fleet-clusters.md).
 6. **Identity-aware Zero Trust suggestions** — review-only drafts. See [`zero-trust.md`](zero-trust.md).
 7. **Threat-prevention-style effectiveness reporting** — coverage snapshot. See [`prevention-report.md`](prevention-report.md).
@@ -73,6 +73,8 @@ category deny drafts, tenant risk scores).
 
 ## See also
 
+- [p0-p5-surfaces.md](p0-p5-surfaces.md) — full feature catalog + UX wiring
+- [sales/buyers-guide.md](sales/buyers-guide.md) — buyer evaluation narrative
 - [competitive-sse.md](competitive-sse.md) — cloud SSE / Zero Trust fit gaps
 - [packetwolf.md](packetwolf.md) — suite co-existence
 - [firewall.md](firewall.md) — leased deny model

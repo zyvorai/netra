@@ -348,7 +348,10 @@ docs/syn-drop.md          SYN-drop mode: exact-IP and CIDR variants, kernel-veri
 docs/edge-tcp-intel.md    standalone TCX edge observer: handshake/RTT histograms, retransmit/RST/FIN counters
 docs/capture.md           packet capture: eBPF vs AF_PACKET, auto-capture PCAPs, veth+iperf3 CI smoke
 docs/tls-fingerprints.md  JA3/JA4 datapath + encrypted DNS; openssl+iperf3 CI smoke
-docs/sales/               buyer PDFs/PPTX/DOCX (Perspective + Brochure) — also on GitHub Pages /resources
+docs/p0-p5-surfaces.md    P0–P5 observe surface catalog (what / how / UX / APIs)
+docs/p5-surfaces.md       P5 residual boards (JA3 risk, ECH, exfil, lateral, …)
+docs/sales/               buyer guide + PDFs/PPTX/DOCX — also on GitHub Pages /resources
+docs/sales/buyers-guide.md evaluation narrative for buyers (P0–P5 + checklist)
 scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)
 scripts/ci-tlsfp-smoke.sh        Linux root smoke for always-on JA3 (GitHub job `tlsfp-smoke`)
 scripts/ci-tlsfp-unit.sh         tlsfp + API JA3 unit/race (GitHub `go` job)
@@ -358,9 +361,9 @@ scripts/ci-ebpf-tests.sh         BPF C helpers + clang + PROG_TEST_RUN (GitHub `
 
 ## Buyer resources
 
-Download the Netra Product Perspective and Product Brochure from the repo or the docs site:
-
-- Folder: [`docs/sales/`](docs/sales/)
+- Buyers guide (markdown): [`docs/sales/buyers-guide.md`](docs/sales/buyers-guide.md)
+- Feature catalog: [`docs/p0-p5-surfaces.md`](docs/p0-p5-surfaces.md)
+- Product Perspective / Brochure (PDF, PPTX, DOCX): [`docs/sales/`](docs/sales/)
 - GitHub Pages: https://zyvorai.github.io/netra/resources
 
 ## Prerequisites
