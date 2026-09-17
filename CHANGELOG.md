@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **CI: features / status gate.** `./scripts/ci-features-unit.sh` (catalog,
+  banner/status, API routes) wired into the `go` job; Helm asserts
+  `NETRA_TLSFP`, features Role patch RBAC, and `agent.tlsfp=off`.
 - **Cilium-style CLI + Features UX.** Zyvor banner on `netractl status` /
   `install` / `upgrade` / `features`. Human-readable `netractl status`
   (`--json`, `--wait`). Helm lifecycle: `netractl install|upgrade|uninstall`.

@@ -1,4 +1,4 @@
-.PHONY: test build web bpf fmt test-python test-tlsfp test-p1-p5
+.PHONY: test build web bpf fmt test-python test-tlsfp test-p1-p5 test-features
 fmt:
 	gofmt -w cmd internal
 
@@ -10,6 +10,9 @@ test-tlsfp:
 
 test-p1-p5:
 	./scripts/ci-p1-p5-unit.sh
+
+test-features:
+	./scripts/ci-features-unit.sh
 
 # Optional companion; no pip packages required for the linear runner.
 test-python:
