@@ -69,6 +69,8 @@ func helmLifecycle(verb string, args []string) error {
 	agentKey := ""
 	reuse := verb == "upgrade"
 	dryRun := false
+	skipCLI := false
+	cliPrefix := ""
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -120,8 +122,17 @@ func helmLifecycle(verb string, args []string) error {
 			reuse = false
 		case "--dry-run":
 			dryRun = true
+		case "--skip-cli":
+			skipCLI = true
+		case "--cli-prefix":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--cli-prefix requires a value")
+			}
+			cliPrefix = args[i+1]
+			i++
 		case "-h", "--help":
-			fmt.Printf("netractl %s [--namespace NS] [--release NAME] [--chart PATH] [--node-port N] [--api-key K] [--agent-key K] [--set k=v]...\n", verb)
+			fmt.Printf("netractl %s [--namespace NS] [--release NAME] [--chart PATH] [--node-port N] [--api-key K] [--agent-key K] [--cli-prefix DIR] [--skip-cli] [--set k=v]...\n", verb)
+			fmt.Println("  Also installs this netractl onto PATH (make install); use --skip-cli to opt out.")
 			return nil
 		default:
 			return fmt.Errorf("unknown %s flag: %s", verb, args[i])
@@ -185,6 +196,9 @@ func helmLifecycle(verb string, args []string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return err
+	}
+	if !dryRun {
+		maybeInstallCLIAfterHelm(skipCLI, cliPrefix)
 	}
 	fmt.Println("Done. Next: netractl status  (export NETRA_URL / NETRA_API_KEY / NETRA_TLS_INSECURE as needed)")
 	return nil

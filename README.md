@@ -400,8 +400,10 @@ coverage idea as a CNI agent). Opt out with `--set agent.enabled=false` for a
 controller-only install.
 
 ```bash
-# Prefer the Cilium-style wrapper (banner, agent+TLS defaults, key generation):
+# Install netractl onto PATH, then install the cluster:
+make install                          # → /usr/local/bin/netractl (or PREFIX=$HOME/.local)
 netractl install --namespace netra-system
+# netractl install also copies itself onto PATH (use --skip-cli to opt out).
 # or classic Helm:
 helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \

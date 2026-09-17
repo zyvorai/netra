@@ -24,8 +24,8 @@ fi
 echo "==> features catalog + helm argv"
 go test "${RACE_FLAG[@]}" -count="$COUNT" ./internal/features/...
 
-echo "==> netractl banner / status / redact"
-go test "${RACE_FLAG[@]}" -count="$COUNT" ./cmd/netractl/ -run 'Banner|FormatStatus|RedactHelm'
+echo "==> netractl banner / status / redact / install-cli"
+go test "${RACE_FLAG[@]}" -count="$COUNT" ./cmd/netractl/ -run 'Banner|FormatStatus|RedactHelm|ResolveCLI|InstallSelf|DefaultCLI'
 
 echo "==> API features handlers + route registration"
 go test "${RACE_FLAG[@]}" -count="$COUNT" ./internal/api/ -run 'Feature|RegisteredAPIRoutes'

@@ -56,6 +56,14 @@ missing or all stale (controller-only installs are treated as healthy).
 
 ## Install defaults
 
+```bash
+make install                    # netractl → /usr/local/bin (PREFIX=$HOME/.local if needed)
+make uninstall
+netractl install-cli            # same, from an already-built binary
+```
+
 `netractl install` wraps Helm with `agent.enabled=true`, `tls.enabled=true`,
-generated API/agent keys, optional `--node-port`. Chart path:
-`./helm/netra`, `NETRA_CHART`, or `--chart`.
+generated API/agent keys, optional `--node-port`, and **also installs this
+CLI onto PATH** (opt out with `--skip-cli`). Chart path: `./helm/netra`,
+`NETRA_CHART`, or `--chart`. Remote deploys via `scripts/deploy-remote.sh`
+install `netractl` to `/usr/local/bin` (or `~/.local/bin`) after the build.

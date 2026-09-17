@@ -1,4 +1,10 @@
-.PHONY: test build web bpf fmt test-python test-tlsfp test-p1-p5 test-features
+.PHONY: test build build-cli web bpf fmt test-python test-tlsfp test-p1-p5 test-features install uninstall
+
+# Destination for `make install` (override: make install PREFIX=$HOME/.local).
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+DESTDIR ?=
+
 fmt:
 	gofmt -w cmd internal
 
@@ -18,8 +24,27 @@ test-features:
 test-python:
 	PYTHONPATH=python python3 -m unittest discover -s python/tests -v
 
+# Build operator CLI into ./bin (used by install and deploy-remote).
+build-cli:
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/netractl ./cmd/netractl
+
+# Install netractl onto PATH: make install  or  make install PREFIX=$$HOME/.local
+install: build-cli
+	install -d "$(DESTDIR)$(BINDIR)"
+	install -m 755 bin/netractl "$(DESTDIR)$(BINDIR)/netractl"
+	@echo "installed $(DESTDIR)$(BINDIR)/netractl"
+
+uninstall:
+	rm -f "$(DESTDIR)$(BINDIR)/netractl"
+	@echo "removed $(DESTDIR)$(BINDIR)/netractl"
+
 build: web
-	go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/netrad ./cmd/netrad
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/netractl ./cmd/netractl
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/netra-agent ./cmd/netra-agent
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/netra-doctor ./cmd/netra-doctor
 
 web:
 	npm --prefix web install

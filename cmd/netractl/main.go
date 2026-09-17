@@ -40,6 +40,8 @@ func main() {
 		err = statusCmd(os.Args[2:], os.Stdout)
 	case "install":
 		err = installCmd(os.Args[2:])
+	case "install-cli":
+		err = installCLICmd(os.Args[2:])
 	case "upgrade":
 		err = upgradeCmd(os.Args[2:])
 	case "uninstall":
@@ -118,7 +120,7 @@ func main() {
 func usage() {
 	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
   status [--json] [--wait]
-  install | upgrade | uninstall --yes
+  install | upgrade | uninstall --yes | install-cli [--prefix DIR]
   features list | features enable NAME --yes | features disable NAME --yes
   audit | audit summary
   export audit|events|flows|blocks|status [--format json|jsonl|cef|syslog|otlp|otlp-trace] [--limit N] [--include anomaly,incident,audit]

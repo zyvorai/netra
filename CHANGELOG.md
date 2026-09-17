@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`make install` / PATH CLI.** `make install` and `make uninstall` install
+  `netractl` to `$(PREFIX)/bin` (default `/usr/local`). `netractl install`
+  and `deploy-remote.sh` also place the CLI on PATH; `netractl install-cli`
+  for CLI-only. Opt out of cluster install CLI copy with `--skip-cli`.
 - **CI: features / status gate.** `./scripts/ci-features-unit.sh` (catalog,
   banner/status, API routes) wired into the `go` job; Helm asserts
   `NETRA_TLSFP`, features Role patch RBAC, and `agent.tlsfp=off`.

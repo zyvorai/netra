@@ -177,6 +177,16 @@ build_image() {
     mkdir -p bin
     CGO_ENABLED=0 go build -o bin/netrad ./cmd/netrad
     CGO_ENABLED=0 go build -o bin/netractl ./cmd/netractl
+    # Put netractl on PATH for operators (same as make install).
+    if install -d /usr/local/bin 2>/dev/null && install -m 755 bin/netractl /usr/local/bin/netractl 2>/dev/null; then
+      echo "Installed netractl → /usr/local/bin/netractl"
+    elif sudo install -d /usr/local/bin && sudo install -m 755 bin/netractl /usr/local/bin/netractl; then
+      echo "Installed netractl → /usr/local/bin/netractl (via sudo)"
+    else
+      mkdir -p "\$HOME/.local/bin"
+      install -m 755 bin/netractl "\$HOME/.local/bin/netractl"
+      echo "Installed netractl → \$HOME/.local/bin/netractl (add to PATH if needed)"
+    fi
     if [[ -z "\$runtime" ]]; then
       echo "podman or working docker required to build controller image" >&2
       exit 1
