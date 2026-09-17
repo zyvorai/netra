@@ -22,10 +22,12 @@ Screenshots and the demo GIF are **not** duplicated into `website/static/` — `
 
 ## Sales / buyer downloads
 
-Customer-facing PDFs and editable sources live in `website/static/sales/` and
-are served at `/netra/sales/...`. The Resources page (`/resources`) links them
-for download. Update those files in place when refreshing the perspective or
-brochure.
+Canonical copies for **GitHub repo browsing** live in [`docs/sales/`](../docs/sales/)
+(README + PDF/PPTX/DOCX). The same binaries are also under `website/static/sales/`
+so GitHub Pages can serve them at `/netra/sales/...`. The Resources page
+(`/resources`) links the Pages URLs for download. Update both directories when
+refreshing the perspective or brochure (or copy from `docs/sales/` into
+`website/static/sales/`).
 
 ## Deployment
 

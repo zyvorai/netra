@@ -345,8 +345,16 @@ docs/chatops-teams.md     Microsoft Teams ChatOps: bot setup, confirm-by-reply f
 docs/syn-drop.md          SYN-drop mode: exact-IP and CIDR variants, kernel-verified CI coverage
 docs/edge-tcp-intel.md    standalone TCX edge observer: handshake/RTT histograms, retransmit/RST/FIN counters
 docs/capture.md           packet capture: eBPF vs AF_PACKET, auto-capture PCAPs, veth+iperf3 CI smoke
+docs/sales/               buyer PDFs/PPTX/DOCX (Perspective + Brochure) — also on GitHub Pages /resources
 scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)
 ```
+
+## Buyer resources
+
+Download the Netra Product Perspective and Product Brochure from the repo or the docs site:
+
+- Folder: [`docs/sales/`](docs/sales/)
+- GitHub Pages: https://zyvorai.github.io/netra/resources
 
 ## Prerequisites
 
