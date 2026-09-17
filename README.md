@@ -230,7 +230,7 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 
 ## HTTPS default
 
-`netrad` listens on `:30870` by default. Helm enables in-pod HTTPS by default and generates a self-signed P-256 certificate in an init container. The agent chart explicitly opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` only when TLS is terminated by a trusted proxy/ingress. Plain manifests intentionally remain HTTP unless you provide `NETRA_TLS_CERT` and `NETRA_TLS_KEY`.
+`netrad` listens on `:30870` by default. **Helm and plain manifests enable in-pod HTTPS by default** and generate a self-signed P-256 certificate in an init container. The agent opts into certificate verification bypass for that generated internal certificate (`tls.agentInsecureSkipVerify=true` / `NETRA_TLS_INSECURE=true`); use a trusted certificate/CA path in hardened environments instead. Set `tls.enabled=false` (Helm) or remove `NETRA_TLS_CERT`/`NETRA_TLS_KEY` (plain) only when TLS is terminated by a trusted proxy/ingress.
 
 ## Signing in
 
@@ -394,16 +394,34 @@ docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.71 .
 
 ## Standalone Helm install
 
-Generate independent API and agent credentials and enable the node agent:
+Generate independent API and agent credentials. The privileged **node agent
+DaemonSet is on by default** (one pod per node, `tolerations: Exists` — same
+coverage idea as a CNI agent). Opt out with `--set agent.enabled=false` for a
+controller-only install.
 
 ```bash
+# Prefer the Cilium-style wrapper (banner, agent+TLS defaults, key generation):
+netractl install --namespace netra-system
+# or classic Helm:
 helm upgrade --install netra ./helm/netra \
   --namespace netra-system --create-namespace \
   --set auth.apiKey="$(openssl rand -hex 32)" \
-  --set auth.agentKey="$(openssl rand -hex 32)" \
-  --set agent.enabled=true
+  --set auth.agentKey="$(openssl rand -hex 32)"
 ```
 
+Then:
+
+```bash
+export NETRA_URL=https://127.0.0.1:30870
+export NETRA_API_KEY='…'          # from install output / Secret
+export NETRA_TLS_INSECURE=true    # chart self-signed cert
+netractl status
+netractl features list
+netractl features enable dns-detect --yes
+```
+
+See [`docs/features.md`](docs/features.md) for the full feature catalog, API,
+and dashboard **Features** page.
 This uses cgroup hooks and requires neither Cilium nor a configured interface. TCX can be enabled for explicit interfaces or all up non-loopback interfaces:
 
 ```bash

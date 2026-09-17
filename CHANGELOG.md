@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Cilium-style CLI + Features UX.** Zyvor banner on `netractl status` /
+  `install` / `upgrade` / `features`. Human-readable `netractl status`
+  (`--json`, `--wait`). Helm lifecycle: `netractl install|upgrade|uninstall`.
+  Feature catalog (`internal/features`): `netractl features list|enable|disable`,
+  `GET/POST /api/v1/features`, dashboard **Features** page. Helm
+  `agent.tlsfp` → `NETRA_TLSFP`. Docs: `docs/features.md`.
+- **Helm: node agent DaemonSet on by default.** `agent.enabled` defaults to
+  `true` so every node gets a privileged `netra-agent` pod (`tolerations:
+  Exists`, same coverage idea as a CNI agent). Opt out with
+  `--set agent.enabled=false`. `deploy-remote.sh` builds/enables the agent
+  for k3s/k8s profiles by default. Fixes empty dashboard data when the
+  controller was installed alone.
+- **Fix: login shows wrong-password and probes the API key.** Demo login
+  previously stored bearer `Admin@321` while deploy minted a random
+  `NETRA_API_KEY`, so sign-in flashed the console then 401'd back with **no
+  error**. Login now probes `/api/v1/fleet`, surfaces **Wrong username or
+  password**, and keeps that message when a session expires. `admin` + the
+  real API key as password also works; deploy-remote defaults the key to
+  `Admin@321` (`docs/dashboard-login.md`).
+- **Deploy: plain manifests default to HTTPS.** `deploy/controller.yaml` now
+  mirrors the Helm chart — openssl initContainer mints a self-signed P-256
+  cert; probes/Service use `https`. Agent talks `https://…` with
+  `NETRA_TLS_INSECURE=true` for that generated cert. Helm already had
+  `tls.enabled: true` by default; chart `NOTES.txt` + values comments make
+  the HTTPS default explicit.
 - **Docs: P0–P5 feature catalog + buyers guide.** Detailed
   [`docs/p0-p5-surfaces.md`](docs/p0-p5-surfaces.md) (what each surface does,
   how it works, API/CLI/UX, boundaries) and customer

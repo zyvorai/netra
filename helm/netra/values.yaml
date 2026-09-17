@@ -157,8 +157,13 @@ service:
   port: 30870
   nodePort: null
 tls:
+  # HTTPS is the default. Init container mints a self-signed P-256 cert into
+  # an emptyDir; probes and the Service use scheme/port name https.
+  # Set enabled=false only when TLS is terminated by a trusted proxy/ingress.
   enabled: true
   opensslImage: alpine/openssl:3.3.2
+  # Bypass verify for the chart-generated self-signed cert (agent → controller).
+  # Prefer a trusted cert/CA in hardened environments and set this false.
   agentInsecureSkipVerify: true
 metrics:
   enabled: true
@@ -167,7 +172,10 @@ resources:
   requests: {cpu: 50m, memory: 64Mi}
   limits: {cpu: 500m, memory: 256Mi}
 agent:
-  enabled: false
+  # Privileged node DaemonSet — on by default (like a CNI agent): one pod per
+  # node with tolerations Exists so it lands on every schedulable node.
+  # Set enabled=false only for controller-only installs.
+  enabled: true
   cgroupEnabled: true
   cgroupPath: /sys/fs/cgroup
   cgroupScanInterval: 10s
@@ -184,6 +192,8 @@ agent:
   # host process's /proc, not just what eBPF hooks already surface). See
   # docs/process-metadata.md.
   procMetaEnabled: false
+  # TLS ClientHello JA3/JA4 sampler (bpf/netra_tlsfp.c). auto|off|required.
+  tlsfp: auto
 persistence:
   enabled: true
   existingClaim: ""

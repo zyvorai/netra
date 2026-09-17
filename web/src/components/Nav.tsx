@@ -25,6 +25,7 @@ export type Page =
   | 'talkers'
   | 'fleet'
   | 'surfaces'
+  | 'features'
   | 'traffic'
   | 'capture'
   | 'congestion'
@@ -61,6 +62,7 @@ const groups: NavGroup[] = [
       { page: 'node-resources', label: 'Node Resources', blurb: 'Per-node CPU, memory, and load average, plus per-workload cgroup CPU/memory usage — a "top"-like view, attributed to workloads rather than raw PIDs.' },
       { page: 'l7', label: 'L7', blurb: 'Best-effort SNI and HTTP Host from the datapath.' },
       { page: 'surfaces', label: 'Surfaces', blurb: 'P1–P5 observe boards: JA3, encrypted DNS, shadow SaaS, exfil, fleet tenants, and more.' },
+      { page: 'features', label: 'Features', blurb: 'Enable or disable install-time capabilities (DNS detect, auto-mitigate, AI, agent coverage).' },
       { page: 'insights', label: 'Insights', blurb: 'Baselines, drift, and review-only remediation proposals.' },
       { page: 'topology', label: 'Topology', blurb: 'The observed-traffic dependency graph, live and force-directed.' },
     ],

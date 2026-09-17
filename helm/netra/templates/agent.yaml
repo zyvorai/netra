@@ -57,6 +57,8 @@ spec:
           value: {{ .Values.agent.failsafeAfter | quote }}
         - name: NETRA_PROCMETA_ENABLED
           value: {{ .Values.agent.procMetaEnabled | default false | quote }}
+        - name: NETRA_TLSFP
+          value: {{ .Values.agent.tlsfp | default "auto" | quote }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:

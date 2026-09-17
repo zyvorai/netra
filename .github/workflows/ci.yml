@@ -89,13 +89,31 @@ jobs:
         grep -q 'containerPort: 30870' /tmp/netra.yaml
         grep -q 'NETRA_LISTEN' /tmp/netra.yaml
         grep -q 'NETRA_TLS_CERT' /tmp/netra.yaml
+        grep -q 'NETRA_TLS_KEY' /tmp/netra.yaml
         grep -q 'gen-cert' /tmp/netra.yaml
+        grep -q 'scheme: HTTPS' /tmp/netra.yaml
+        grep -q 'name: https' /tmp/netra.yaml
         grep -q 'resources: \["pods","services"\]' /tmp/netra.yaml
         grep -q 'kubevirt.io' /tmp/netra.yaml
         # Helm renders env as name/value pairs; Cilium must stay off by default.
         awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 ~ /"true"/) exit 1}' /tmp/netra.yaml
         grep -q 'name: NETRA_CILIUM_ENABLED' /tmp/netra.yaml
         grep -q 'name: NETRA_HUBBLE_ENABLED' /tmp/netra.yaml
+        # Opt-out path still works when explicitly disabled.
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set tls.enabled=false >/tmp/netra-notls.yaml
+        if grep -q 'NETRA_TLS_CERT' /tmp/netra-notls.yaml; then
+          echo "tls.enabled=false unexpectedly rendered NETRA_TLS_CERT" >&2
+          exit 1
+        fi
+        grep -q 'name: http' /tmp/netra-notls.yaml
+        # Node agent DaemonSet is on by default (one pod per node).
+        grep -q 'kind: DaemonSet' /tmp/netra.yaml
+        grep -q 'name: netra-agent' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=false >/tmp/netra-noagent.yaml
+        if grep -q 'kind: DaemonSet' /tmp/netra-noagent.yaml; then
+          echo "agent.enabled=false unexpectedly rendered DaemonSet" >&2
+          exit 1
+        fi
     - name: Default render must not enable dns/scan detectors
       run: |
         if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then

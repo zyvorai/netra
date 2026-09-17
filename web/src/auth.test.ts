@@ -12,7 +12,7 @@ vi.stubGlobal('localStorage', {
   },
 });
 
-import { checkCredentials, logout } from './auth';
+import { bearerCandidates, checkCredentials, logout } from './auth';
 
 describe('auth', () => {
   beforeEach(() => {
@@ -23,20 +23,22 @@ describe('auth', () => {
     store.clear();
   });
 
-  it('returns the API token for valid credentials', () => {
+  it('returns the demo API token for default credentials', () => {
     expect(checkCredentials('admin', 'Admin@321')).toBe('Admin@321');
+    expect(bearerCandidates('admin', 'Admin@321')).toEqual(['Admin@321']);
+  });
+
+  it('treats a non-demo password as a NETRA_API_KEY candidate', () => {
+    expect(bearerCandidates('admin', 'deadbeef')).toEqual(['deadbeef']);
   });
 
   it('rejects a wrong username', () => {
     expect(checkCredentials('nobody', 'Admin@321')).toBeNull();
+    expect(bearerCandidates('nobody', 'Admin@321')).toEqual([]);
   });
 
-  it('rejects a wrong password', () => {
-    expect(checkCredentials('admin', 'wrong')).toBeNull();
-  });
-
-  it('rejects both wrong', () => {
-    expect(checkCredentials('nobody', 'wrong')).toBeNull();
+  it('rejects empty password', () => {
+    expect(bearerCandidates('admin', '')).toEqual([]);
   });
 
   it('logout clears the stored token', () => {

@@ -19,6 +19,15 @@ above. The login screen shows the host you're connecting to ("Connecting to
 entering credentials — useful when you manage more than one Netra
 deployment.
 
+If the controller was installed with a **custom** `NETRA_API_KEY` /
+`auth.apiKey` (for example `openssl rand -hex 32`), sign in as `admin` and
+paste that API key as the password. The UI probes `/api/v1/fleet` with the
+bearer before opening the dashboard, so a wrong key fails on the login
+screen instead of bouncing you after a brief flash of the console.
+
+`scripts/deploy-remote.sh` defaults `NETRA_API_KEY` to `Admin@321` so the
+demo pair works after a remote deploy unless you override it.
+
 ## What the login actually does
 
 Netra's controller has one shared bearer secret (`NETRA_API_KEY`, see

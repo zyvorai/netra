@@ -22,6 +22,7 @@ export default function Overview() {
   const [insights, setInsights] = useState<any>();
   const [path, setPath] = useState<any>();
   const [drops, setDrops] = useState<any>();
+  const [featSummary, setFeatSummary] = useState<{ on?: number; off?: number } | null>(null);
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -33,8 +34,9 @@ export default function Overview() {
       api('/api/v1/insights/summary'),
       api('/api/v1/ebpf/path?limit=1'),
       api('/api/v1/ebpf/drops?limit=1'),
+      api<{ summary?: { on?: number; off?: number } }>('/api/v1/features'),
     ])
-      .then(([s, o, h, l, i, pathDiag, dropDiag]) => {
+      .then(([s, o, h, l, i, pathDiag, dropDiag, feats]) => {
         setData(s);
         setObs(o);
         setHealth(h);
@@ -42,6 +44,7 @@ export default function Overview() {
         setInsights(i);
         setPath(pathDiag);
         setDrops(dropDiag);
+        setFeatSummary(feats?.summary || null);
         setErr('');
       })
       .catch((e) => setErr(String(e)));
@@ -70,6 +73,7 @@ export default function Overview() {
           <Metric value={obs?.packets ?? 0} label="packets counted" />
           <Metric value={obs?.blocked ?? 0} label="blocked packets" />
           <Metric value={obs?.dnsQueries ?? 0} label="DNS events" />
+          <Metric value={featSummary?.on ?? '—'} label="features on" />
         </div>
         {fp?.enforceUntil && (
           <p className="warning">Enforcement lease expires {new Date(fp.enforceUntil).toLocaleString()}.</p>

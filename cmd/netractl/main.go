@@ -37,7 +37,15 @@ func main() {
 	case "explain":
 		err = explainCmd(os.Args[2:], os.Stdout)
 	case "status":
-		err = request("GET", "/api/v1/status", nil)
+		err = statusCmd(os.Args[2:], os.Stdout)
+	case "install":
+		err = installCmd(os.Args[2:])
+	case "upgrade":
+		err = upgradeCmd(os.Args[2:])
+	case "uninstall":
+		err = uninstallCmd(os.Args[2:])
+	case "features":
+		err = featuresCmd(os.Args[2:])
 	case "audit":
 		if len(os.Args) >= 3 && os.Args[2] == "summary" {
 			err = request("GET", "/api/v1/audit/summary", nil)
@@ -109,7 +117,10 @@ func main() {
 }
 func usage() {
 	fmt.Println(`netractl explain --docker NAME --node NODE | --pod NS/NAME | --node NODE --pid PID | --destination IP[:PORT] | --dns NAME | --all [--format json] [--input FILE]
-  status | audit | audit summary
+  status [--json] [--wait]
+  install | upgrade | uninstall --yes
+  features list | features enable NAME --yes | features disable NAME --yes
+  audit | audit summary
   export audit|events|flows|blocks|status [--format json|jsonl|cef|syslog|otlp|otlp-trace] [--limit N] [--include anomaly,incident,audit]
   report [--format markdown|json]
   playbooks [--format markdown|json]

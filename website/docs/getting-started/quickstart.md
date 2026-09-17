@@ -4,11 +4,16 @@ sidebar_position: 1
 
 # Quickstart
 
-Netra is a single Helm chart with two workloads: a controller (`netrad`) and an optional privileged node agent. Pick the path that matches what you already have.
+Netra is a single Helm chart with two workloads: a controller (`netrad`) and a
+privileged node agent DaemonSet (**on by default**, one pod per node — like a
+CNI agent). Pick the path that matches what you already have.
 
 ## Path A — Helm install (works with or without Cilium)
 
-Netra doesn't require Cilium. This installs the controller against any Kubernetes cluster; if Cilium and Hubble Relay are already running, Netra will also offer optional Cilium policy management and Hubble flow viewing, but nothing here depends on it.
+Netra doesn't require Cilium. This installs the controller **and** the node
+agent against any Kubernetes cluster; if Cilium and Hubble Relay are already
+running, Netra will also offer optional Cilium policy management and Hubble
+flow viewing, but nothing here depends on it.
 
 ```bash
 helm upgrade --install netra ./helm/netra \
@@ -20,7 +25,7 @@ kubectl -n netra-system port-forward svc/netra 30870:30870
 curl -skf https://127.0.0.1:30870/livez
 ```
 
-Open `https://127.0.0.1:30870` (self-signed TLS by default, so expect a browser warning). The nav bar: **Overview**, **Pods**, **VMs**, **Network Health**, **Path Diagnostics**, **Drop Diagnostics**, **L7 Metadata**, **Insights**, **Firewall**, **Live flows**, **Policies**, **Audit**.
+Open `https://127.0.0.1:30870` (self-signed TLS by default, so expect a browser warning). Sign in with `admin` / `Admin@321` when the controller API key matches that demo token (or paste your `auth.apiKey` as the password). The nav bar: **Overview**, **Pods**, **VMs**, **Network Health**, **Path Diagnostics**, **Drop Diagnostics**, **L7 Metadata**, **Surfaces**, **Insights**, **Firewall**, **Live flows**, **Policies**, **Audit**.
 
 | Page | What it's for |
 |---|---|
@@ -34,24 +39,25 @@ Open `https://127.0.0.1:30870` (self-signed TLS by default, so expect a browser 
 | Policies | Guided `CiliumNetworkPolicy` builder + JSON workbench with preflight receipts |
 | Audit | Bounded control-plane audit feed |
 
-To also run the privileged node agent (workload-attributed enforcement, TCP/DNS/L7 telemetry, TCX/XDP):
+Controller-only (no privileged node agent):
 
 ```bash
 helm upgrade --install netra ./helm/netra \
-  --namespace netra-system \
-  --reuse-values \
-  --set agent.enabled=true
+  --namespace netra-system --create-namespace \
+  --set auth.apiKey="$(openssl rand -hex 32)" \
+  --set auth.agentKey="$(openssl rand -hex 32)" \
+  --set agent.enabled=false
 ```
 
 ## Path B — Remote full-stack script (K3s + Cilium + Netra)
 
-For a fresh host with nothing installed yet: `scripts/deploy-remote.sh` bootstraps K3s, Cilium with Hubble Relay, then deploys Netra via Helm over SSH.
+For a fresh host with nothing installed yet: `scripts/deploy-remote.sh` bootstraps K3s, Cilium with Hubble Relay, then deploys Netra via Helm over SSH. The node agent is built and enabled by default on k3s/k8s profiles.
 
 ```bash
-NETRA_ALLOW_UNAUTHENTICATED=true ./scripts/deploy-remote.sh HOST USER --k8s
+./scripts/deploy-remote.sh user@HOST --k8s
 ```
 
-Add `NETRA_AGENT_ENABLED=true` to also build and deploy the node agent, or `NETRA_AGENT_INTERFACES`/`NETRA_AGENT_XDP_INTERFACES` to attach TCX/XDP on specific interfaces. Run without `--quick` to rebuild images from source; with `--quick` to reuse whatever's already built on the host.
+Set `NETRA_AGENT_ENABLED=false` for controller-only, or `NETRA_AGENT_INTERFACES`/`NETRA_AGENT_XDP_INTERFACES` to attach TCX/XDP on specific interfaces. Run without `--quick` to rebuild images from source; with `--quick` to reuse whatever's already built on the host.
 
 ## Path C — Local binaries (development)
 

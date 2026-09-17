@@ -27,6 +27,9 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
+		{"GET", "/api/v1/status"},
+		{"GET", "/api/v1/features"},
+		{"POST", "/api/v1/features/dns-detect"},
 		{"GET", "/api/v1/pods"},
 		{"GET", "/api/v1/vms"},
 		{"GET", "/api/v1/workloads/pod/default/demo"},

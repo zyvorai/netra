@@ -1,22 +1,73 @@
-import { useState } from 'react';
-import { checkCredentials } from '../auth';
+import { useEffect, useState } from 'react';
+import { bearerCandidates } from '../auth';
 import { setToken } from '../api';
 
-export default function Login({ onLogin }: { onLogin: () => void }) {
+const WRONG = 'Wrong username or password.';
+
+/** Probe that the bearer is accepted — must be JSON API, not SPA HTML. */
+async function probeBearer(bearer: string): Promise<'ok' | 'unauthorized' | 'unreachable'> {
+  try {
+    const r = await fetch('/api/v1/fleet', {
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        Accept: 'application/json',
+      },
+    });
+    if (r.status === 401) return 'unauthorized';
+    const ct = r.headers.get('content-type') || '';
+    if (!r.ok || !ct.includes('application/json')) return 'unreachable';
+    return 'ok';
+  } catch {
+    return 'unreachable';
+  }
+}
+
+export default function Login({
+  onLogin,
+  initialError = '',
+}: {
+  onLogin: () => void;
+  initialError?: string;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
+  const [busy, setBusy] = useState(false);
   const host = window.location.host || window.location.hostname;
 
-  function submit(e: React.FormEvent) {
+  useEffect(() => {
+    if (initialError) setError(initialError);
+  }, [initialError]);
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const token = checkCredentials(username, password);
-    if (!token) {
-      setError('Invalid username or password.');
+    const user = username.trim();
+    const candidates = bearerCandidates(user, password);
+    if (!candidates.length) {
+      setError(WRONG);
       return;
     }
-    setToken(token);
-    onLogin();
+    setBusy(true);
+    setError('');
+    let sawUnauthorized = false;
+    try {
+      for (const bearer of candidates) {
+        setToken(bearer);
+        const result = await probeBearer(bearer);
+        if (result === 'ok') {
+          onLogin();
+          return;
+        }
+        if (result === 'unauthorized') sawUnauthorized = true;
+      }
+      setToken('');
+      setError(sawUnauthorized ? WRONG : 'Could not reach the controller. Check the URL and try again.');
+    } catch {
+      setToken('');
+      setError('Could not reach the controller. Check the URL and try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -33,15 +84,20 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           Connecting to <code>{host}</code>
         </p>
       </div>
-      <form className="card login-card" onSubmit={submit}>
+      <form className="card login-card" onSubmit={submit} noValidate>
         <h1>Sign in.</h1>
         <label className="tokenbox">
           Username
           <input
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              if (error) setError('');
+            }}
             autoFocus
             autoComplete="username"
+            disabled={busy}
+            aria-invalid={Boolean(error)}
           />
         </label>
         <label className="tokenbox">
@@ -49,12 +105,23 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError('');
+            }}
             autoComplete="current-password"
+            disabled={busy}
+            aria-invalid={Boolean(error)}
           />
         </label>
-        {error && <p className="warning">{error}</p>}
-        <button type="submit" className="primary">Sign in</button>
+        {error ? (
+          <p className="login-error" role="alert" aria-live="assertive">
+            {error}
+          </p>
+        ) : null}
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
       </form>
     </div>
   );

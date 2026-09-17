@@ -2,6 +2,8 @@
 
 The base plain manifests are standalone and do **not** grant Cilium permissions. The controller receives read-only `get/list` access to Pods and Services for workload attribution and dependency resolution; the privileged agent remains tokenless.
 
+**HTTPS is on by default** (self-signed P-256 via an openssl init container), matching the Helm chart. Open `https://…:30870` (browser warning expected). The agent sets `NETRA_TLS_INSECURE=true` for that generated cert.
+
 Create controller/agent credentials first:
 
 ```bash

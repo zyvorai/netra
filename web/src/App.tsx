@@ -21,6 +21,7 @@ import Scorecard from './pages/Scorecard';
 import Talkers from './pages/Talkers';
 import Fleet from './pages/Fleet';
 import Surfaces from './pages/Surfaces';
+import Features from './pages/Features';
 import Traffic from './pages/Traffic';
 import Capture from './pages/Capture';
 import CongestionMap from './pages/CongestionMap';
@@ -107,6 +108,12 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
     lede: 'P1–P5 metadata: JA3/JA4, encrypted DNS, shadow SaaS, destination risk, exfil/lateral drafts, compliance, fleet tenants — no decrypt, no payload export.',
     tint: 'purple',
   },
+  features: {
+    eyebrow: 'Features',
+    title: 'Turn capabilities on.',
+    lede: 'Install-time and controller/agent flags — DNS detect, scan detect, auto-mitigate, AI rewrite, GitOps, TLS fingerprints. Does not flip enforce or apply denies.',
+    tint: 'amber',
+  },
   insights: {
     eyebrow: 'Insights',
     title: 'Behavior, rates, and exposure.',
@@ -191,6 +198,7 @@ export default function App() {
   // investigation link (#page=...), so a pasted link opens directly to it.
   const [page, setPage] = useState<Page>(() => readRoute(window.location.hash).page as Page);
   const [loggedIn, setLoggedIn] = useState(() => Boolean(token()));
+  const [authError, setAuthError] = useState('');
   const [theme, setTheme] = useState<Theme>(() => {
     const t = readStoredTheme();
     applyTheme(t);
@@ -198,7 +206,10 @@ export default function App() {
   });
 
   useEffect(() => {
-    const onExpired = () => setLoggedIn(false);
+    const onExpired = () => {
+      setAuthError('Wrong username or password — the controller rejected the API token.');
+      setLoggedIn(false);
+    };
     window.addEventListener('netra-auth-expired', onExpired);
     return () => window.removeEventListener('netra-auth-expired', onExpired);
   }, []);
@@ -214,7 +225,17 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
+  if (!loggedIn) {
+    return (
+      <Login
+        initialError={authError}
+        onLogin={() => {
+          setAuthError('');
+          setLoggedIn(true);
+        }}
+      />
+    );
+  }
 
   const body = {
     overview: <Overview />,
@@ -231,6 +252,7 @@ export default function App() {
     'node-resources': <NodeResources />,
     l7: <L7 />,
     surfaces: <Surfaces />,
+    features: <Features />,
     insights: <Insights />,
     topology: <Topology />,
     incidents: <Incidents />,

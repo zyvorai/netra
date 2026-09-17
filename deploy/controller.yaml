@@ -6,9 +6,9 @@ metadata:
 spec:
   selector: {app.kubernetes.io/name: netra}
   ports:
-  - name: http
+  - name: https
     port: 30870
-    targetPort: http
+    targetPort: https
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -31,13 +31,29 @@ spec:
         fsGroup: 65532
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile: {type: RuntimeDefault}
+      initContainers:
+      - name: gen-cert
+        image: alpine/openssl:3.3.2
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+            -keyout /certs/tls.key -out /certs/tls.crt \
+            -subj "/CN=netra/O=Zyvor AI Labs" \
+            -addext "subjectAltName=DNS:netra,DNS:netra.netra-system.svc,DNS:localhost,IP:127.0.0.1"
+          chown 65532:65532 /certs/tls.key /certs/tls.crt
+          chmod 600 /certs/tls.key
+        securityContext: {runAsUser: 0, runAsNonRoot: false}
+        volumeMounts: [{name: tls-certs, mountPath: /certs}]
       containers:
       - name: netra
         image: ghcr.io/zyvorai/netra:0.14.0
         imagePullPolicy: IfNotPresent
-        ports: [{name: http, containerPort: 30870}]
+        ports: [{name: https, containerPort: 30870}]
         env:
         - {name: NETRA_LISTEN, value: ":30870"}
+        - {name: NETRA_TLS_CERT, value: /certs/tls.crt}
+        - {name: NETRA_TLS_KEY, value: /certs/tls.key}
         - {name: NETRA_CILIUM_ENABLED, value: "false"}
         - {name: NETRA_HUBBLE_ENABLED, value: "false"}
         - {name: NETRA_HUBBLE_ADDR, value: hubble-relay.kube-system.svc:80}
@@ -49,10 +65,19 @@ spec:
           valueFrom: {secretKeyRef: {name: netra-auth, key: api-key, optional: false}}
         - name: NETRA_AGENT_KEY
           valueFrom: {secretKeyRef: {name: netra-auth, key: agent-key, optional: false}}
-        readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 2, periodSeconds: 5}
-        livenessProbe: {httpGet: {path: /livez, port: http}, initialDelaySeconds: 5, periodSeconds: 10}
+        readinessProbe:
+          httpGet: {path: /readyz, port: https, scheme: HTTPS}
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet: {path: /livez, port: https, scheme: HTTPS}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
         volumeMounts:
         - {name: state, mountPath: /var/lib/netra}
+        - {name: tls-certs, mountPath: /certs, readOnly: true}
         resources:
           requests: {cpu: 50m, memory: 64Mi}
           limits: {cpu: 500m, memory: 256Mi}
@@ -62,5 +87,5 @@ spec:
           runAsNonRoot: true
           capabilities: {drop: ["ALL"]}
       volumes:
-      - name: state
-        persistentVolumeClaim: {claimName: netra-state}
+      - {name: state, persistentVolumeClaim: {claimName: netra-state}}
+      - {name: tls-certs, emptyDir: {}}

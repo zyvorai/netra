@@ -196,6 +196,8 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /chatops/teams", s.chatopsTeamsHandler)
 	}
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
+	mux.Handle("GET /api/v1/features", s.auth(http.HandlerFunc(s.listFeatures)))
+	mux.Handle("POST /api/v1/features/{id}", s.auth(http.HandlerFunc(s.setFeature)))
 	mux.Handle("GET /api/v1/policies", s.auth(s.cilium(http.HandlerFunc(s.listPolicies))))
 	mux.Handle("POST /api/v1/policies/build", s.auth(http.HandlerFunc(s.buildPolicy)))
 	mux.Handle("POST /api/v1/policies/plan", s.auth(s.cilium(http.HandlerFunc(s.planPolicy))))

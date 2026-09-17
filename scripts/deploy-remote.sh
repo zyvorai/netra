@@ -79,15 +79,20 @@ if [[ -z "${TARGET}" ]]; then
 fi
 
 ALLOW_UNAUTH_LOCAL="${NETRA_ALLOW_UNAUTHENTICATED:-false}"
-# Resolved locally (not on the remote host) so a caller-supplied
-# NETRA_API_KEY/NETRA_AGENT_KEY actually takes effect: SSH does not forward
-# the invoking shell's environment, so referencing ${NETRA_API_KEY:-...}
-# inside the remote script (evaluated over on the remote host) would always
-# see it unset and mint a fresh random key on every single deploy, silently
-# rotating credentials out from under whatever the operator had configured.
-API_KEY_LOCAL="${NETRA_API_KEY:-$(openssl rand -hex 32)}"
+# Default matches web/src/auth.ts demo login (admin / Admin@321 → bearer
+# Admin@321). Override with NETRA_API_KEY for production; operators can also
+# sign in as admin using that key as the password (UI probes /api/v1/fleet).
+API_KEY_LOCAL="${NETRA_API_KEY:-Admin@321}"
 AGENT_KEY_LOCAL="${NETRA_AGENT_KEY:-$(openssl rand -hex 32)}"
-AGENT_ENABLED_LOCAL="${NETRA_AGENT_ENABLED:-false}"
+# Node agent is required for dashboard data. Default on for k3s/k8s deploys;
+# --quick and explicit NETRA_AGENT_ENABLED=false leave it off.
+if [[ -n "${NETRA_AGENT_ENABLED:-}" ]]; then
+  AGENT_ENABLED_LOCAL="${NETRA_AGENT_ENABLED}"
+elif [[ "$PROFILE" == "quick" ]]; then
+  AGENT_ENABLED_LOCAL=false
+else
+  AGENT_ENABLED_LOCAL=true
+fi
 WORKLOAD_CONSOLE_ENABLED_LOCAL="${NETRA_WORKLOAD_CONSOLE_ENABLED:-false}"
 AGENT_INTERFACES_LOCAL="${NETRA_AGENT_INTERFACES:-}"
 AGENT_XDP_INTERFACES_LOCAL="${NETRA_AGENT_XDP_INTERFACES:-}"
@@ -197,8 +202,8 @@ import_image() {
 # Builds the privileged node agent from Dockerfile.agent (compiles both the
 # Go binary and bpf/netra_tc.c inside the image, same as CI's compile check)
 # and imports it the same way as the controller image above. Only invoked
-# when AGENT_ENABLED=true, since most deploys don't run the agent — see
-# helm/netra/values.yaml's agent.enabled default and docs/native-netpol.md.
+# when AGENT_ENABLED=true (Helm/deploy default). Opt out with
+# NETRA_AGENT_ENABLED=false for controller-only installs.
 build_agent_image() {
   local runtime=""
   if command -v podman >/dev/null 2>&1; then
@@ -238,7 +243,7 @@ fi
 
 AGENT_SET=(--set agent.enabled=false)
 if [[ "\$AGENT_ENABLED" == "true" ]]; then
-  AGENT_SET=(--set agent.enabled=true --set agentImage.repository=ghcr.io/zyvorai/netra-agent --set agentImage.tag=0.27.81)
+  AGENT_SET=(--set agent.enabled=true --set agentImage.repository=ghcr.io/zyvorai/netra-agent --set agentImage.tag=0.27.81 --set agentImage.pullPolicy=IfNotPresent)
 fi
 
 CONSOLE_SET=(--set workloadConsole.enabled=false)
