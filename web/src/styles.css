@@ -157,7 +157,7 @@ button,
 .buttonlike,
 .buildbutton {
   font-family: inherit;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 400;
   letter-spacing: -0.022em;
   line-height: 1.17648;
@@ -597,7 +597,7 @@ main {
   animation: heroDrift 22s ease-in-out infinite alternate;
 }
 .hero h1 {
-  font-size: clamp(32px, 4vw, 56px);
+  font-size: clamp(38px, 4.6vw, 64px);
   line-height: 1.05;
   letter-spacing: -0.03em;
   max-width: 920px;
@@ -608,7 +608,7 @@ main {
 .hero p {
   color: var(--text-secondary);
   max-width: 720px;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1.381;
   font-weight: 400;
   letter-spacing: 0.011em;
@@ -626,9 +626,11 @@ main {
 
 /* Page heroes carry their own glow layer as a "chapter opener" per page,
    but at a page-title scale, not display/poster scale — kept a clear step
-   under .hero's ceiling (38px vs 56px) so Overview stays the single
-   biggest moment in the app. Shrunk twice: from an original near-hero-scale
-   (84px) treatment, then again from a still-oversized 48px ceiling. */
+   under .hero's ceiling (52px vs 64px) so Overview stays the single
+   biggest moment in the app. History: shrunk twice (an original
+   near-hero-scale 84px, then a still-oversized 48px ceiling), then raised
+   again to this larger, Apple-marketing-inspired scale on explicit
+   request. */
 .page-hero {
   position: relative;
   margin: 20px 0 36px;
@@ -637,7 +639,7 @@ main {
   animation: fadeRise 0.45s var(--ease-apple) both;
 }
 .page-hero h1 {
-  font-size: clamp(22px, 2.6vw, 38px);
+  font-size: clamp(32px, 4vw, 52px);
   line-height: 1.15;
   letter-spacing: -0.02em;
   font-weight: 600;
@@ -646,7 +648,7 @@ main {
 }
 .page-hero p {
   color: var(--text-secondary);
-  font-size: 17px;
+  font-size: 19px;
   line-height: 1.42;
   margin: 0;
   max-width: 640px;
@@ -706,7 +708,7 @@ main {
   display: block;
 }
 .login-info h1 {
-  font-size: clamp(32px, 4vw, 48px);
+  font-size: clamp(38px, 4.6vw, 56px);
   line-height: 1.04;
   letter-spacing: -0.04em;
   font-weight: 600;
@@ -715,7 +717,7 @@ main {
 }
 .login-info p {
   color: var(--text-secondary);
-  font-size: 17px;
+  font-size: 19px;
   line-height: 1.5;
   max-width: 420px;
 }
@@ -736,7 +738,7 @@ main {
   gap: 16px;
 }
 .login-card h1 {
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: clamp(32px, 3.5vw, 46px);
   letter-spacing: -0.03em;
   margin: 6px 0 4px;
   font-weight: 600;
@@ -845,7 +847,7 @@ main {
   pointer-events: none;
 }
 .card h2 {
-  font-size: clamp(28px, 3vw, 40px);
+  font-size: clamp(32px, 3.5vw, 46px);
   letter-spacing: -0.03em;
   margin: 6px 0 12px;
   font-weight: 600;
@@ -853,7 +855,7 @@ main {
 }
 .card h3 {
   margin-top: 0;
-  font-size: 21px;
+  font-size: 24px;
   letter-spacing: -0.02em;
   font-weight: 600;
   color: var(--text-primary);
@@ -861,7 +863,7 @@ main {
 .card p {
   color: var(--text-secondary);
   line-height: 1.55;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .metrics {
@@ -1883,8 +1885,8 @@ code {
   .span3 { grid-column: auto; }
   .metrics { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .filters { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-  .hero p { font-size: 17px; }
-  .page-hero p { font-size: 17px; }
+  .hero p { font-size: 19px; }
+  .page-hero p { font-size: 19px; }
   /* Keep all columns readable: scroll horizontally instead of hiding. */
   .terminalbody {
     overflow-x: auto;
