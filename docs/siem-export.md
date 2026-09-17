@@ -123,10 +123,13 @@ See `examples/siem-export.sh`.
 Optional best-effort push sink, off by default, leader-only in HA — same
 shape as the syslog forwarder above, but writes audit events straight
 into a Snowflake table via `internal/snowflakesink` instead of dialing a
-syslog collector. **Audit events only** in this pass; flows, blocks,
-anomalies, and incidents have no continuous/watermarked source inside
-`netrad` today (only the point-in-time pull endpoints above), so they
-aren't part of this sink yet.
+syslog collector. Optionally also exports sysctl-audit findings into a
+second table (`NETRA_SNOWFLAKE_SYSCTL_ENABLED`), re-sending the full
+current snapshot every tick rather than watermarking, since those
+findings have no timestamp of their own. Flows, blocks, anomalies, and
+incidents still have no continuous/watermarked source inside `netrad`
+today (only the point-in-time pull endpoints above), so they aren't part
+of either export.
 
 See [`docs/snowflake-export.md`](snowflake-export.md) for full
 Snowflake-side setup (warehouse/role/user/key-pair), example queries,
@@ -146,6 +149,12 @@ feature, same as `NETRA_SYSLOG_ADDR`):
 | `NETRA_SNOWFLAKE_TABLE` | `NETRA_AUDIT` | created on startup if missing |
 | `NETRA_SNOWFLAKE_INTERVAL` | `15s` | Go duration string |
 | `NETRA_SNOWFLAKE_BATCH_SIZE` | `50` | rows per `INSERT` |
+| `NETRA_SNOWFLAKE_EXTRA_COLUMNS` | (empty) | `NAME=SOURCE` pairs (`details:<key>` or `static:<value>`) promoted to extra columns |
+| `NETRA_SNOWFLAKE_SYSCTL_ENABLED` | `false` | also export sysctl-audit findings, reusing this connection |
+| `NETRA_SNOWFLAKE_SYSCTL_TABLE` | `NETRA_SYSCTL_AUDIT` | created on startup if missing |
+| `NETRA_SNOWFLAKE_SYSCTL_INTERVAL` | `30s` | Go duration string |
+| `NETRA_SNOWFLAKE_SYSCTL_BATCH_SIZE` | `50` | rows per `INSERT` |
+| `NETRA_SNOWFLAKE_SYSCTL_TOPN` | `100000` | intentionally far above the HTTP handler's `limit=50` default, so the export never truncates |
 
 A misconfigured account (bad credentials, unreachable warehouse, syntax
 error) fails `netrad` startup — this is the one push sink that dials out
@@ -162,6 +171,23 @@ CREATE TABLE IF NOT EXISTS NETRA_AUDIT (
   target  STRING,
   message STRING,
   details VARIANT
+)
+```
+
+Optional sysctl-audit findings table (`NETRA_SNOWFLAKE_SYSCTL_ENABLED=true`):
+
+```sql
+CREATE TABLE IF NOT EXISTS NETRA_SYSCTL_AUDIT (
+  at             TIMESTAMP_NTZ NOT NULL,
+  node           STRING,
+  severity       STRING,
+  category       STRING,
+  name           STRING,
+  interface      STRING,
+  current_value  STRING,
+  expected_value STRING,
+  rationale      STRING,
+  informational  BOOLEAN
 )
 ```
 

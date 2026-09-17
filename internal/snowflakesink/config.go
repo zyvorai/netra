@@ -12,8 +12,8 @@ import (
 	"strings"
 )
 
-// Config configures the sink. Every field except Table and BatchSize is
-// required once Account is set.
+// Config configures the sink. Every field except Table, BatchSize, and
+// ExtraColumns is required once Account is set.
 type Config struct {
 	Account        string
 	User           string
@@ -23,7 +23,29 @@ type Config struct {
 	Schema         string
 	Table          string
 	BatchSize      int
+	ExtraColumns   []ExtraColumn
 }
+
+// ExtraColumn maps one additional, operator-configured Snowflake column
+// onto either a key inside models.AuditEvent.Details or a fixed value
+// supplied at startup. Column names reach raw DDL/DML unquoted exactly
+// like Table, so Name is validated with the same isValidIdentifier used
+// for Table.
+type ExtraColumn struct {
+	Name   string // uppercased, validated identifier
+	Source string // "details:<key>" or "static:<value>"
+}
+
+// reservedColumns are the fixed columns every table already has; an
+// ExtraColumn may not reuse one of these names.
+var reservedColumns = map[string]bool{
+	"AT": true, "ACTOR": true, "ACTION": true, "TARGET": true, "MESSAGE": true, "DETAILS": true,
+}
+
+const (
+	extraColumnDetailsPrefix = "details:"
+	extraColumnStaticPrefix  = "static:"
+)
 
 func (c *Config) applyDefaults() error {
 	c.Account = strings.TrimSpace(c.Account)
@@ -60,7 +82,74 @@ func (c *Config) applyDefaults() error {
 	if c.BatchSize <= 0 {
 		c.BatchSize = 50
 	}
+	if err := c.applyExtraColumnDefaults(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// applyExtraColumnDefaults uppercases and validates every configured
+// ExtraColumn in place. This is the one place ExtraColumn safety is
+// enforced, regardless of whether a Config was built from env vars (via
+// ParseExtraColumns) or directly in a test — the same guarantee Table
+// already gets from applyDefaults.
+func (c *Config) applyExtraColumnDefaults() error {
+	seen := make(map[string]bool, len(c.ExtraColumns))
+	for i := range c.ExtraColumns {
+		ec := &c.ExtraColumns[i]
+		ec.Name = strings.ToUpper(strings.TrimSpace(ec.Name))
+		if !isValidIdentifier(ec.Name) {
+			return fmt.Errorf("snowflake extra column %q is not a valid unquoted identifier", ec.Name)
+		}
+		if reservedColumns[ec.Name] {
+			return fmt.Errorf("snowflake extra column %q collides with a fixed column", ec.Name)
+		}
+		if seen[ec.Name] {
+			return fmt.Errorf("snowflake extra column %q is configured more than once", ec.Name)
+		}
+		seen[ec.Name] = true
+		switch {
+		case strings.HasPrefix(ec.Source, extraColumnDetailsPrefix):
+			if strings.TrimPrefix(ec.Source, extraColumnDetailsPrefix) == "" {
+				return fmt.Errorf("snowflake extra column %q: %q source has an empty key", ec.Name, ec.Source)
+			}
+		case strings.HasPrefix(ec.Source, extraColumnStaticPrefix):
+			// A static value may legitimately be empty (e.g. an
+			// intentionally blank tag), so no further check here.
+		default:
+			return fmt.Errorf("snowflake extra column %q: source %q must start with %q or %q", ec.Name, ec.Source, extraColumnDetailsPrefix, extraColumnStaticPrefix)
+		}
+	}
+	return nil
+}
+
+// ParseExtraColumns parses NETRA_SNOWFLAKE_EXTRA_COLUMNS: a comma-separated
+// list of NAME=SOURCE pairs, e.g.
+// "REASON=details:reason,ENVIRONMENT=static:prod". SOURCE is
+// "details:<key>" (project models.AuditEvent.Details[key] into the
+// column, JSON-encoding non-string values) or "static:<value>" (a fixed
+// value repeated on every row). This only checks the NAME=SOURCE shape;
+// identifier safety, reserved-name, and duplicate checks happen in
+// Config.applyDefaults, the same place Table's safety check lives.
+func ParseExtraColumns(raw string) ([]ExtraColumn, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	cols := make([]ExtraColumn, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		name, source, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(source) == "" {
+			return nil, fmt.Errorf("snowflake extra column %q: want NAME=SOURCE", part)
+		}
+		cols = append(cols, ExtraColumn{Name: strings.TrimSpace(name), Source: strings.TrimSpace(source)})
+	}
+	return cols, nil
 }
 
 // isValidIdentifier reports whether s is safe to interpolate unquoted

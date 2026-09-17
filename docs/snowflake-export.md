@@ -57,6 +57,39 @@ Netra writes the rows itself.
   startup — Snowflake trades that startup leniency for catching a
   misconfiguration immediately instead of as a stream of later flush
   warnings nobody is watching.
+- **The optional sysctl-audit export has no watermark, on purpose.**
+  `sysctlaudit.Build` recomputes the entire current cluster state fresh
+  on every call — there's no persisted history or per-finding timestamp
+  to diff against, unlike the audit log. So `snowflakesink.SysctlSink`
+  does not reuse `siem.NewSince`/`Sink`'s watermark machinery at all:
+  every tick re-exports the *full* current findings snapshot, stamped
+  with that tick's own `time.Now()`. Deduping down to current-state-only
+  is left to a Snowflake-side view (see **Table schema** below), the
+  same way `NETRA_AUDIT_DEDUP` already handles at-least-once redelivery
+  for the audit table — just with a different partition key, since the
+  two tables solve different problems.
+- **Configurable extra columns promote a `details` key or a static
+  value to its own top-level column.** `models.AuditEvent` itself has
+  only five fields (`at/actor/action/target/details`) — there's nothing
+  else on the struct to expose — so `NETRA_SNOWFLAKE_EXTRA_COLUMNS` lets
+  an operator pull a specific `Details` map key (e.g. `reason`) out to a
+  fast, filterable/joinable `STRING` column, or stamp every row with a
+  fixed value (e.g. an environment tag). Adding a new extra column to an
+  already-running table widens it via `ALTER TABLE ... ADD COLUMN IF NOT
+  EXISTS` at the next startup — no separate migration step. See
+  **Configuration** below.
+- **Tighter interval/batch tuning substitutes for genuine Snowpipe
+  Streaming.** `gosnowflake` (the Go Snowflake driver netra depends on)
+  has no Snowpipe Streaming Ingest API, and there is no other viable Go
+  client for that protocol to depend on instead — so this sink does not
+  attempt real streaming ingestion. What it does instead: when a full
+  `BatchSize` batch of fresh events flushes successfully, `Sink.Run`
+  drains again immediately (bounded, so a permanently busy audit stream
+  can't turn this into a tight loop) rather than always waiting out the
+  rest of `NETRA_SNOWFLAKE_INTERVAL`. Combined with a small
+  `NETRA_SNOWFLAKE_BATCH_SIZE` and a short interval, this gets close to
+  real-time delivery using the same `INSERT`-based mechanism above — see
+  **Tuning for lower latency** below.
 
 ## Snowflake-side setup
 
@@ -122,6 +155,14 @@ export NETRA_SNOWFLAKE_SCHEMA=PUBLIC
 export NETRA_SNOWFLAKE_TABLE=NETRA_AUDIT
 export NETRA_SNOWFLAKE_INTERVAL=15s
 export NETRA_SNOWFLAKE_BATCH_SIZE=50
+export NETRA_SNOWFLAKE_EXTRA_COLUMNS=REASON=details:reason,ENVIRONMENT=static:prod
+
+# optional: export sysctl-audit findings to a second table too
+export NETRA_SNOWFLAKE_SYSCTL_ENABLED=true
+export NETRA_SNOWFLAKE_SYSCTL_TABLE=NETRA_SYSCTL_AUDIT
+export NETRA_SNOWFLAKE_SYSCTL_INTERVAL=30s
+export NETRA_SNOWFLAKE_SYSCTL_BATCH_SIZE=50
+export NETRA_SNOWFLAKE_SYSCTL_TOPN=100000
 ```
 
 | Env var | Default | Notes |
@@ -133,8 +174,14 @@ export NETRA_SNOWFLAKE_BATCH_SIZE=50
 | `NETRA_SNOWFLAKE_DATABASE` | — | required |
 | `NETRA_SNOWFLAKE_SCHEMA` | — | required |
 | `NETRA_SNOWFLAKE_TABLE` | `NETRA_AUDIT` | created on first connect if missing. Must be a valid unquoted Snowflake identifier (letters, digits, underscore, not leading with a digit) — `netrad` refuses to start otherwise, since this is the one config value interpolated into raw DDL/DML rather than passed as a bind parameter |
-| `NETRA_SNOWFLAKE_INTERVAL` | `15s` | Go duration string, same as `NETRA_SYSLOG_INTERVAL` |
+| `NETRA_SNOWFLAKE_INTERVAL` | `15s` | Go duration string, same as `NETRA_SYSLOG_INTERVAL`. See **Tuning for lower latency** below for how low this can practically go |
 | `NETRA_SNOWFLAKE_BATCH_SIZE` | `50` | rows per `INSERT` |
+| `NETRA_SNOWFLAKE_EXTRA_COLUMNS` | unset (no extra columns) | comma-separated `NAME=SOURCE` pairs, e.g. `REASON=details:reason,ENVIRONMENT=static:prod`. `details:<key>` projects `models.AuditEvent.Details[key]` (JSON-encoded if not already a string; SQL `NULL` if the key is absent on a given row); `static:<value>` repeats a fixed value on every row. Column names go through the same identifier validation as `NETRA_SNOWFLAKE_TABLE` and may not reuse a fixed column name (`at`/`actor`/`action`/`target`/`message`/`details`) |
+| `NETRA_SNOWFLAKE_SYSCTL_ENABLED` | `false` | turns on the second, sysctl-audit-findings export loop, reusing this sink's Snowflake connection. Has no effect unless `NETRA_SNOWFLAKE_ACCOUNT` is also set |
+| `NETRA_SNOWFLAKE_SYSCTL_TABLE` | `NETRA_SYSCTL_AUDIT` | same identifier rules as `NETRA_SNOWFLAKE_TABLE` |
+| `NETRA_SNOWFLAKE_SYSCTL_INTERVAL` | `30s` | deliberately longer than the audit table's default — sysctl posture changes far less often than audit events |
+| `NETRA_SNOWFLAKE_SYSCTL_BATCH_SIZE` | `50` | rows per `INSERT` for the sysctl table |
+| `NETRA_SNOWFLAKE_SYSCTL_TOPN` | `100000` | passed as `topN` to `sysctlaudit.Build`. Deliberately much larger than that function's own HTTP-handler default of `50` (`GET /api/v1/ebpf/sysctl-audit?limit=`), so this export never silently truncates findings |
 
 There is no `NETRA_SNOWFLAKE_PASSWORD` and there will not be one —
 see **Mechanism** above.
@@ -163,6 +210,38 @@ in Snowflake, the pull export, and the syslog forwarder. `details` is
 loaded via `PARSE_JSON(...)`, so it queries as a native Snowflake
 `VARIANT`/`OBJECT`, not a JSON string column — no `PARSE_JSON()` needed
 at query time, just `details:someKey`.
+
+Any columns configured via `NETRA_SNOWFLAKE_EXTRA_COLUMNS` are added on
+top of this fixed set (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS <NAME>
+STRING`) and always land as plain `STRING` values — a `details:<key>`
+source that resolves to a non-string value is JSON-encoded into the
+column rather than type-inferred.
+
+**Sysctl-audit findings table** (only created if
+`NETRA_SNOWFLAKE_SYSCTL_ENABLED=true`):
+
+```sql
+CREATE TABLE IF NOT EXISTS NETRA_SYSCTL_AUDIT (
+  at             TIMESTAMP_NTZ NOT NULL,
+  node           STRING,
+  severity       STRING,
+  category       STRING,
+  name           STRING,
+  interface      STRING,
+  current_value  STRING,
+  expected_value STRING,
+  rationale      STRING,
+  informational  BOOLEAN
+)
+```
+
+Every row is one `models.SysctlAuditFinding` for one node, flattened out
+of `sysctlaudit.Build`'s response. `at` is *not* the finding's own
+timestamp (findings don't have one) — it is the `time.Now()` of the
+export tick that wrote it, so every row from one tick shares exactly the
+same `at`. Because the full current snapshot is re-exported every tick
+(see **Mechanism** above), the same `(node, category, name, interface)`
+key accumulates one row per tick over time, not one row per change.
 
 ## Example queries
 
@@ -214,6 +293,41 @@ QUALIFY ROW_NUMBER() OVER (
 ) = 1;
 ```
 
+**Latest-per-key view for sysctl findings** — note the partition key is
+the *opposite* shape from `NETRA_AUDIT_DEDUP` above: it deliberately
+**excludes** `at`, because `NETRA_SYSCTL_AUDIT` is a series of full
+snapshots taken at different instants (not discrete historical events
+that might be redelivered), so the useful query is "the single freshest
+observation per key," with `at` used only to pick that winner:
+
+```sql
+CREATE OR REPLACE VIEW NETRA_SYSCTL_AUDIT_DEDUP AS
+SELECT * FROM NETRA_SYSCTL_AUDIT
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY node, category, name, interface
+  ORDER BY at DESC
+) = 1;
+```
+
+## Tuning for lower latency
+
+This is **not** Snowpipe Streaming — `gosnowflake` has no Streaming
+Ingest API, and there's no other mature Go client for that protocol to
+depend on instead, so this feature does not attempt genuine streaming
+ingestion. What's available with the existing `INSERT`-based mechanism:
+
+- Set `NETRA_SNOWFLAKE_BATCH_SIZE=1` so each fresh event becomes its own
+  `INSERT` rather than waiting to accumulate a larger batch.
+- Set `NETRA_SNOWFLAKE_INTERVAL` as low as `1s`–`2s` as a practical
+  floor; `netrad` logs a one-time warning
+  (`"snowflake interval below recommended floor"`) below `1s` but still
+  honors it — this is guidance, not a hard limit.
+- Independent of both settings above, `Sink.Run` re-drains immediately
+  (rather than waiting for the next tick) whenever a full `BatchSize`
+  batch flushes successfully, up to 4 times per tick — so a burst of
+  audit activity drains faster than the configured interval alone would
+  suggest, without needing an aggressively short interval to keep up.
+
 ## Semantics and limitations
 
 - **At-least-once, not exactly-once.** The watermark (`lastAt`, the
@@ -239,15 +353,23 @@ QUALIFY ROW_NUMBER() OVER (
   events are only recoverable via a pull export until the next
   successful tick happens to include them (it won't, once they age out
   of the 200-event snapshot).
-- **Audit events only.** Flows, blocks, anomalies, and incidents are
-  not written to Snowflake — see `docs/siem-export.md`'s Snowflake
-  section for why (no continuous/watermarked source exists for them
-  inside `netrad` today, only the point-in-time pull export endpoints).
-- **No schema evolution.** The `CREATE TABLE IF NOT EXISTS` runs once
-  at connect time with a fixed column set. If a future Netra release
-  adds columns, existing tables will not be altered automatically —
-  that would need a real migration step, which this feature
-  deliberately does not attempt.
+- **Audit events and, optionally, sysctl-audit findings — not flows,
+  blocks, anomalies, or incidents.** Those are not written to Snowflake
+  — see `docs/siem-export.md`'s Snowflake section for why (no
+  continuous/watermarked source exists for them inside `netrad` today,
+  only the point-in-time pull export endpoints). Sysctl-audit findings
+  *are* continuous in the sense that `sysctlaudit.Build` can be called
+  on any interval, just not watermarked — see **Mechanism** above.
+- **Schema evolution is limited to adding configured extra columns.**
+  The base `CREATE TABLE IF NOT EXISTS` for each table runs with a fixed
+  column set and is never altered by this feature on its own. The one
+  exception: a column named in `NETRA_SNOWFLAKE_EXTRA_COLUMNS` is added
+  to the audit table via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` at
+  every startup, so adding a new extra column to config retroactively
+  widens an already-existing table with no manual migration step. This
+  does **not** extend to type changes, or dropped/renamed columns on
+  either table — those would still need a real migration step, which
+  this feature deliberately does not attempt.
 - **No column-level encryption or masking.** `details` is whatever the
   originating mutator already refuses to put payloads into (the same
   invariant `siem.Record`/CEF/syslog export already document) — this

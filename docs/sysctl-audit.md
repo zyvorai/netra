@@ -151,6 +151,18 @@ netractl ebpf sysctl-audit
 The dashboard exposes this under **Sysctl Audit** (cluster pulse card,
 outliers card, and per-node findings + per-category drill-down panels).
 
+## Export
+
+Netra vX.Y.Z adds an optional Snowflake export of this data
+(`NETRA_SNOWFLAKE_SYSCTL_ENABLED=true`), alongside the existing audit-log
+export — see [`docs/snowflake-export.md`](snowflake-export.md) for setup,
+configuration, and table schema. Because findings here have no timestamp
+of their own and are recomputed fresh on every call (see **Why this is
+stateless** above), the export re-sends the full current snapshot on
+every tick rather than watermarking; a `NETRA_SYSCTL_AUDIT_DEDUP` view
+(documented in the export doc) collapses that down to the latest
+observation per `(node, category, name, interface)`.
+
 ## Limits
 
 The baseline is a generic, established hardening/lifecycle baseline, not a

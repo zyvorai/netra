@@ -107,12 +107,32 @@ func (s *Sink) ensureTable(ctx context.Context) error {
 		message STRING,
 		details VARIANT
 	)`, s.cfg.Table)
-	_, err := s.db.ExecContext(ctx, ddl)
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("create table %s: %w", s.cfg.Table, err)
+	}
+	// The base table always has exactly the 6 fixed columns above, so
+	// this CREATE stays stable and idempotent regardless of config; any
+	// operator-configured extra columns are added on top of it here,
+	// letting a column added to config after the table already exists
+	// widen it in place with no separate migration step.
+	for _, ec := range s.cfg.ExtraColumns {
+		alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s STRING", s.cfg.Table, ec.Name)
+		if _, err := s.db.ExecContext(ctx, alter); err != nil {
+			return fmt.Errorf("add column %s.%s: %w", s.cfg.Table, ec.Name, err)
+		}
 	}
 	return nil
 }
+
+// maxImmediateRedrainsPerTick bounds how many times Run will call drain
+// back-to-back (instead of waiting for the next ticker fire) when a
+// drain fully flushes a batch as large as cfg.BatchSize — a signal there
+// may be more backlog immediately behind it. This is netra's substitute
+// for genuine Snowpipe Streaming: gosnowflake has no Streaming Ingest
+// API to build on, so instead of waiting out the rest of interval when
+// there's evident backlog, Run drains again right away, bounded so a
+// permanently busy audit stream can't turn this into a tight loop.
+const maxImmediateRedrainsPerTick = 4
 
 // Run polls fetch() on interval and loads audit events newer than the
 // last successful flush, batching up to cfg.BatchSize rows per insert.
@@ -131,24 +151,41 @@ func (s *Sink) Run(ctx context.Context, interval time.Duration, fetch func() []m
 	}
 	s.started = true
 	s.mu.Unlock()
+	if interval < time.Second {
+		s.log.Warn("snowflake interval below recommended floor", "interval", interval, "recommendedMinimum", time.Second)
+	}
+
+	drainUntilCaughtUp := func() {
+		for i := 0; i < maxImmediateRedrainsPerTick; i++ {
+			if !s.drain(ctx, fetch) {
+				return
+			}
+		}
+	}
 
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	s.drain(ctx, fetch)
+	drainUntilCaughtUp()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			s.drain(ctx, fetch)
+			drainUntilCaughtUp()
 		}
 	}
 }
 
-func (s *Sink) drain(ctx context.Context, fetch func() []models.AuditEvent) {
+// drain returns true when a full cfg.BatchSize batch of fresh events was
+// found and successfully flushed — a signal there may be more backlog
+// worth draining immediately, since fetch() (typically st.Audit(200)) is
+// a capped snapshot. It returns false otherwise, including after any
+// flush error, so a struggling warehouse gets backed off to the normal
+// ticker cadence instead of being hammered immediately.
+func (s *Sink) drain(ctx context.Context, fetch func() []models.AuditEvent) bool {
 	events := fetch()
 	if len(events) == 0 {
-		return
+		return false
 	}
 	s.mu.Lock()
 	cutoff := s.lastAt
@@ -156,8 +193,10 @@ func (s *Sink) drain(ctx context.Context, fetch func() []models.AuditEvent) {
 
 	fresh, _ := siem.NewSince(events, cutoff)
 	if len(fresh) == 0 {
-		return
+		return false
 	}
+	hadFullBatch := len(fresh) >= s.cfg.BatchSize
+	succeeded := true
 	// Track the newest timestamp actually committed, batch by batch, so
 	// a failure partway through still advances the watermark past what
 	// landed instead of re-sending already-committed rows next tick.
@@ -171,6 +210,7 @@ func (s *Sink) drain(ctx context.Context, fetch func() []models.AuditEvent) {
 		fresh = fresh[n:]
 		if err := s.flush(ctx, batch); err != nil {
 			s.log.Warn("snowflake flush failed", "error", err, "count", len(batch), "table", s.cfg.Table)
+			succeeded = false
 			break
 		}
 		for _, e := range batch {
@@ -186,14 +226,21 @@ func (s *Sink) drain(ctx context.Context, fetch func() []models.AuditEvent) {
 		}
 		s.mu.Unlock()
 	}
+	return hadFullBatch && succeeded
 }
 
 func (s *Sink) flush(ctx context.Context, events []models.AuditEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
+	cols := "at, actor, action, target, message, details"
+	rowPlaceholder := "?, ?, ?, ?, ?, PARSE_JSON(?)"
+	for _, ec := range s.cfg.ExtraColumns {
+		cols += ", " + ec.Name
+		rowPlaceholder += ", ?"
+	}
 	placeholders := make([]string, 0, len(events))
-	args := make([]any, 0, len(events)*6)
+	args := make([]any, 0, len(events)*(6+len(s.cfg.ExtraColumns)))
 	for _, e := range events {
 		details := "{}"
 		if len(e.Details) > 0 {
@@ -203,15 +250,54 @@ func (s *Sink) flush(ctx context.Context, events []models.AuditEvent) error {
 			}
 			details = string(b)
 		}
-		placeholders = append(placeholders, "(?, ?, ?, ?, ?, PARSE_JSON(?))")
 		args = append(args, e.At.UTC(), e.Actor, e.Action, e.Target, auditMessage(e), details)
+		for _, ec := range s.cfg.ExtraColumns {
+			v, err := extraColumnValue(ec, e)
+			if err != nil {
+				return fmt.Errorf("extra column %s: %w", ec.Name, err)
+			}
+			args = append(args, v)
+		}
+		placeholders = append(placeholders, "("+rowPlaceholder+")")
 	}
 	stmt := fmt.Sprintf(
-		"INSERT INTO %s (at, actor, action, target, message, details) VALUES %s",
-		s.cfg.Table, strings.Join(placeholders, ", "),
+		"INSERT INTO %s (%s) VALUES %s",
+		s.cfg.Table, cols, strings.Join(placeholders, ", "),
 	)
 	_, err := s.db.ExecContext(ctx, stmt, args...)
 	return err
+}
+
+// extraColumnValue resolves one configured ExtraColumn against one
+// event. Extra columns are always STRING-typed by design — non-string
+// Details values are JSON-encoded into the string rather than attempting
+// type inference, so typed/queryable JSON still goes through the
+// existing details VARIANT column; extra columns exist for fast
+// equality/ILIKE filtering and joins on one hot key. Source's shape is
+// already validated by Config.applyDefaults, so the default branch below
+// is unreachable in practice — it returns an error rather than panicking
+// only as defense in depth.
+func extraColumnValue(ec ExtraColumn, e models.AuditEvent) (any, error) {
+	switch {
+	case strings.HasPrefix(ec.Source, extraColumnStaticPrefix):
+		return strings.TrimPrefix(ec.Source, extraColumnStaticPrefix), nil
+	case strings.HasPrefix(ec.Source, extraColumnDetailsPrefix):
+		key := strings.TrimPrefix(ec.Source, extraColumnDetailsPrefix)
+		v, ok := e.Details[key]
+		if !ok || v == nil {
+			return nil, nil
+		}
+		if str, ok := v.(string); ok {
+			return str, nil
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		return string(b), nil
+	default:
+		return nil, fmt.Errorf("unrecognized source %q", ec.Source)
+	}
 }
 
 // auditMessage mirrors internal/siem's unexported helper of the same
