@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/capdrift"
+	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/chatops"
 	"github.com/zyvorai/netra/internal/detective"
 	"github.com/zyvorai/netra/internal/dnsdetect"
@@ -66,6 +67,7 @@ type Server struct {
 	consoleEnabled      bool
 	metricsData         *telemetry
 	captureHub          *captureHub
+	artifacts           *capture.ArtifactStore
 	dnsDetector         *dnsdetect.Detector
 	scanDetector        *scandetect.Detector
 	workloadInventory   *workloadInventoryCache
@@ -147,6 +149,13 @@ func (s *Server) WithScanDetect(d *scandetect.Detector) *Server {
 	return s
 }
 
+// WithArtifacts attaches the auto-capture PCAP store used by agentCaptureStream
+// and GET /api/v1/capture/artifacts/{id}. Nil disables server-side recording.
+func (s *Server) WithArtifacts(a *capture.ArtifactStore) *Server {
+	s.artifacts = a
+	return s
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -204,6 +213,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/vms/{node}/capture/ws", s.auth(http.HandlerFunc(s.proxyCaptureStream)))
 	mux.Handle("GET /api/v1/capture/status", s.auth(http.HandlerFunc(s.captureStatus)))
 	mux.Handle("GET /api/v1/capture/history", s.auth(http.HandlerFunc(s.captureHistory)))
+	mux.Handle("GET /api/v1/capture/artifacts/{id}", s.auth(http.HandlerFunc(s.captureArtifactDownload)))
 	mux.Handle("POST /api/v1/capture/bulk", s.auth(http.HandlerFunc(s.captureBulkStart)))
 	mux.Handle("GET /api/v1/agents/capture/stream", s.agentAuth(http.HandlerFunc(s.agentCaptureStream)))
 	mux.Handle("GET /api/v1/ebpf/workloads", s.auth(http.HandlerFunc(s.ebpfWorkloads)))

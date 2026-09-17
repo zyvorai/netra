@@ -3,6 +3,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zyvorai/netra/internal/alert"
+	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/models"
 )
 
@@ -253,7 +256,8 @@ func (s *Server) captureHistory(w http.ResponseWriter, r *http.Request) {
 // agent-initiated leg of the relay, authenticated the same way
 // POST /api/v1/agents/report already is (agentAuth). Every frame this
 // connection receives is broadcast to that node's captureSession verbatim;
-// this handler never parses a frame's contents.
+// when the active session is an auto-capture, frames are also appended to
+// a classic PCAP under the configured artifact store.
 func (s *Server) agentCaptureStream(w http.ResponseWriter, r *http.Request) {
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	if node == "" {
@@ -266,6 +270,19 @@ func (s *Server) agentCaptureStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	defer s.captureHub.drop(node)
+
+	var startedAt time.Time
+	if spec := s.store.Capture(node); spec != nil && alert.IsAutoCaptureRequestor(spec.Requestor) {
+		startedAt = spec.StartedAt
+		if s.artifacts != nil && s.artifacts.Enabled() {
+			src, kind, _ := capture.ParseAutoRequestor(spec.Requestor)
+			if _, err := s.artifacts.Begin(node, src, kind, "", startedAt); err != nil {
+				s.log.Warn("auto-capture artifact begin", "node", node, "error", err)
+			}
+		}
+	}
+	defer s.finalizeAutoArtifact(node, startedAt)
+
 	sess := s.captureHub.session(node)
 	for {
 		mt, data, err := conn.ReadMessage()
@@ -274,8 +291,49 @@ func (s *Server) agentCaptureStream(w http.ResponseWriter, r *http.Request) {
 		}
 		if mt == websocket.BinaryMessage {
 			sess.broadcast(data)
+			if s.artifacts != nil && !startedAt.IsZero() {
+				s.artifacts.WriteFrame(node, data)
+			}
 		}
 	}
+}
+
+func (s *Server) finalizeAutoArtifact(node string, startedAt time.Time) {
+	if s.artifacts == nil || !s.artifacts.Enabled() || startedAt.IsZero() {
+		return
+	}
+	meta, ok := s.artifacts.Finalize(node, time.Now().UTC())
+	if !ok || meta.ID == "" || meta.Frames == 0 {
+		return
+	}
+	s.store.PatchCaptureHistory(node, startedAt, func(e *models.CaptureHistoryEntry) {
+		e.ArtifactID = meta.ID
+		e.ArtifactBytes = meta.Bytes
+		e.ArtifactFrames = meta.Frames
+		e.TriggerSource = meta.TriggerSource
+		e.TriggerKind = meta.TriggerKind
+		if e.TriggerSubject == "" {
+			e.TriggerSubject = meta.TriggerSubject
+		}
+	})
+}
+
+// captureArtifactDownload handles GET /api/v1/capture/artifacts/{id}.
+func (s *Server) captureArtifactDownload(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" || s.artifacts == nil {
+		errorJSON(w, 404, "artifact not found")
+		return
+	}
+	f, meta, err := s.artifacts.Open(id)
+	if err != nil {
+		errorJSON(w, 404, "artifact not found")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pcap"`, meta.ID))
+	http.ServeContent(w, r, meta.ID+".pcap", meta.EndedAt, f)
 }
 
 // proxyCaptureStream handles GET /api/v1/vms/{node}/capture/ws — the

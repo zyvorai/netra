@@ -113,6 +113,29 @@ alerting:
 
 Dedup state is in-memory only and resets on process restart or HA failover.
 
+## Auto-capture
+
+When `NETRA_AUTO_CAPTURE=true`, the same alert poller that feeds notify
+channels also starts filtered packet captures on critical drop/congestion
+signals and persists PCAPs for later diagnosis. See `docs/capture.md`
+(section "Auto-capture on heavy load / packet drops").
+
+| Env | Default | Notes |
+|---|---|---|
+| `NETRA_AUTO_CAPTURE` | unset (off) | `true` enables |
+| `NETRA_AUTO_CAPTURE_DURATION` | `60s` | max 5m |
+| `NETRA_AUTO_CAPTURE_COOLDOWN` | `10m` | per-node |
+| `NETRA_AUTO_CAPTURE_PROTOCOL` | `tcp` | fallback filter |
+| `NETRA_AUTO_CAPTURE_MAX_PPS` | `1000` | |
+| `NETRA_AUTO_CAPTURE_MAX_CONCURRENT` | `5` | |
+| `NETRA_AUTO_CAPTURE_DIR` | `/var/lib/netra/auto-capture` | PCAP directory |
+| `NETRA_AUTO_CAPTURE_MAX_ARTIFACTS` | `50` | prune oldest |
+| `NETRA_AUTO_CAPTURE_MAX_TOTAL_MB` | `1024` | |
+| `NETRA_AUTO_CAPTURE_MAX_SESSION_MB` | `50` | stop writing beyond this |
+
+Helm: `alerting.autoCapture.*`. Auto-capture can run even when no notify
+channels are configured (the poller still evaluates findings).
+
 ## Not included
 
 - No alert history / ack / silence API or UI.

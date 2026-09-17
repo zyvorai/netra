@@ -209,6 +209,7 @@ spec:
         {{- end }}
         {{- end }}
         {{- end }}
+        {{- if or .Values.alerting.enabled .Values.alerting.autoCapture.enabled }}
         {{- if .Values.alerting.enabled }}
         - name: NETRA_ALERT_POLL_INTERVAL
           value: {{ .Values.alerting.pollInterval | quote }}
@@ -232,8 +233,31 @@ spec:
           value: {{ .Values.alerting.webhooksJson | quote }}
         {{- end }}
         {{- end }}
+        {{- if .Values.alerting.autoCapture.enabled }}
+        - name: NETRA_AUTO_CAPTURE
+          value: "true"
+        - name: NETRA_AUTO_CAPTURE_DURATION
+          value: {{ .Values.alerting.autoCapture.duration | quote }}
+        - name: NETRA_AUTO_CAPTURE_COOLDOWN
+          value: {{ .Values.alerting.autoCapture.cooldown | quote }}
+        - name: NETRA_AUTO_CAPTURE_PROTOCOL
+          value: {{ .Values.alerting.autoCapture.protocol | quote }}
+        - name: NETRA_AUTO_CAPTURE_MAX_PPS
+          value: {{ .Values.alerting.autoCapture.maxPps | quote }}
+        - name: NETRA_AUTO_CAPTURE_MAX_CONCURRENT
+          value: {{ .Values.alerting.autoCapture.maxConcurrent | quote }}
+        - name: NETRA_AUTO_CAPTURE_DIR
+          value: {{ .Values.alerting.autoCapture.dir | quote }}
+        - name: NETRA_AUTO_CAPTURE_MAX_ARTIFACTS
+          value: {{ .Values.alerting.autoCapture.maxArtifacts | quote }}
+        - name: NETRA_AUTO_CAPTURE_MAX_TOTAL_MB
+          value: {{ .Values.alerting.autoCapture.maxTotalMb | quote }}
+        - name: NETRA_AUTO_CAPTURE_MAX_SESSION_MB
+          value: {{ .Values.alerting.autoCapture.maxSessionMb | quote }}
+        {{- end }}
+        {{- end }}
         resources: {{- toYaml .Values.resources | nindent 10 }}
-        {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
+        {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled .Values.alerting.autoCapture.enabled }}
         volumeMounts:
         {{- if .Values.tls.enabled }}
         - {name: tls-certs, mountPath: /certs, readOnly: true}
@@ -241,6 +265,10 @@ spec:
         {{- if .Values.persistence.enabled }}
         - name: state
           mountPath: /var/lib/netra
+        {{- end }}
+        {{- if and .Values.alerting.autoCapture.enabled (not .Values.persistence.enabled) }}
+        - name: auto-capture
+          mountPath: {{ .Values.alerting.autoCapture.dir | quote }}
         {{- end }}
         {{- if .Values.gitops.enabled }}
         - name: gitops-manifests
@@ -272,7 +300,7 @@ spec:
             {{- end }}
           initialDelaySeconds: 5
           periodSeconds: 10
-      {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
+      {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled .Values.alerting.autoCapture.enabled }}
       volumes:
       {{- if .Values.tls.enabled }}
       - {name: tls-certs, emptyDir: {}}
@@ -281,6 +309,9 @@ spec:
       - name: state
         persistentVolumeClaim:
           claimName: {{ default "netra-state" .Values.persistence.existingClaim }}
+      {{- end }}
+      {{- if and .Values.alerting.autoCapture.enabled (not .Values.persistence.enabled) }}
+      - {name: auto-capture, emptyDir: {}}
       {{- end }}
       {{- if .Values.gitops.enabled }}
       # An emptyDir shared with an operator-supplied git-sync-style sidecar

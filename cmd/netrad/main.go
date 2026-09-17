@@ -17,6 +17,7 @@ import (
 
 	"github.com/zyvorai/netra/internal/alert"
 	"github.com/zyvorai/netra/internal/api"
+	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/dnsdetect"
 	"github.com/zyvorai/netra/internal/gitops"
 	"github.com/zyvorai/netra/internal/ha"
@@ -64,6 +65,7 @@ func main() {
 		dispatcher.Start(envInt("NETRA_ALERT_WORKERS", 2))
 		defer dispatcher.Stop()
 	}
+	artifacts := buildArtifactStore(log)
 	gitopsCfg, gitopsEnabled := buildGitOps()
 
 	stateFile := strings.TrimSpace(os.Getenv("NETRA_STATE_FILE"))
@@ -73,7 +75,7 @@ func main() {
 			log.Error("HA startup refused", "reason", "NETRA_STATE_FILE is required in HA mode")
 			os.Exit(1)
 		}
-		runHA(ctx, log, k, h, stateFile, dispatcher, alertCfg, gitopsCfg, gitopsEnabled)
+		runHA(ctx, log, k, h, stateFile, dispatcher, alertCfg, artifacts, gitopsCfg, gitopsEnabled)
 		return
 	}
 
@@ -90,16 +92,16 @@ func main() {
 	}
 	dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 	scanDet, scanInterval, scanEnabled := buildScanDetect()
-	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).Handler()
+	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithArtifacts(artifacts).Handler()
 
-	if dispatcher != nil {
+	if shouldRunAlertPoller(dispatcher) {
 		var pollerWG sync.WaitGroup
 		pctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		pollerWG.Add(1)
 		go func() {
 			defer pollerWG.Done()
-			alert.New(log, st, dispatcher.Publish, alertCfg, k.ListPods).Run(pctx)
+			newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods).Run(pctx)
 		}()
 		defer pollerWG.Wait()
 	}
@@ -349,6 +351,64 @@ func buildAlerting(log *slog.Logger) (*notify.Dispatcher, alert.Config) {
 	return d, cfg
 }
 
+func autoCaptureEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_AUTO_CAPTURE")), "true")
+}
+
+func shouldRunAlertPoller(dispatcher *notify.Dispatcher) bool {
+	return dispatcher != nil || autoCaptureEnabled()
+}
+
+func buildArtifactStore(log *slog.Logger) *capture.ArtifactStore {
+	if !autoCaptureEnabled() {
+		return nil
+	}
+	dir := strings.TrimSpace(os.Getenv("NETRA_AUTO_CAPTURE_DIR"))
+	if dir == "" {
+		dir = capture.DefaultArtifactDir
+	}
+	maxArt := envInt("NETRA_AUTO_CAPTURE_MAX_ARTIFACTS", capture.DefaultMaxArtifacts)
+	maxTotal := int64(envInt("NETRA_AUTO_CAPTURE_MAX_TOTAL_MB", int(capture.DefaultMaxTotalBytes/(1<<20)))) << 20
+	maxSession := int64(envInt("NETRA_AUTO_CAPTURE_MAX_SESSION_MB", int(capture.DefaultMaxSessionBytes/(1<<20)))) << 20
+	store, err := capture.NewArtifactStore(dir, maxArt, maxTotal, maxSession)
+	if err != nil {
+		log.Error("auto-capture artifact store", "error", err)
+		os.Exit(1)
+	}
+	log.Info("auto-capture artifact store ready", "dir", dir)
+	return store
+}
+
+func newAlertPoller(log *slog.Logger, st *store.Store, dispatcher *notify.Dispatcher, alertCfg alert.Config, listPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *alert.Poller {
+	publish := func(ev notify.Event) bool {
+		if dispatcher == nil {
+			return true
+		}
+		return dispatcher.Publish(ev)
+	}
+	p := alert.New(log, st, publish, alertCfg, listPods)
+	if !autoCaptureEnabled() {
+		return p
+	}
+	cfg := alert.AutoConfig{
+		Enabled:       true,
+		Duration:      envDuration("NETRA_AUTO_CAPTURE_DURATION", 60*time.Second),
+		Cooldown:      envDuration("NETRA_AUTO_CAPTURE_COOLDOWN", 10*time.Minute),
+		Protocol:      env("NETRA_AUTO_CAPTURE_PROTOCOL", "tcp"),
+		MaxPPS:        uint32(envInt("NETRA_AUTO_CAPTURE_MAX_PPS", 1000)),
+		MaxConcurrent: envInt("NETRA_AUTO_CAPTURE_MAX_CONCURRENT", 5),
+	}
+	auto := alert.NewAutoCapture(log, cfg,
+		func(spec models.CaptureSpec) models.CaptureSpec {
+			return st.SetCapture(spec, spec.Requestor)
+		},
+		func(node string) *models.CaptureSpec { return st.Capture(node) },
+		func() int { return len(st.Captures()) },
+		publish,
+	)
+	return p.WithAutoCapture(auto)
+}
+
 // buildDNSDetect reads NETRA_DNSDETECT_* env vars and constructs a
 // dnsdetect.Detector when enabled. Off by default via a plain feature
 // flag — matching gitops/chatops's "enabled: false" shape rather than a
@@ -401,7 +461,7 @@ func buildScanDetect() (*scandetect.Detector, time.Duration, bool) {
 	return scandetect.New(cfg), interval, true
 }
 
-func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *notify.Dispatcher, alertCfg alert.Config, gitopsCfg gitops.Config, gitopsEnabled bool) {
+func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *notify.Dispatcher, alertCfg alert.Config, artifacts *capture.ArtifactStore, gitopsCfg gitops.Config, gitopsEnabled bool) {
 	identity := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
 	if identity == "" {
 		identity, _ = os.Hostname()
@@ -428,7 +488,7 @@ func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Clie
 	electionWG.Add(1)
 	go func() {
 		defer electionWG.Done()
-		electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod, dispatcher, alertCfg, gitopsCfg, gitopsEnabled)
+		electionLoop(ctx, log, k, h, gate, stateFile, namespace, leaseName, identity, leaseDuration, renewDeadline, retryPeriod, dispatcher, alertCfg, artifacts, gitopsCfg, gitopsEnabled)
 	}()
 	runHTTP(ctx, log, gate, true, true)
 	electionWG.Wait()
@@ -444,6 +504,7 @@ func electionLoop(
 	leaseDuration, renewDeadline, retryPeriod time.Duration,
 	dispatcher *notify.Dispatcher,
 	alertCfg alert.Config,
+	artifacts *capture.ArtifactStore,
 	gitopsCfg gitops.Config,
 	gitopsEnabled bool,
 ) {
@@ -554,14 +615,14 @@ func electionLoop(
 		}
 		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 		scanDet, scanInterval, scanEnabled := buildScanDetect()
-		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).Handler())
-		if dispatcher != nil {
+		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithArtifacts(artifacts).Handler())
+		if shouldRunAlertPoller(dispatcher) {
 			pctx, cancel := context.WithCancel(ctx)
 			pollerCancel = cancel
 			pollerWG.Add(1)
 			go func() {
 				defer pollerWG.Done()
-				alert.New(log, st, dispatcher.Publish, alertCfg, k.ListPods).Run(pctx)
+				newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods).Run(pctx)
 			}()
 		}
 		if gr != nil {

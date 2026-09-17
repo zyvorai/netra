@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Auto-capture on critical drop/congestion.** Opt-in (`NETRA_AUTO_CAPTURE`):
+  the alert poller starts a filtered, time-bounded capture when kerneldiag
+  critical findings, critical drop-rate spikes, or critical softnet-drops
+  fire; frames are persisted as classic PCAPs under
+  `NETRA_AUTO_CAPTURE_DIR`, linked from capture history
+  (`GET /api/v1/capture/artifacts/{id}`), and announced via a
+  `source=auto-capture` notify event. Helm `alerting.autoCapture`; Capture
+  history shows an Auto badge + Download. CI: dedicated auto-capture unit
+  tests, race on `alert`/`capture`, Helm default-off plus enabled env and
+  emptyDir-without-PVC volume gates.
 - **CI coverage for the Snowflake sink's real network/auth path.** `internal/snowflakesink`'s existing tests all build a `Sink` around an already-open, already-authenticated `*sql.DB` (via sqlmock), so `New`'s own DSN construction, JWT key-pair signing, and the `gosnowflake` driver's real HTTP handshake were never exercised in CI. Added a minimal fake Snowflake REST server (`fake_server_test.go`) implementing just enough of `/session/v1/login-request` and `/queries/v1/query-request` for the real (non-mocked) driver to complete a login and run `ensureTable`'s DDL against it; the new test also parses and verifies the JWT `New()` sends is correctly signed by the configured private key with the exact `iss`/`sub` claim shape Snowflake's key-pair auth expects. `New` gained an unexported `dialTarget` seam (zero value = real Snowflake host, used by the only production caller) so tests can point the DSN at the fake server without touching the public `Config` API.
 - **Multi-channel alerting framework.** Extends the existing alert poller with
   `internal/notify`: typed channels for webhook, SMTP email, Slack (Incoming

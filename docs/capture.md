@@ -49,6 +49,34 @@ Everything below is client-side on top of the API/wire format above — none of 
 - **Live throughput, presets, export.** A packets/sec and bytes/sec sparkline is computed from the buffered frames' own timestamps. Named filter presets (`{backend, protocol, host, port, duration}`) persist to the browser's `localStorage`. The currently-filtered decoded rows export to `.json`/`.csv` alongside the existing `.pcap` download.
 - **Congestion Map integration.** Each Congestion Map per-node finding has a "Capture on {node}" button that pre-selects that node on this page. Separately, this page polls the same `GET /api/v1/ebpf/kernel-network` endpoint the Congestion Map uses and shows a dismissible "Suggested capture" banner when a node has a live critical finding — evidence gathered close to the moment of an incident, not only after.
 
+## Auto-capture on heavy load / packet drops
+
+Opt-in (`NETRA_AUTO_CAPTURE=true` / Helm `alerting.autoCapture.enabled`).
+When enabled, the alert poller automatically starts a **filtered**,
+time-bounded capture on critical drop/congestion signals:
+
+| Trigger | Source / kind |
+|---------|----------------|
+| Congestion Map critical finding | `kerneldiag` / layer |
+| Kernel or policy drop-rate spike (critical) | `dropdiag-baseline` / `kernel-drop-spike` or `policy-drop-spike` |
+| Softnet drops at critical | `dropdiag` / `softnet-drop` |
+
+Defaults: 60s duration, 10m per-node cooldown, protocol `tcp` (policy spikes
+may enrich host/port from the top `PolicyDropStat`), max 1000 PPS, max 5
+concurrent auto sessions. Requestor is tagged `auto-capture:{source}/{kind}`
+in the audit log.
+
+Frames for auto-capture sessions are written to classic PCAP files under
+`NETRA_AUTO_CAPTURE_DIR` (default `/var/lib/netra/auto-capture`), retained
+with count/size caps, and listed on `GET /api/v1/capture/history` with an
+`artifactId`. Download: `GET /api/v1/capture/artifacts/{id}`.
+
+A notify event (`source=auto-capture`, `kind=started`) is published when a
+session begins (delivered through configured alert channels).
+
+**HA note:** artifact files are local to the leader process unless the
+directory sits on shared RWX storage alongside the state file.
+
 ## v1 scope notes
 
 - AF_PACKET's cBPF filter mirrors `bpf/netra_capture.c`'s `spec_matches()` filter semantics (family/protocol/host/port, host and port each matched against source *or* destination) but, like the eBPF path's own `parse_headers`, does not walk IPv6 extension headers — a v6 packet with extension headers before its L4 header won't have its port matched. Not a new limitation introduced by AF_PACKET; it matches the existing eBPF behavior exactly.

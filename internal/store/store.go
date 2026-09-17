@@ -335,8 +335,7 @@ func (s *Store) Captures() []models.CaptureSpec {
 }
 
 // recordCaptureHistoryLocked appends one ended session to the bounded
-// capture-history log (metadata only — see captureHistory's doc comment).
-// Callers must hold s.mu.
+// capture-history log. Callers must hold s.mu.
 func (s *Store) recordCaptureHistoryLocked(spec models.CaptureSpec, reason string) {
 	s.captureHistory = append(s.captureHistory, models.CaptureHistoryEntry{
 		Node: spec.Node, Backend: spec.Backend, Protocol: spec.Protocol, Host: spec.Host, Port: spec.Port,
@@ -345,6 +344,35 @@ func (s *Store) recordCaptureHistoryLocked(spec models.CaptureSpec, reason strin
 	if len(s.captureHistory) > 500 {
 		s.captureHistory = append([]models.CaptureHistoryEntry(nil), s.captureHistory[len(s.captureHistory)-500:]...)
 	}
+}
+
+// PatchCaptureHistory finds the newest history entry for node whose
+// StartedAt matches (equal UTC instant) and applies fn. Returns false if
+// no matching entry exists. Used to attach auto-capture PCAP metadata
+// after the agent stream finalizes.
+func (s *Store) PatchCaptureHistory(node string, startedAt time.Time, fn func(*models.CaptureHistoryEntry)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start := startedAt.UTC()
+	for i := len(s.captureHistory) - 1; i >= 0; i-- {
+		e := &s.captureHistory[i]
+		if e.Node != node {
+			continue
+		}
+		if e.StartedAt.UTC().Equal(start) || e.StartedAt.UTC().Sub(start).Abs() < time.Second {
+			fn(e)
+			return true
+		}
+	}
+	// Fallback: newest entry for this node (stream may finalize slightly off).
+	for i := len(s.captureHistory) - 1; i >= 0; i-- {
+		e := &s.captureHistory[i]
+		if e.Node == node {
+			fn(e)
+			return true
+		}
+	}
+	return false
 }
 
 // CaptureHistory returns the most recent ended capture sessions, newest

@@ -115,6 +115,19 @@ alerting:
   # Legacy webhook-only JSON (ignored when channelsJson / secret is set).
   webhooksJson: ""
   existingSecret: ""
+  # Opt-in: auto-start filtered capture on critical drop/congestion signals
+  # and persist PCAPs under dir. See docs/capture.md / docs/alerting.md.
+  autoCapture:
+    enabled: false
+    duration: "60s"
+    cooldown: "10m"
+    protocol: tcp
+    maxPps: 1000
+    maxConcurrent: 5
+    dir: /var/lib/netra/auto-capture
+    maxArtifacts: 50
+    maxTotalMb: 1024
+    maxSessionMb: 50
 service:
   type: ClusterIP
   port: 30870

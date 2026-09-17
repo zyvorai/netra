@@ -131,6 +131,9 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"DELETE", "/api/v1/vms/node-1/capture"},
 		{"GET", "/api/v1/vms/node-1/capture/ws"},
 		{"GET", "/api/v1/capture/status"},
+		{"GET", "/api/v1/capture/history"},
+		{"GET", "/api/v1/capture/artifacts/x"},
+		{"POST", "/api/v1/capture/bulk"},
 		{"GET", "/livez"},
 	}
 	for _, tc := range paths {

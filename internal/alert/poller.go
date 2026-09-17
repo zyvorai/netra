@@ -113,6 +113,7 @@ type Poller struct {
 	dedup        *dedupState
 	restarts     *restartTracker
 	dropBaseline *dropBaselineTracker
+	auto         *AutoCapture
 }
 
 // New returns a Poller bound to st (via st.AgentStatuses/st.RecordHealthSample/
@@ -137,6 +138,13 @@ func New(log *slog.Logger, st *store.Store, publish func(notify.Event) bool, cfg
 		restarts:           newRestartTracker(),
 		dropBaseline:       newDropBaselineTracker(),
 	}
+}
+
+// WithAutoCapture attaches an optional AutoCapture collaborator. Nil disables
+// auto-capture (the default). Safe to call before Run.
+func (p *Poller) WithAutoCapture(a *AutoCapture) *Poller {
+	p.auto = a
+	return p
 }
 
 // Run blocks until ctx is cancelled, polling at cfg.Interval. It evaluates
@@ -169,6 +177,9 @@ func (p *Poller) tick() {
 	for _, ev := range events {
 		if !p.publish(ev) {
 			p.log.Warn("alert dropped: dispatcher queue full", "source", ev.Source, "kind", ev.Kind, "subject", ev.Subject)
+		}
+		if p.auto != nil {
+			p.auto.MaybeStart(now, ev, agents)
 		}
 	}
 }
@@ -239,7 +250,7 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []n
 			}
 			ev := notify.Event{
 				Source: "dropdiag-baseline", Kind: "kernel-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
-				Subject: a.Node + "/" + name,
+				Subject: a.Node + "/" + name, Node: a.Node,
 				Message: fmt.Sprintf("kernel drops (%s) on %s spiked by %d in the last interval", name, a.Node, delta),
 				Value:   float64(delta), Timestamp: now,
 			}
@@ -259,7 +270,7 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []n
 			}
 			ev := notify.Event{
 				Source: "dropdiag-baseline", Kind: "policy-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
-				Subject: a.Node + "/" + name,
+				Subject: a.Node + "/" + name, Node: a.Node,
 				Message: fmt.Sprintf("policy drops (%s) on %s spiked by %d packets in the last interval", name, a.Node, delta),
 				Value:   float64(delta), Timestamp: now,
 			}
@@ -298,6 +309,7 @@ func (p *Poller) kernelNetworkEvents(now time.Time, agents []models.AgentStatus)
 			ev := notify.Event{
 				Source: "kerneldiag", Kind: f.Layer, Severity: f.Severity,
 				Subject:   n.Node + "/" + f.Layer,
+				Node:      n.Node,
 				Message:   fmt.Sprintf("%s on %s: %s", f.Signal, n.Node, f.Explanation),
 				Timestamp: now,
 			}

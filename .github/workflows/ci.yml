@@ -21,7 +21,7 @@ jobs:
       # lease-race + mid-test handoff a few independent shots under the
       # race detector rather than relying on a single pass.
       run: go test ./cmd/netrad/... -run TestElectionLoopNeverDoubleShipsPushSinks -race -count=5
-    - name: Race-detect the recent detector/sink batch (denysim, dnsdetect, scandetect, tlsfp, slo, snowflakesink, notify/alert)
+    - name: Race-detect the recent detector/sink/notify/auto-capture batch
       # These packages are new and hold mutex-protected state shared between
       # a background poller goroutine and an HTTP handler (the same shape
       # the netrad race step above exists for) — scoped here rather than
@@ -29,8 +29,14 @@ jobs:
       # unrelated pre-existing race elsewhere in the module can't turn this
       # batch's CI red for a reason having nothing to do with it.
       # notify/alert/webhook: multi-channel dispatcher fans events to channels
-      # concurrently from poller workers (same mutex+queue shape).
-      run: go test ./internal/denysim/... ./internal/dnsdetect/... ./internal/scandetect/... ./internal/tlsfp/... ./internal/slo/... ./internal/snowflakesink/... ./internal/notify/... ./internal/alert/... ./internal/webhook/... -race
+      # concurrently from poller workers. capture: auto-capture ArtifactStore
+      # writes PCAPs while the poller may start sessions on the same node.
+      run: go test ./internal/denysim/... ./internal/dnsdetect/... ./internal/scandetect/... ./internal/tlsfp/... ./internal/slo/... ./internal/snowflakesink/... ./internal/notify/... ./internal/alert/... ./internal/webhook/... ./internal/capture/... -race
+    - name: Auto-capture unit tests (triggers, cooldown, PCAP artifact store)
+      # Focused gate for the opt-in heavy-load auto-capture path so a
+      # regression in ShouldTrigger / ArtifactStore prune can't hide inside
+      # the broader package race batch above.
+      run: go test ./internal/alert/... ./internal/capture/... -run 'ShouldTrigger|AutoCapture|ArtifactStore|ParseAutoRequestor' -count=1
     - run: go vet ./...
     - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor ./cmd/netra-mcp
   web:
@@ -92,6 +98,12 @@ jobs:
       run: |
         if grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra.yaml || grep -q 'name: NETRA_ALERT_WEBHOOKS' /tmp/netra.yaml || grep -q 'name: NETRA_ALERT_POLL_INTERVAL' /tmp/netra.yaml; then
           echo "alerting env vars unexpectedly rendered when alerting.enabled=false" >&2
+          exit 1
+        fi
+    - name: Default render must not enable auto-capture
+      run: |
+        if grep -q 'name: NETRA_AUTO_CAPTURE' /tmp/netra.yaml; then
+          echo "auto-capture env unexpectedly rendered when alerting.autoCapture.enabled=false" >&2
           exit 1
         fi
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
@@ -158,6 +170,35 @@ jobs:
         grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra-alerting-secret.yaml
         grep -q 'secretKeyRef' /tmp/netra-alerting-secret.yaml
         grep -q 'key: channels-json' /tmp/netra-alerting-secret.yaml
+    - name: Render auto-capture when enabled
+      run: |
+        helm template autocap helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set alerting.autoCapture.enabled=true \
+          >/tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE' /tmp/netra-autocapture.yaml
+        awk '/name: NETRA_AUTO_CAPTURE$/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_DIR' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_DURATION' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_COOLDOWN' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_MAX_PPS' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_MAX_CONCURRENT' /tmp/netra-autocapture.yaml
+        grep -q 'name: NETRA_AUTO_CAPTURE_MAX_ARTIFACTS' /tmp/netra-autocapture.yaml
+        # With default persistence.enabled, PCAPs land under the state PVC
+        # (/var/lib/netra/auto-capture). emptyDir is only used without PVC.
+        helm template autocap-ed helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set alerting.autoCapture.enabled=true \
+          --set persistence.enabled=false \
+          >/tmp/netra-autocapture-ed.yaml
+        grep -q 'name: auto-capture' /tmp/netra-autocapture-ed.yaml
+        grep -q 'mountPath: "/var/lib/netra/auto-capture"' /tmp/netra-autocapture-ed.yaml
+        # Auto-capture alone (no notify channels) must still render — the
+        # poller runs when NETRA_AUTO_CAPTURE=true even without webhooks.
+        if grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra-autocapture.yaml || grep -q 'name: NETRA_ALERT_WEBHOOKS' /tmp/netra-autocapture.yaml; then
+          echo "auto-capture-only render unexpectedly set alert channel env" >&2
+          exit 1
+        fi
     - name: Standalone render must expose workload attribution safely
       run: |
         grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml

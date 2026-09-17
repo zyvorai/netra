@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, authHeaders } from '../api';
 
 type HistoryEntry = {
   node: string;
@@ -11,6 +11,11 @@ type HistoryEntry = {
   startedAt?: string;
   endedAt?: string;
   reason?: string;
+  artifactId?: string;
+  artifactBytes?: number;
+  artifactFrames?: number;
+  triggerSource?: string;
+  triggerKind?: string;
 };
 
 const PAGE_SIZE = 20;
@@ -23,8 +28,26 @@ function fmtDuration(startedAt?: string, endedAt?: string): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`;
 }
 
-// CaptureHistory lists already-ended capture sessions (metadata only, no
-// packet bytes — see models.CaptureHistoryEntry's doc comment for why).
+function isAuto(e: HistoryEntry): boolean {
+  return !!e.artifactId || !!(e.requestor && e.requestor.startsWith('auto-capture'));
+}
+
+async function downloadArtifact(id: string) {
+  const res = await fetch(`/api/v1/capture/artifacts/${encodeURIComponent(id)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`download failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${id}.pcap`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// CaptureHistory lists already-ended capture sessions. Manual captures are
+// metadata-only; auto-capture rows may include a downloadable PCAP artifact.
 export default function CaptureHistory({ onRepeat }: { onRepeat: (e: HistoryEntry) => void }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [page, setPage] = useState(0);
@@ -59,11 +82,29 @@ export default function CaptureHistory({ onRepeat }: { onRepeat: (e: HistoryEntr
           </div>
           {entries.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((e, i) => (
             <div className="datarow capture" key={i}>
-              <span>{e.node}</span>
+              <span>
+                {e.node}
+                {isAuto(e) && <small> · Auto{e.triggerKind ? ` (${e.triggerSource}/${e.triggerKind})` : ''}</small>}
+              </span>
               <span>{e.protocol || 'any'}{e.host ? ` · ${e.host}` : ''}{e.port ? `:${e.port}` : ''}</span>
               <span>{e.backend === 'afpacket' ? 'AF_PACKET' : 'eBPF'}</span>
               <span>{e.startedAt ? new Date(e.startedAt).toLocaleString() : '—'} → {e.endedAt ? new Date(e.endedAt).toLocaleTimeString() : '—'}<br /><small>{fmtDuration(e.startedAt, e.endedAt)}</small></span>
-              <span>{e.requestor || 'unknown'} · {e.reason || '—'}<br /><button className="btn-secondary" onClick={() => onRepeat(e)}>Repeat</button></span>
+              <span>
+                {e.requestor || 'unknown'} · {e.reason || '—'}
+                <br />
+                <button className="btn-secondary" onClick={() => onRepeat(e)}>Repeat</button>
+                {e.artifactId && (
+                  <>
+                    {' '}
+                    <button
+                      className="btn-secondary"
+                      onClick={() => downloadArtifact(e.artifactId!).catch(() => {})}
+                    >
+                      Download{e.artifactFrames ? ` (${e.artifactFrames} pkt)` : ''}
+                    </button>
+                  </>
+                )}
+              </span>
             </div>
           ))}
         </div>

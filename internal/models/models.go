@@ -203,9 +203,11 @@ type CaptureStatusResponse struct {
 	Active []CaptureSpec `json:"active"`
 }
 
-// CaptureHistoryEntry records one capture session that has already ended —
-// metadata only, never packet bytes (those are relayed live and never held
-// server-side, see internal/api/capture.go's captureHub doc comment).
+// CaptureHistoryEntry records one capture session that has already ended.
+// Packet bytes for manual captures are never held server-side (live relay
+// only). Auto-capture sessions (requestor prefix "auto-capture:") may also
+// persist a classic PCAP under NETRA_AUTO_CAPTURE_DIR; ArtifactID then
+// points at GET /api/v1/capture/artifacts/{id}.
 // Backs GET /api/v1/capture/history and the Capture page's history table.
 type CaptureHistoryEntry struct {
 	Node      string    `json:"node"`
@@ -216,7 +218,14 @@ type CaptureHistoryEntry struct {
 	Requestor string    `json:"requestor,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	EndedAt   time.Time `json:"endedAt"`
-	Reason    string    `json:"reason"` // "manual" | "expired"
+	Reason    string    `json:"reason"` // "manual" | "expired" | "auto-complete"
+	// Auto-capture extras (empty for operator-started sessions).
+	ArtifactID     string `json:"artifactId,omitempty"`
+	ArtifactBytes  int64  `json:"artifactBytes,omitempty"`
+	ArtifactFrames int64  `json:"artifactFrames,omitempty"`
+	TriggerSource  string `json:"triggerSource,omitempty"`
+	TriggerKind    string `json:"triggerKind,omitempty"`
+	TriggerSubject string `json:"triggerSubject,omitempty"`
 }
 
 // CaptureHistoryResponse backs GET /api/v1/capture/history.

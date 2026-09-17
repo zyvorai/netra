@@ -202,7 +202,7 @@ func TestElectionLoopNeverDoubleShipsPushSinks(t *testing.T) {
 		gate := ha.NewGate(identity, "test")
 		electionLoop(ctx, log, k, nil, gate, stateFile, "netra", "controller", identity,
 			leaseDuration, renewDeadline, retryPeriod,
-			nil, alert.Config{}, gitops.Config{}, false)
+			nil, alert.Config{}, nil, gitops.Config{}, false)
 	}
 
 	parent, cancelAll := context.WithTimeout(context.Background(), 700*time.Millisecond)
