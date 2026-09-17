@@ -377,6 +377,10 @@ Build requirements are Go 1.27, Node 22 and Clang/LLVM with a BPF target.
 ## Build
 
 ```bash
+make build            # web + binaries into ./bin
+make install          # netractl → /usr/local/bin (or PREFIX=$HOME/.local)
+make uninstall
+# or manually:
 npm --prefix web install
 npm --prefix web run build
 go mod tidy
