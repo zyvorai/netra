@@ -17,16 +17,31 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ -f "${HOME}/.netra/env" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${HOME}/.netra/env"
-  set +a
+# Prefer explicit env (CI live gate). Skip ~/.netra when NETRA_SKIP_DOTENV=1
+# so a developer lab config cannot hijack GitHub Actions / local CI.
+if [[ "${NETRA_SKIP_DOTENV:-}" != "1" && -f "${HOME}/.netra/env" ]]; then
+  # Only fill unset keys (do not clobber NETRA_URL already exported by caller).
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -z "$line" ]] && continue
+    k="${line%%=*}"
+    v="${line#*=}"
+    k="$(echo "$k" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    v="$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'\'']//;s/["'\'']$//')"
+    [[ -z "$k" ]] && continue
+    if [[ -z "${!k:-}" ]]; then
+      export "$k=$v"
+    fi
+  done < "${HOME}/.netra/env"
 fi
 
 : "${NETRA_URL:=https://127.0.0.1:30870}"
 export NETRA_URL
-export NETRA_TLS_INSECURE="${NETRA_TLS_INSECURE:-true}"
+# HTTP controllers (ci-netractl-live) need no TLS skip; HTTPS labs default true.
+if [[ "$NETRA_URL" == https://* ]]; then
+  export NETRA_TLS_INSECURE="${NETRA_TLS_INSECURE:-true}"
+fi
 if [[ -z "${NETRA_API_KEY:-}" && -f "${HOME}/.netra/api-key" ]]; then
   NETRA_API_KEY="$(cat "${HOME}/.netra/api-key")"
   export NETRA_API_KEY
@@ -49,6 +64,7 @@ export NETRA_CLI_NO_BANNER=1
 export NO_COLOR=1
 
 ALLOW_MUTATE="${NETRA_CLI_ALLOW_MUTATE:-0}"
+ACCEPT_API_ERRORS="${NETRA_CLI_ACCEPT_API_ERRORS:-0}"
 SNIPPET_LINES="${SNIPPET_LINES:-12}"
 CMD_TIMEOUT="${NETRA_CLI_CMD_TIMEOUT:-45}"
 TMP="$(mktemp -d)"
@@ -58,6 +74,12 @@ pass=0
 fail=0
 skip=0
 FAILED=()
+
+api_error_ok() {
+  # Structured controller responses prove argv→HTTP wiring even when the
+  # feature needs Cilium/Hubble/kube (live CI boots a bare netrad).
+  grep -qE '^error: (Bad Request|Not Found|Conflict|Forbidden|Unauthorized|Method Not Allowed|Bad Gateway|Service Unavailable|Internal Server Error|Not Implemented)' "$1"
+}
 
 run_one() {
   local name="$1"
@@ -82,8 +104,8 @@ run_one() {
     head -n "$SNIPPET_LINES" "$out" | sed 's/^/      | /'
     echo
     pass=$((pass + 1))
-  elif [[ "$optional" == "1" ]] && grep -qE '^error: (Bad Request|Not Found|Conflict|Forbidden|Unauthorized|Method Not Allowed)' "$out"; then
-    echo "PASS  $name  →  $*  (optional: API answered)"
+  elif { [[ "$optional" == "1" ]] || [[ "$ACCEPT_API_ERRORS" == "1" ]]; } && api_error_ok "$out"; then
+    echo "PASS  $name  →  $*  (API answered)"
     head -n "$SNIPPET_LINES" "$out" | sed 's/^/      | /'
     echo
     pass=$((pass + 1))

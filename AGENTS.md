@@ -49,6 +49,7 @@ go test ./...
 ./scripts/ci-p1-p5-unit.sh
 make test-features
 make test-netractl-commands
+make test-netractl-live
 make test-python
 npm --prefix web run test
 # eBPF compile + PROG_TEST_RUN (Linux root):

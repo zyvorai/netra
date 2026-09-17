@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **CI: live netractl full suite.** `./scripts/ci-netractl-live.sh`
+  (`make test-netractl-live`) boots a local `netrad` and runs the detailed
+  remote command board in GitHub Actions (no lab required). Catalog mock
+  gate remains `./scripts/ci-netractl-commands.sh`.
 - **CI: full netractl command catalog gate.** `./scripts/ci-netractl-commands.sh`
   (`make test-netractl-commands`) runs every catalogued CLI argv against an
   httptest mock. Live lab full-detail suite (not smoke):

@@ -24,8 +24,12 @@ jobs:
       # Exhaustive argv→HTTP coverage for every catalogued netractl command
       # (read + representative mutates) against httptest. Same command locally:
       # ./scripts/ci-netractl-commands.sh
-      # Live lab (full detail, not smoke): ./scripts/ci-netractl-remote.sh
       run: ./scripts/ci-netractl-commands.sh
+    - name: netractl full suite against live local netrad
+      # Boots netrad on an ephemeral HTTP port and runs the detailed
+      # remote command board (not smoke). Same command locally:
+      # ./scripts/ci-netractl-live.sh
+      run: ./scripts/ci-netractl-live.sh
     - name: P1–P5 surface unit + race (scripted)
       # Dedicated gate for the metadata surfaces (tlsfp, encdns, fleet,
       # shadow-saas, prevention, exfil/lateral/ECH, …) so regressions

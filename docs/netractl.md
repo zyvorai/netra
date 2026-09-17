@@ -125,9 +125,15 @@ is exercised against an httptest mock in CI:
 ./scripts/ci-netractl-commands.sh   # or: make test-netractl-commands
 ```
 
-Against a live lab (full detail board with response snippets — not a short
-smoke), after `~/.netra/env` or `NETRA_URL` / `NETRA_API_KEY` /
-`NETRA_TLS_INSECURE` are set:
+GitHub CI also boots a local `netrad` and runs the full detailed board
+(not a short smoke):
+
+```bash
+./scripts/ci-netractl-live.sh       # or: make test-netractl-live
+```
+
+Against a real lab (after `~/.netra/env` or `NETRA_URL` / `NETRA_API_KEY` /
+`NETRA_TLS_INSECURE`):
 
 ```bash
 ./scripts/ci-netractl-remote.sh
