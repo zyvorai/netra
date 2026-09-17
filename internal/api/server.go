@@ -374,6 +374,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/namespaces/heat", s.auth(http.HandlerFunc(s.namespaceHeat)))
 	mux.Handle("GET /api/v1/protocols", s.auth(http.HandlerFunc(s.protocolMix)))
 	mux.Handle("GET /api/v1/ebpf/census", s.auth(http.HandlerFunc(s.denyCensus)))
+	mux.Handle("GET /api/v1/ebpf/maps", s.auth(http.HandlerFunc(s.ebpfMaps)))
 	mux.Handle("GET /api/v1/baselines", s.auth(http.HandlerFunc(s.baselineStatus)))
 	mux.Handle("GET /api/v1/ports", s.auth(http.HandlerFunc(s.portHeat)))
 	mux.Handle("GET /api/v1/dns/board", s.auth(http.HandlerFunc(s.dnsBoard)))

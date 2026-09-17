@@ -8,6 +8,7 @@ import (
 	"github.com/zyvorai/netra/internal/baselineage"
 	"github.com/zyvorai/netra/internal/denycensus"
 	"github.com/zyvorai/netra/internal/dnsboard"
+	"github.com/zyvorai/netra/internal/ebpfmaps"
 	"github.com/zyvorai/netra/internal/leaseclock"
 	"github.com/zyvorai/netra/internal/nsheat"
 	"github.com/zyvorai/netra/internal/portheat"
@@ -30,6 +31,10 @@ func (s *Server) protocolMix(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) denyCensus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, denycensus.Build(s.store.Config(), time.Now().UTC()))
+}
+
+func (s *Server) ebpfMaps(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, ebpfmaps.Build(s.store.Config(), time.Now().UTC()))
 }
 
 func (s *Server) baselineStatus(w http.ResponseWriter, _ *http.Request) {

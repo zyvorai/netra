@@ -52,7 +52,7 @@ func helpSections() []helpSection {
 				{"ebpf summary|health|path|drops|l7|…", "Datapath counters and diagnostics"},
 				{"ebpf kernel-network [5m]", "Windowed kernel network pressure"},
 				{"ebpf sysctl-audit | dns-findings | scan-findings", "Hardening + detectors"},
-				{"ebpf coverage | census | capabilities", "Hook/program coverage"},
+				{"ebpf coverage | census | maps | capabilities", "Hook coverage + map inventory"},
 				{"drops [explain]", "Drop explain from policy + kernel"},
 				{"insights … | incidents …", "Baselines, drift, joined incidents"},
 			},

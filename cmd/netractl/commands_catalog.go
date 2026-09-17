@@ -118,11 +118,12 @@ func ebpfReadCommands() []cliCommand {
 		"tls-fingerprints", "tls-fingerprint-risk", "encrypted-dns", "ipv6",
 		"shield", "interfaces", "diagnose", "l7", "capabilities", "workloads",
 	}
-	out := make([]cliCommand, 0, len(names)+4)
+	out := make([]cliCommand, 0, len(names)+5)
 	for _, n := range names {
 		out = append(out, cliCommand{Name: "ebpf-" + n, Args: []string{"ebpf", n}})
 	}
 	out = append(out,
+		cliCommand{Name: "ebpf-maps", Args: []string{"ebpf", "maps", "--json"}},
 		cliCommand{Name: "ebpf-sysctl", Args: []string{"ebpf", "sysctl"}},
 		cliCommand{Name: "ebpf-kernel-network-window", Args: []string{"ebpf", "kernel-network", "5m"}},
 		cliCommand{Name: "ebpf-scope-show", Args: []string{"ebpf", "scope", "show"}},

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Read-only datapath map inventory.** `GET /api/v1/ebpf/maps` and
+  `netractl ebpf maps [--json]` show controller desired map contents
+  (deny/allow/rate/policy/…) in a human board or JSON. Docs:
+  [`docs/ebpf-maps.md`](docs/ebpf-maps.md).
 - **CI: live netractl full suite.** `./scripts/ci-netractl-live.sh`
   (`make test-netractl-live`) boots a local `netrad` and runs the detailed
   remote command board in GitHub Actions (no lab required). Catalog mock

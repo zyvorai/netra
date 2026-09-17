@@ -146,5 +146,6 @@ stays observe-first.
 ## Related
 
 - [`features.md`](features.md) — feature catalog, API, UX
+- [`ebpf-maps.md`](ebpf-maps.md) — read-only map inventory (`ebpf maps`)
 - [README · Standalone Helm install](../README.md#standalone-helm-install)
 - [README · HTTPS default](../README.md#https-default)

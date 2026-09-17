@@ -1042,6 +1042,8 @@ func ebpf() error {
 		return request("GET", "/api/v1/ebpf/l7", nil)
 	case "capabilities":
 		return request("GET", "/api/v1/ebpf/capabilities", nil)
+	case "maps":
+		return ebpfMapsCmd(os.Args[3:])
 	case "mode":
 		if len(os.Args) < 4 {
 			return fmt.Errorf("mode required")

@@ -129,6 +129,8 @@ func mockNetraAPI(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"version":"ci","datapath":"ebpf","agents":1,"staleAgents":0,"ciliumEnabled":false,"fastPath":{"mode":"observe"}}`))
 	case path == "/api/v1/features":
 		_, _ = w.Write([]byte(`{"features":[{"id":"dns-detect","title":"DNS detect","scope":"agent","enabled":false,"source":"env"}]}`))
+	case path == "/api/v1/ebpf/maps":
+		_, _ = w.Write([]byte(`{"generatedAt":"2026-09-18T00:00:00Z","mode":"observe","revision":1,"pinRoot":"/sys/fs/bpf/netra","note":"ci","filledMaps":0,"emptyMaps":0,"totalEntries":0,"maps":[]}`))
 	case path == "/api/v1/fleet":
 		_, _ = w.Write([]byte(`{"nodes":[{"name":"ci","ready":true}]}`))
 	case path == "/api/v1/lease":
