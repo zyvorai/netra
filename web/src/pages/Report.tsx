@@ -45,6 +45,7 @@ export default function Report() {
   const [snap, setSnap] = useState<Snapshot>();
   const [book, setBook] = useState<Book>();
   const [sum, setSum] = useState<AuditSum>();
+  const [prevention, setPrevention] = useState<any>();
   const [msg, setMsg] = useState('');
 
   const load = () => {
@@ -52,11 +53,13 @@ export default function Report() {
       api<Snapshot>('/api/v1/report?format=json'),
       api<Book>('/api/v1/playbooks'),
       api<AuditSum>('/api/v1/audit/summary'),
+      api<any>('/api/v1/report/prevention'),
     ])
-      .then(([s, b, a]) => {
+      .then(([s, b, a, p]) => {
         setSnap(s);
         setBook(b);
         setSum(a);
+        setPrevention(p);
         setMsg('');
       })
       .catch((e) => setMsg(String(e)));
@@ -124,6 +127,45 @@ export default function Report() {
           {(snap?.attention || []).map((a, i) => (
             <div className="agent wide" key={i}>
               <small>{a}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card span3">
+        <p className="eyebrow">PREVENTION</p>
+        <h3>
+          {prevention?.coverageScore != null ? `Coverage ${prevention.coverageScore}` : 'Prevention report'}
+        </h3>
+        <p>{prevention?.note || 'Observe-only prevention rollup (TLSFP, intel, detectors, lease posture).'}</p>
+        <div className="list">
+          {prevention?.tlsFingerprints != null && (
+            <div className="agent wide">
+              <b>TLS fingerprints</b>
+              <span>{prevention.tlsFingerprints}</span>
+            </div>
+          )}
+          {prevention?.dnsDetectorFindings != null && (
+            <div className="agent wide">
+              <b>DNS findings</b>
+              <span>{prevention.dnsDetectorFindings}</span>
+            </div>
+          )}
+          {prevention?.scanDetectorFindings != null && (
+            <div className="agent wide">
+              <b>Scan findings</b>
+              <span>{prevention.scanDetectorFindings}</span>
+            </div>
+          )}
+          {prevention?.mode && (
+            <div className="agent wide">
+              <b>Mode</b>
+              <span>{prevention.mode}{prevention.leaseActive ? ' · lease active' : ''}</span>
+            </div>
+          )}
+          {(prevention?.gaps || []).slice(0, 4).map((g: string, i: number) => (
+            <div className="agent wide" key={i}>
+              <small>{g}</small>
             </div>
           ))}
         </div>

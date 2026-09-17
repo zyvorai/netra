@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- **P5 residual SSE/NGFW metadata surfaces.**
+- **UX: P1–P5 surfaces in the console.** New **Surfaces** page (Diagnostics +
+  Security nav) boards all observe-only APIs (JA3, encrypted DNS, shadow SaaS,
+  exfil/lateral, compliance, fleet tenants, …). L7 shows JA3 + DoT/DoH
+  summaries; Fleet shows multi-cluster/tenant rollups; Report shows prevention
+  coverage.
   - JA3 risk board + ECH detection (`GET /api/v1/ebpf/tls-fingerprints/risk`).
   - **Always-on datapath JA3/JA4** via standalone `bpf/netra_tlsfp.c`
     (`tls_hello_events`, rate-limited `bpf_skb_load_bytes` samples) plus

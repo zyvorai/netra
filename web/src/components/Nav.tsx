@@ -24,6 +24,7 @@ export type Page =
   | 'scorecard'
   | 'talkers'
   | 'fleet'
+  | 'surfaces'
   | 'traffic'
   | 'capture'
   | 'congestion'
@@ -59,6 +60,7 @@ const groups: NavGroup[] = [
       { page: 'sysctl-audit', label: 'Sysctl Audit', blurb: 'A flat, baseline-checked inventory of network hardening and tuning sysctls — security posture, IPv6, TCP lifecycle, conntrack timeouts, ARP/bridge — separate from Congestion Map’s evidence-correlated findings.' },
       { page: 'node-resources', label: 'Node Resources', blurb: 'Per-node CPU, memory, and load average, plus per-workload cgroup CPU/memory usage — a "top"-like view, attributed to workloads rather than raw PIDs.' },
       { page: 'l7', label: 'L7', blurb: 'Best-effort SNI and HTTP Host from the datapath.' },
+      { page: 'surfaces', label: 'Surfaces', blurb: 'P1–P5 observe boards: JA3, encrypted DNS, shadow SaaS, exfil, fleet tenants, and more.' },
       { page: 'insights', label: 'Insights', blurb: 'Baselines, drift, and review-only remediation proposals.' },
       { page: 'topology', label: 'Topology', blurb: 'The observed-traffic dependency graph, live and force-directed.' },
     ],
@@ -67,6 +69,7 @@ const groups: NavGroup[] = [
     label: 'Security',
     children: [
       { page: 'incidents', label: 'Incidents', blurb: 'Health, drift, exposure, drops, and audit signals joined by shared source.' },
+      { page: 'surfaces', label: 'Surfaces', blurb: 'JA3 risk, ECH blindness, DNS intel, exfil/lateral drafts, compliance — observe-only.' },
       { page: 'ebpf', label: 'Firewall', blurb: 'Deny lists, DDoS shield, NetPol, and emergency controls in one place.' },
       { page: 'policies', label: 'Policies', blurb: 'Plan and apply CiliumNetworkPolicy when CRDs are present.' },
       { page: 'audit', label: 'Audit', blurb: 'Controller audit trail for policy and datapath actions.' },

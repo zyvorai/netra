@@ -7,6 +7,8 @@ export default function L7() {
   const [cfg, setCfg] = useState<any>();
   const [sni, setSNI] = useState('');
   const [err, setErr] = useState('');
+  const [tlsFP, setTlsFP] = useState<any>();
+  const [encDNS, setEncDNS] = useState<any>();
 
   const [downgrades, setDowngrades] = useState<any>();
 
@@ -14,7 +16,11 @@ export default function L7() {
     api<any>('/api/v1/ebpf/l7?limit=200'),
     api<any>('/api/v1/ebpf/config'),
     api<any>('/api/v1/insights/protocol-downgrades'),
-  ]).then(([d, c, dg]) => { setData(d); setCfg(c); setDowngrades(dg); setErr(''); }).catch(e => setErr(String(e)));
+    api<any>('/api/v1/ebpf/tls-fingerprints?limit=30'),
+    api<any>('/api/v1/ebpf/encrypted-dns?limit=30'),
+  ]).then(([d, c, dg, fp, ed]) => {
+    setData(d); setCfg(c); setDowngrades(dg); setTlsFP(fp); setEncDNS(ed); setErr('');
+  }).catch(e => setErr(String(e)));
 
   useEffect(() => { void load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
 
@@ -74,6 +80,41 @@ export default function L7() {
         <button className="primary" onClick={() => mutate('/api/v1/ebpf/sni', sni)} disabled={!sni.trim()}>Add SNI</button>
       </div>
       <div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => mutate('/api/v1/ebpf/sni/delete', x)}>{x} ×</button>)}</div>
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">JA3 / JA4</p>
+      <h3>{tlsFP?.stats?.uniqueJa3 ?? 0} unique fingerprints</h3>
+      <p>Always-on datapath ClientHello samples (and capture frames). Full boards under Diagnostics → Surfaces.</p>
+      {(tlsFP?.fingerprints || []).length === 0 && <p className="empty-state">No JA3 samples yet.</p>}
+      <div className="list">
+        {(tlsFP?.fingerprints || []).slice(0, 12).map((f: any, i: number) => (
+          <div className="agent wide" key={f.ja3 || i}>
+            <b className="truncate" title={f.ja3}>{f.sni || f.ja3}</b>
+            <small>{f.ja4 || ''}{f.count != null ? ` · n=${f.count}` : ''}{f.node ? ` · ${f.node}` : ''}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">ENCRYPTED DNS</p>
+      <h3>DoT / DoH observe</h3>
+      <p>Port 853 and known DoH hostnames via SNI/Host/DNS — no decryption. See Surfaces for the full board.</p>
+      {(() => {
+        const hits = encDNS?.result?.hits || encDNS?.hits || encDNS?.result?.items || [];
+        if (!hits.length) return <p className="empty-state">No DoT/DoH hits yet.</p>;
+        return (
+          <div className="list">
+            {hits.slice(0, 12).map((h: any, i: number) => (
+              <div className="agent wide" key={i}>
+                <b className="truncate">{h.host || h.hostname || h.name || h.kind || 'hit'}</b>
+                <small>{[h.kind, h.port, h.count != null ? `n=${h.count}` : ''].filter(Boolean).join(' · ')}</small>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </section>
 
     <section className="card span3">

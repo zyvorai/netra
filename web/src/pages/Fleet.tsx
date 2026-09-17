@@ -15,11 +15,17 @@ type Coverage = { nodes?: CoverageNode[]; agentCount?: number; staleAgents?: num
 export default function Fleet() {
   const [inv, setInv] = useState<Inventory>();
   const [cov, setCov] = useState<Coverage>();
+  const [clusters, setClusters] = useState<any>();
+  const [tenants, setTenants] = useState<any>();
   const [err, setErr] = useState('');
   const load = () => Promise.all([
     api<Inventory>('/api/v1/fleet'),
     api<Coverage>('/api/v1/ebpf/coverage'),
-  ]).then(([i, c]) => { setInv(i); setCov(c); setErr(''); }).catch((e) => setErr(String(e)));
+    api<any>('/api/v1/fleet/clusters'),
+    api<any>('/api/v1/fleet/tenants'),
+  ]).then(([i, c, cl, te]) => {
+    setInv(i); setCov(c); setClusters(cl); setTenants(te); setErr('');
+  }).catch((e) => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
 
   return (
@@ -70,6 +76,45 @@ export default function Fleet() {
                     </>
                   );
                 })()}
+              </small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card span3">
+        <p className="eyebrow">MULTI-CLUSTER</p>
+        <h3>{(clusters?.clusters || clusters?.items || []).length} clusters</h3>
+        <p>Read-only aggregator via <code>NETRA_FLEET_PEERS</code>. Observe-only.</p>
+        <div className="list">
+          {(clusters?.clusters || clusters?.items || []).length === 0 && <p className="empty-state">Only the local cluster is visible (no peers configured).</p>}
+          {(clusters?.clusters || clusters?.items || []).map((c: any, i: number) => (
+            <div className="agent wide" key={c.name || c.id || i}>
+              <b>{c.name || c.id || `cluster ${i + 1}`}</b>
+              <small>
+                {[c.tenant, c.agentCount != null ? `${c.agentCount} agents` : '', c.staleAgents != null ? `${c.staleAgents} stale` : '', c.reachable === false ? 'unreachable' : '']
+                  .filter(Boolean)
+                  .join(' · ')}
+              </small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card span3">
+        <p className="eyebrow">TENANTS</p>
+        <h3>{(tenants?.tenants || tenants?.items || []).length} tenant rollups</h3>
+        <p>MSSP-style risk rollup from local + peer clusters. Full board also under Surfaces → Fleet.</p>
+        <div className="list">
+          {(tenants?.tenants || tenants?.items || []).length === 0 && <p className="empty-state">No tenant labels yet — set <code>NETRA_CLUSTER_TENANT</code> on peers.</p>}
+          {(tenants?.tenants || tenants?.items || []).map((t: any, i: number) => (
+            <div className="agent wide" key={t.tenant || t.name || i}>
+              <b>{t.tenant || t.name || `tenant ${i + 1}`}</b>
+              <span className="severity-badge info">{t.riskScore != null ? `risk ${t.riskScore}` : t.risk || '—'}</span>
+              <small>
+                {[t.clusterCount != null ? `${t.clusterCount} clusters` : '', t.agentCount != null ? `${t.agentCount} agents` : '']
+                  .filter(Boolean)
+                  .join(' · ')}
               </small>
             </div>
           ))}

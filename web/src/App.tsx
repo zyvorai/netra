@@ -20,6 +20,7 @@ import Report from './pages/Report';
 import Scorecard from './pages/Scorecard';
 import Talkers from './pages/Talkers';
 import Fleet from './pages/Fleet';
+import Surfaces from './pages/Surfaces';
 import Traffic from './pages/Traffic';
 import Capture from './pages/Capture';
 import CongestionMap from './pages/CongestionMap';
@@ -97,8 +98,14 @@ const pageHero: Partial<Record<Page, { eyebrow: string; title: string; lede: str
   l7: {
     eyebrow: 'L7 Metadata',
     title: 'TLS and cleartext HTTP context.',
-    lede: 'Best-effort SNI and HTTP Host from the datapath — evidence for review, not a full proxy.',
+    lede: 'Best-effort SNI and HTTP Host from the datapath — evidence for review, not a full proxy. JA3/JA4 and encrypted DNS live under Surfaces.',
     tint: 'amber',
+  },
+  surfaces: {
+    eyebrow: 'Surfaces',
+    title: 'Observe-only fit boards.',
+    lede: 'P1–P5 metadata: JA3/JA4, encrypted DNS, shadow SaaS, destination risk, exfil/lateral drafts, compliance, fleet tenants — no decrypt, no payload export.',
+    tint: 'purple',
   },
   insights: {
     eyebrow: 'Insights',
@@ -223,6 +230,7 @@ export default function App() {
     'sysctl-audit': <SysctlAudit />,
     'node-resources': <NodeResources />,
     l7: <L7 />,
+    surfaces: <Surfaces />,
     insights: <Insights />,
     topology: <Topology />,
     incidents: <Incidents />,
