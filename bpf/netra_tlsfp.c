@@ -10,10 +10,10 @@
 // samples (≤256 bytes) go to tls_hello_events; userspace parses JA3/JA4.
 // No decryption, no application payload export.
 //
-// Payload is read via bpf_skb_load_bytes into a per-CPU scratch map (stack
-// alone cannot hold a 256-byte sample under the 512-byte combined-frame
-// limit). load_bytes size must be constant, so we try 256→128→64→6.
-// cgroup_id may be 0; rate-limit falls back to dst tuple.
+// Payload is read from linear data when present, else via bpf_skb_load_bytes
+// into a per-CPU scratch map (stack alone cannot hold a 256-byte sample under
+// the 512-byte combined-frame limit). load_bytes size must be constant, so we
+// try 256→128→64→6. Rate-limit key is destination tuple (cgroup_id may be 0).
 
 #include <linux/bpf.h>
 #include <linux/in.h>
@@ -86,6 +86,29 @@ load_hello(struct __sk_buff *skb, __u32 payload_off, struct tls_hello_scratch *s
 	return 0;
 }
 
+/* Prefer linear skb bytes when the ClientHello is already in data/data_end
+ * (BPF_PROG_TEST_RUN and some short packets). Fall back to load_bytes when
+ * the linear window only covers headers — the common live cgroup_skb case. */
+static __always_inline __u16
+fill_hello(struct __sk_buff *skb, __u32 payload_off, unsigned char *payload, void *data_end,
+	   struct tls_hello_scratch *sc)
+{
+	if (payload && (void *)(payload + 6) <= data_end &&
+	    payload[0] == 0x16 && payload[5] == 0x01) {
+		__u16 n = 0;
+#pragma unroll
+		for (int i = 0; i < TLS_HELLO_COPY; i++) {
+			if ((void *)(payload + i + 1) > data_end)
+				break;
+			sc->data[i] = payload[i];
+			n = (__u16)(i + 1);
+		}
+		if (n >= 6)
+			return n;
+	}
+	return load_hello(skb, payload_off, sc);
+}
+
 static __always_inline int
 emit_from_scratch(struct tls_hello_scratch *sc, __u16 n, __u64 rate_key)
 {
@@ -132,14 +155,15 @@ static __always_inline int sample_v4(struct __sk_buff *skb)
 	if (tcp->doff < 5)
 		return 1;
 	__u32 payload_off = ihl * 4 + ((__u32)tcp->doff * 4);
-	if (skb->len > 0 && payload_off >= skb->len)
-		return 1;
+	unsigned char *payload = (unsigned char *)tcp + ((__u32)tcp->doff * 4);
+	if ((void *)payload > data_end)
+		payload = 0;
 
 	__u32 zero = 0;
 	struct tls_hello_scratch *sc = bpf_map_lookup_elem(&tls_hello_scratch, &zero);
 	if (!sc)
 		return 1;
-	__u16 n = load_hello(skb, payload_off, sc);
+	__u16 n = fill_hello(skb, payload_off, payload, data_end, sc);
 	__u64 rate_key = ((__u64)ip->daddr << 16) | (__u64)tcp->dest;
 	return emit_from_scratch(sc, n, rate_key);
 }
@@ -159,14 +183,15 @@ static __always_inline int sample_v6(struct __sk_buff *skb)
 	if (tcp->doff < 5)
 		return 1;
 	__u32 payload_off = sizeof(struct ipv6hdr) + ((__u32)tcp->doff * 4);
-	if (skb->len > 0 && payload_off >= skb->len)
-		return 1;
+	unsigned char *payload = (unsigned char *)tcp + ((__u32)tcp->doff * 4);
+	if ((void *)payload > data_end)
+		payload = 0;
 
 	__u32 zero = 0;
 	struct tls_hello_scratch *sc = bpf_map_lookup_elem(&tls_hello_scratch, &zero);
 	if (!sc)
 		return 1;
-	__u16 n = load_hello(skb, payload_off, sc);
+	__u16 n = fill_hello(skb, payload_off, payload, data_end, sc);
 	__u64 rate_key = ((__u64)ip6->daddr.s6_addr32[3] << 16) | (__u64)tcp->dest;
 	return emit_from_scratch(sc, n, rate_key);
 }
