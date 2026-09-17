@@ -23,12 +23,12 @@ import (
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/notify"
 	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/siem"
 	"github.com/zyvorai/netra/internal/snowflakesink"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
-	"github.com/zyvorai/netra/internal/webhook"
 )
 
 const version = "0.27.96"
@@ -305,11 +305,12 @@ func buildGitOps() (gitops.Config, bool) {
 	}, true
 }
 
-// buildAlerting constructs the webhook dispatcher and alert-poller config
-// from env vars. It returns a nil dispatcher (alerting fully disabled) when
-// NETRA_ALERT_WEBHOOKS is unset, matching the off-by-default convention
-// used for every other optional feature in this codebase.
-func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
+// buildAlerting constructs the notify dispatcher and alert-poller config
+// from env vars. Prefer NETRA_ALERT_CHANNELS; fall back to legacy
+// NETRA_ALERT_WEBHOOKS. Returns a nil dispatcher (alerting fully disabled)
+// when both are unset, matching the off-by-default convention used for
+// every other optional feature in this codebase.
+func buildAlerting(log *slog.Logger) (*notify.Dispatcher, alert.Config) {
 	cfg := alert.Config{
 		Interval:             envDuration("NETRA_ALERT_POLL_INTERVAL", 30*time.Second),
 		Cooldown:             envDuration("NETRA_ALERT_COOLDOWN", 5*time.Minute),
@@ -319,23 +320,31 @@ func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
 		DropSpikeMultiplier:  envFloat("NETRA_DROP_SPIKE_MULTIPLIER", 0),
 		DropSpikeMinAbsolute: envUint64("NETRA_DROP_SPIKE_MIN_ABSOLUTE", 0),
 	}
-	raw := strings.TrimSpace(os.Getenv("NETRA_ALERT_WEBHOOKS"))
-	if raw == "" {
+	channelsRaw := strings.TrimSpace(os.Getenv("NETRA_ALERT_CHANNELS"))
+	webhooksRaw := strings.TrimSpace(os.Getenv("NETRA_ALERT_WEBHOOKS"))
+	if channelsRaw == "" && webhooksRaw == "" {
 		return nil, cfg
 	}
-	sinkCfgs, err := webhook.ParseConfigs(raw)
-	if err != nil {
-		log.Error("alert webhook config", "error", err)
-		os.Exit(1)
-	}
-	d := webhook.NewDispatcher(envInt("NETRA_ALERT_QUEUE_SIZE", 256))
-	for _, sc := range sinkCfgs {
-		sink, err := webhook.New(sc)
+	var (
+		chs []notify.Channel
+		err error
+	)
+	if channelsRaw != "" {
+		chs, err = notify.ParseChannels(channelsRaw)
 		if err != nil {
-			log.Error("alert webhook sink", "name", sc.Name, "error", err)
+			log.Error("alert channels config", "error", err)
 			os.Exit(1)
 		}
-		d.Add(sink)
+	} else {
+		chs, err = notify.ParseLegacyWebhooks(webhooksRaw)
+		if err != nil {
+			log.Error("alert webhook config", "error", err)
+			os.Exit(1)
+		}
+	}
+	d := notify.NewDispatcher(envInt("NETRA_ALERT_QUEUE_SIZE", 256))
+	for _, ch := range chs {
+		d.Add(ch)
 	}
 	return d, cfg
 }
@@ -392,7 +401,7 @@ func buildScanDetect() (*scandetect.Detector, time.Duration, bool) {
 	return scandetect.New(cfg), interval, true
 }
 
-func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *webhook.Dispatcher, alertCfg alert.Config, gitopsCfg gitops.Config, gitopsEnabled bool) {
+func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *notify.Dispatcher, alertCfg alert.Config, gitopsCfg gitops.Config, gitopsEnabled bool) {
 	identity := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
 	if identity == "" {
 		identity, _ = os.Hostname()
@@ -433,7 +442,7 @@ func electionLoop(
 	gate *ha.Gate,
 	stateFile, namespace, leaseName, identity string,
 	leaseDuration, renewDeadline, retryPeriod time.Duration,
-	dispatcher *webhook.Dispatcher,
+	dispatcher *notify.Dispatcher,
 	alertCfg alert.Config,
 	gitopsCfg gitops.Config,
 	gitopsEnabled bool,

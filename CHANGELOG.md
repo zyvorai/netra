@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Multi-channel alerting framework.** Extends the existing alert poller with
+  `internal/notify`: typed channels for webhook, SMTP email, Slack (Incoming
+  Webhook Block Kit + optional Web API `chat.postMessage`), Microsoft Teams
+  Adaptive Cards, Twilio SMS / WhatsApp, and a signed HTTP bridge envelope.
+  Config via `NETRA_ALERT_CHANNELS` (JSON); legacy `NETRA_ALERT_WEBHOOKS`
+  remains supported. Helm `alerting:` values; docs in `docs/alerting.md`.
+  ChatOps stays inbound-only and does not share secrets with outbound notify.
+  CI: race-detect `notify`/`alert`/`webhook`; Helm gates default-off plus
+  `channelsJson` / legacy `webhooksJson` / `existingSecret` renders.
 - **Fix: Topology graph could go permanently empty after a transient Kubernetes API error.** `ebpfConfig`'s per-node `ListWorkloads` call ran fresh (uncached) on every agent sync with only a 4s timeout; on a single failed call it responded with `cfg.Workloads` left empty, which `internal/workload.Resolve` treats as "zero workloads on this node," blanking every cgroup's `Namespace`/`Pod`/`WorkloadName` until the next successful call. On a real cluster under apiserver load that could mean an indefinitely empty Insights/Topology dependency graph despite the agent staying healthy. New `internal/api/workloadInventoryCache` remembers each node's last successful inventory and `ebpfConfig` now falls back to it on error instead of zeroing out attribution.
 - **New: optional Snowflake audit export sink.** A second best-effort push sink alongside the existing syslog forwarder — same shape (env-var gated, off by default, leader-only in HA, per-tick drain of `store.Audit`), but lands rows straight into a Snowflake table instead of a syslog collector.
   - `internal/snowflakesink` — key-pair (JWT) auth only via `github.com/snowflakedb/gosnowflake`, `CREATE TABLE IF NOT EXISTS` on startup, batched multi-row `INSERT` (default 50 rows/flush), `details` landed as `VARIANT`.

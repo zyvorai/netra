@@ -3,7 +3,7 @@
 //
 // Package alert polls the existing anomaly-producing diagnostic packages
 // (internal/health, internal/pathdiag, internal/dropdiag) on an interval and
-// publishes new/escalated findings through an internal/webhook.Dispatcher.
+// publishes new/escalated findings through an internal/notify.Dispatcher.
 // None of those packages have a shared background aggregation point of
 // their own — each computes its Anomalies list synchronously, on demand,
 // per HTTP request — so this package is what turns "data available on
@@ -25,10 +25,10 @@ import (
 	"github.com/zyvorai/netra/internal/insights"
 	"github.com/zyvorai/netra/internal/kerneldiag"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/notify"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/store"
-	"github.com/zyvorai/netra/internal/webhook"
 )
 
 // Config controls poll cadence and dedup behavior.
@@ -102,7 +102,7 @@ func (c *Config) applyDefaults() {
 type Poller struct {
 	log                *slog.Logger
 	fetch              func(now time.Time, staleAfter time.Duration) []models.AgentStatus
-	publish            func(webhook.Event) bool
+	publish            func(notify.Event) bool
 	record             func(models.ClusterHealthSample, time.Time)
 	baseline           func() models.BehaviorBaseline
 	fetchPods          func(ctx context.Context, ns string) ([]models.PodInfo, error)
@@ -121,7 +121,7 @@ type Poller struct {
 // entirely, e.g. when no Kubernetes client is configured (a real supported
 // standalone mode). st, publish, and fetchPods are captured once; New itself
 // performs no I/O.
-func New(log *slog.Logger, st *store.Store, publish func(webhook.Event) bool, cfg Config, fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *Poller {
+func New(log *slog.Logger, st *store.Store, publish func(notify.Event) bool, cfg Config, fetchPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *Poller {
 	cfg.applyDefaults()
 	return &Poller{
 		log:                log,
@@ -178,7 +178,7 @@ func (p *Poller) tick() {
 // fetchPods is unset, no baseline is captured yet (insights.NewSinceStart
 // would no-op anyway — skip the kube call entirely), or the pod list fetch
 // fails.
-func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus) []notify.Event {
 	if p.fetchPods == nil || p.baseline == nil {
 		return nil
 	}
@@ -194,12 +194,12 @@ func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus)
 		return nil
 	}
 	restartCounts := restartCountsBySource(pods)
-	var out []webhook.Event
+	var out []notify.Event
 	for _, f := range insights.NewSinceStart(baseline, agents, pods, p.cfg.MaxPodRestarts) {
 		if p.restarts.justRestarted(f.Source, restartCounts[f.Source]) {
 			continue // pod just restarted between polls; too ambiguous which start this traffic follows this cycle
 		}
-		ev := webhook.Event{Source: "new-since-start", Kind: f.Kind, Severity: f.Severity, Subject: f.Source, Message: f.Message, Value: float64(f.Count), Timestamp: now}
+		ev := notify.Event{Source: "new-since-start", Kind: f.Kind, Severity: f.Severity, Subject: f.Source, Message: f.Message, Value: float64(f.Count), Timestamp: now}
 		if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
 			out = append(out, ev)
 		}
@@ -214,7 +214,7 @@ func (p *Poller) newSinceStartEvents(now time.Time, agents []models.AgentStatus)
 // converted to per-tick deltas by dropBaselineTracker and compared against
 // each (node, reason) key's own recent history — reused, not recomputed,
 // wherever dropdiag/detective already provide it.
-func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []notify.Event {
 	if p.dropBaseline == nil {
 		// Tests construct a Poller directly with fixture-backed functions
 		// (see the Poller doc comment) rather than always going through
@@ -222,7 +222,7 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []w
 		// need to be if a test path touched them without going through New().
 		p.dropBaseline = newDropBaselineTracker()
 	}
-	var out []webhook.Event
+	var out []notify.Event
 	for _, a := range agents {
 		if a.Stale {
 			continue
@@ -237,7 +237,7 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []w
 			if name == "" {
 				name = dropreason.Name(d.Reason)
 			}
-			ev := webhook.Event{
+			ev := notify.Event{
 				Source: "dropdiag-baseline", Kind: "kernel-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
 				Subject: a.Node + "/" + name,
 				Message: fmt.Sprintf("kernel drops (%s) on %s spiked by %d in the last interval", name, a.Node, delta),
@@ -257,7 +257,7 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []w
 			if name == "" {
 				name = fmt.Sprintf("reason-%d", d.Reason)
 			}
-			ev := webhook.Event{
+			ev := notify.Event{
 				Source: "dropdiag-baseline", Kind: "policy-drop-spike", Severity: spikeSeverity(delta, p.cfg.DropSpikeMinAbsolute),
 				Subject: a.Node + "/" + name,
 				Message: fmt.Sprintf("policy drops (%s) on %s spiked by %d packets in the last interval", name, a.Node, delta),
@@ -287,15 +287,15 @@ func (p *Poller) dropSpikeEvents(now time.Time, agents []models.AgentStatus) []w
 // The correct, minimal wiring is therefore the same "new/escalated finding
 // + dedupState" pattern evaluate() already uses for health/pathdiag/
 // dropdiag/capdrift below — reused, not duplicated.
-func (p *Poller) kernelNetworkEvents(now time.Time, agents []models.AgentStatus) []webhook.Event {
+func (p *Poller) kernelNetworkEvents(now time.Time, agents []models.AgentStatus) []notify.Event {
 	if p.fetchKernelWindows == nil {
 		return nil
 	}
 	diag := kerneldiag.BuildWindow(agents, p.fetchKernelWindows(p.cfg.KernelWindow))
-	var out []webhook.Event
+	var out []notify.Event
 	for _, n := range diag.Nodes {
 		for _, f := range n.Findings {
-			ev := webhook.Event{
+			ev := notify.Event{
 				Source: "kerneldiag", Kind: f.Layer, Severity: f.Severity,
 				Subject:   n.Node + "/" + f.Layer,
 				Message:   fmt.Sprintf("%s on %s: %s", f.Signal, n.Node, f.Explanation),
@@ -325,11 +325,11 @@ func spikeSeverity(delta, minAbsolute uint64) string {
 // whether any event fired — history needs regular samples, not just
 // anomaly ticks). No I/O itself; recording and publishing both stay in
 // tick(), fully unit-testable.
-func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) ([]webhook.Event, models.ClusterHealthSample) {
-	var out []webhook.Event
+func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) ([]notify.Event, models.ClusterHealthSample) {
+	var out []notify.Event
 	collect := func(source string, anomalies []models.NetworkHealthAnomaly) {
 		for _, a := range anomalies {
-			ev := webhook.Event{Source: source, Kind: a.Kind, Severity: a.Severity, Subject: a.Subject, Message: a.Message, Value: a.Value, Timestamp: now}
+			ev := notify.Event{Source: source, Kind: a.Kind, Severity: a.Severity, Subject: a.Subject, Message: a.Message, Value: a.Value, Timestamp: now}
 			if p.dedup.shouldFire(now, p.cfg.Cooldown, ev) {
 				out = append(out, ev)
 			}
@@ -350,7 +350,7 @@ func (p *Poller) evaluate(now time.Time, agents []models.AgentStatus) ([]webhook
 // digestEvent builds the on-call card for this agent snapshot, plus the
 // cluster-health sample computed along the way. Quiet clusters (info,
 // unchanged fingerprint) still return a valid sample but no webhook event.
-func digestEvent(now time.Time, agents []models.AgentStatus) (models.ClusterHealthSample, webhook.Event, bool) {
+func digestEvent(now time.Time, agents []models.AgentStatus) (models.ClusterHealthSample, notify.Event, bool) {
 	obs := observability.Summarize(agents, 8)
 	hs := health.Build(agents, 8)
 	stale, workloads := 0, 0
@@ -384,9 +384,9 @@ func digestEvent(now time.Time, agents []models.AgentStatus) (models.ClusterHeal
 	d := ai.BuildDigest(ai.BuildBrief(snap))
 	sample := models.ClusterHealthSample{HealthScore: hs.Summary.HealthScore, AgentsStale: stale, Mode: mode, Severity: d.Severity, Fingerprint: d.Fingerprint}
 	if d.Severity == "info" && !d.Changed {
-		return sample, webhook.Event{}, false
+		return sample, notify.Event{}, false
 	}
-	return sample, webhook.Event{
+	return sample, notify.Event{
 		Source:      "ai",
 		Kind:        "digest",
 		Severity:    d.Severity,

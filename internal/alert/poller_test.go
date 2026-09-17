@@ -15,12 +15,13 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/notify"
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-func newTestPoller(cfg Config, published *[]webhook.Event) *Poller {
+func newTestPoller(cfg Config, published *[]notify.Event) *Poller {
 	cfg.applyDefaults()
 	var mu sync.Mutex
 	return &Poller{
@@ -28,7 +29,7 @@ func newTestPoller(cfg Config, published *[]webhook.Event) *Poller {
 		fetch: func(now time.Time, staleAfter time.Duration) []models.AgentStatus {
 			return nil
 		},
-		publish: func(ev webhook.Event) bool {
+		publish: func(ev notify.Event) bool {
 			mu.Lock()
 			*published = append(*published, ev)
 			mu.Unlock()
@@ -42,7 +43,7 @@ func newTestPoller(cfg Config, published *[]webhook.Event) *Poller {
 
 func TestDedupSuppressesRepeatWithinCooldown(t *testing.T) {
 	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
-	ev := webhook.Event{Source: "health", Kind: "x", Subject: "s", Severity: "warning"}
+	ev := notify.Event{Source: "health", Kind: "x", Subject: "s", Severity: "warning"}
 	base := time.Unix(1000, 0)
 
 	if !p.dedup.shouldFire(base, p.cfg.Cooldown, ev) {
@@ -59,8 +60,8 @@ func TestDedupSuppressesRepeatWithinCooldown(t *testing.T) {
 func TestDedupAlwaysFiresOnEscalation(t *testing.T) {
 	p := &Poller{cfg: Config{Cooldown: time.Hour}, dedup: newDedupState()}
 	base := time.Unix(1000, 0)
-	warn := webhook.Event{Source: "health", Kind: "x", Subject: "s", Severity: "warning"}
-	crit := webhook.Event{Source: "health", Kind: "x", Subject: "s", Severity: "critical"}
+	warn := notify.Event{Source: "health", Kind: "x", Subject: "s", Severity: "warning"}
+	crit := notify.Event{Source: "health", Kind: "x", Subject: "s", Severity: "critical"}
 
 	if !p.dedup.shouldFire(base, p.cfg.Cooldown, warn) {
 		t.Fatal("first occurrence should fire")
@@ -77,7 +78,7 @@ func TestDedupAlwaysFiresOnEscalation(t *testing.T) {
 func TestDedupSweepEvictsOldEntries(t *testing.T) {
 	p := &Poller{cfg: Config{Cooldown: time.Minute}, dedup: newDedupState()}
 	base := time.Unix(1000, 0)
-	ev := webhook.Event{Source: "health", Kind: "x", Subject: "s", Severity: "info"}
+	ev := notify.Event{Source: "health", Kind: "x", Subject: "s", Severity: "info"}
 	p.dedup.shouldFire(base, p.cfg.Cooldown, ev)
 
 	p.dedup.sweep(base.Add(30*time.Minute), p.cfg.Cooldown) // within max(cooldown*8, 1h) => not evicted
@@ -96,7 +97,7 @@ func TestEvaluateSkipsDeadAgentsImplicitlyViaSources(t *testing.T) {
 	// this is a smoke test that evaluate() runs the full pipeline without
 	// panicking against a minimal fixture and respects dedup across two
 	// calls with the same data.
-	var published []webhook.Event
+	var published []notify.Event
 	p := newTestPoller(Config{}, &published)
 	agents := []models.AgentStatus{{AgentReport: models.AgentReport{Node: "n1"}}}
 
@@ -129,7 +130,7 @@ func TestEvaluateEmitsAIDigestOnCriticalHealth(t *testing.T) {
 	if sample.Severity == "" {
 		t.Fatalf("expected a populated cluster-health sample alongside events, got %#v", sample)
 	}
-	var digest *webhook.Event
+	var digest *notify.Event
 	for i := range evs {
 		if evs[i].Source == "ai" && evs[i].Kind == "digest" {
 			digest = &evs[i]
@@ -172,7 +173,7 @@ func TestEvaluateAIDigestCardExplainsFingerprintChange(t *testing.T) {
 	p.evaluate(now, quiet)
 
 	evs, _ := p.evaluate(now.Add(time.Second), degraded)
-	var digest *webhook.Event
+	var digest *notify.Event
 	for i := range evs {
 		if evs[i].Source == "ai" && evs[i].Kind == "digest" {
 			digest = &evs[i]
@@ -270,7 +271,7 @@ func TestTickRecordsHealthSampleEvenWhenQuiet(t *testing.T) {
 	p := &Poller{
 		log:     discardLogger(),
 		fetch:   func(now time.Time, staleAfter time.Duration) []models.AgentStatus { return nil },
-		publish: func(webhook.Event) bool { return true },
+		publish: func(notify.Event) bool { return true },
 		record: func(s models.ClusterHealthSample, now time.Time) {
 			recorded = append(recorded, s)
 		},
@@ -288,20 +289,20 @@ func TestTickRecordsHealthSampleEvenWhenQuiet(t *testing.T) {
 }
 
 func TestTickToleratesNilRecord(t *testing.T) {
-	p := newTestPoller(Config{}, &[]webhook.Event{})
+	p := newTestPoller(Config{}, &[]notify.Event{})
 	p.record = nil
 	p.tick() // must not panic
 }
 
-// TestEndToEndDispatch wires a real Poller to a real webhook.Dispatcher and
-// an httptest fake sink, confirming an event survives the full path with
-// the expected JSON body.
+// TestEndToEndDispatch wires a real Poller to a real notify.Dispatcher and
+// an httptest fake webhook channel, confirming an event survives the full
+// path with the expected JSON body.
 func TestEndToEndDispatch(t *testing.T) {
 	var hits int32
 	var mu sync.Mutex
 	var gotSource string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var ev webhook.Event
+		var ev notify.Event
 		_ = json.NewDecoder(r.Body).Decode(&ev)
 		mu.Lock()
 		gotSource = ev.Source
@@ -310,12 +311,12 @@ func TestEndToEndDispatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sink, err := webhook.New(webhook.Config{Name: "t", URL: srv.URL})
+	ch, err := notify.NewWebhookChannel(webhook.Config{Name: "t", URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := webhook.NewDispatcher(16)
-	d.Add(sink)
+	d := notify.NewDispatcher(16)
+	d.Add(ch)
 	d.Start(1)
 	defer d.Stop()
 
@@ -326,7 +327,7 @@ func TestEndToEndDispatch(t *testing.T) {
 		cfg:     Config{Cooldown: time.Minute},
 		dedup:   newDedupState(),
 	}
-	ev := webhook.Event{Source: "health", Kind: "k", Subject: "s", Severity: "warning", Message: "m"}
+	ev := notify.Event{Source: "health", Kind: "k", Subject: "s", Severity: "warning", Message: "m"}
 	if !p.dedup.shouldFire(time.Now(), p.cfg.Cooldown, ev) {
 		t.Fatal("expected first occurrence to fire")
 	}

@@ -21,14 +21,16 @@ jobs:
       # lease-race + mid-test handoff a few independent shots under the
       # race detector rather than relying on a single pass.
       run: go test ./cmd/netrad/... -run TestElectionLoopNeverDoubleShipsPushSinks -race -count=5
-    - name: Race-detect the recent detector/sink batch (denysim, dnsdetect, scandetect, tlsfp, slo, snowflakesink)
+    - name: Race-detect the recent detector/sink batch (denysim, dnsdetect, scandetect, tlsfp, slo, snowflakesink, notify/alert)
       # These packages are new and hold mutex-protected state shared between
       # a background poller goroutine and an HTTP handler (the same shape
       # the netrad race step above exists for) — scoped here rather than
       # broadened onto the main `go test ./...` step above so a real but
       # unrelated pre-existing race elsewhere in the module can't turn this
       # batch's CI red for a reason having nothing to do with it.
-      run: go test ./internal/denysim/... ./internal/dnsdetect/... ./internal/scandetect/... ./internal/tlsfp/... ./internal/slo/... ./internal/snowflakesink/... -race
+      # notify/alert/webhook: multi-channel dispatcher fans events to channels
+      # concurrently from poller workers (same mutex+queue shape).
+      run: go test ./internal/denysim/... ./internal/dnsdetect/... ./internal/scandetect/... ./internal/tlsfp/... ./internal/slo/... ./internal/snowflakesink/... ./internal/notify/... ./internal/alert/... ./internal/webhook/... -race
     - run: go vet ./...
     - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor ./cmd/netra-mcp
   web:
@@ -86,6 +88,12 @@ jobs:
           echo "dnsdetect/scandetect env vars unexpectedly rendered when disabled by default" >&2
           exit 1
         fi
+    - name: Default render must not enable multi-channel alerting
+      run: |
+        if grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra.yaml || grep -q 'name: NETRA_ALERT_WEBHOOKS' /tmp/netra.yaml || grep -q 'name: NETRA_ALERT_POLL_INTERVAL' /tmp/netra.yaml; then
+          echo "alerting env vars unexpectedly rendered when alerting.enabled=false" >&2
+          exit 1
+        fi
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true --set cilium.enabled=true --set hubble.enabled=true >/tmp/netra-cilium.yaml
     - name: Optional Cilium render must include policy RBAC
@@ -101,6 +109,55 @@ jobs:
         grep -q 'name: NETRA_DNSDETECT_INTERVAL' /tmp/netra-detectors.yaml
         grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra-detectors.yaml
         grep -q 'name: NETRA_SCANDETECT_INTERVAL' /tmp/netra-detectors.yaml
+    - name: Render multi-channel alerting with channelsJson
+      run: |
+        cat > /tmp/alerting-values.yaml <<'EOF'
+        alerting:
+          enabled: true
+          channelsJson: '[{"type":"webhook","name":"ci","url":"https://example.invalid/hook","minSeverity":"warning"}]'
+        EOF
+        helm template alert helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          -f /tmp/alerting-values.yaml \
+          >/tmp/netra-alerting.yaml
+    - name: Alerting env vars render when enabled
+      run: |
+        grep -q 'name: NETRA_ALERT_POLL_INTERVAL' /tmp/netra-alerting.yaml
+        grep -q 'name: NETRA_ALERT_COOLDOWN' /tmp/netra-alerting.yaml
+        grep -q 'name: NETRA_ALERT_WORKERS' /tmp/netra-alerting.yaml
+        grep -q 'name: NETRA_ALERT_QUEUE_SIZE' /tmp/netra-alerting.yaml
+        grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra-alerting.yaml
+        grep -q 'example.invalid/hook' /tmp/netra-alerting.yaml
+        if grep -q 'name: NETRA_ALERT_WEBHOOKS' /tmp/netra-alerting.yaml; then
+          echo "legacy NETRA_ALERT_WEBHOOKS should not render when channelsJson is set" >&2
+          exit 1
+        fi
+    - name: Render legacy alerting webhooksJson when channelsJson unset
+      run: |
+        cat > /tmp/alerting-legacy-values.yaml <<'EOF'
+        alerting:
+          enabled: true
+          webhooksJson: '[{"name":"ci","url":"https://example.invalid/hook"}]'
+        EOF
+        helm template alert-legacy helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          -f /tmp/alerting-legacy-values.yaml \
+          >/tmp/netra-alerting-legacy.yaml
+        grep -q 'name: NETRA_ALERT_WEBHOOKS' /tmp/netra-alerting-legacy.yaml
+        if grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra-alerting-legacy.yaml; then
+          echo "NETRA_ALERT_CHANNELS should not render when only webhooksJson is set" >&2
+          exit 1
+        fi
+    - name: Render alerting from existingSecret
+      run: |
+        helm template alert-secret helm/netra \
+          --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set alerting.enabled=true \
+          --set alerting.existingSecret=netra-alerting \
+          >/tmp/netra-alerting-secret.yaml
+        grep -q 'name: NETRA_ALERT_CHANNELS' /tmp/netra-alerting-secret.yaml
+        grep -q 'secretKeyRef' /tmp/netra-alerting-secret.yaml
+        grep -q 'key: channels-json' /tmp/netra-alerting-secret.yaml
     - name: Standalone render must expose workload attribution safely
       run: |
         grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml

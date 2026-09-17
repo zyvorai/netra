@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyvorai/netra/internal/webhook"
+	"github.com/zyvorai/netra/internal/notify"
 )
 
 // severityRank mirrors internal/health/summary.go's own severity-order map
@@ -38,7 +38,7 @@ func newDedupState() *dedupState {
 
 // shouldFire reports whether ev should be published now, and if so records
 // it as the new fire state for its key.
-func (d *dedupState) shouldFire(now time.Time, cooldown time.Duration, ev webhook.Event) bool {
+func (d *dedupState) shouldFire(now time.Time, cooldown time.Duration, ev notify.Event) bool {
 	key := dedupKey{ev.Source, ev.Kind, ev.Subject}
 	d.mu.Lock()
 	defer d.mu.Unlock()

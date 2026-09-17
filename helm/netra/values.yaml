@@ -98,6 +98,23 @@ chatops:
   # registered), independent of the Slack signing secret above. See
   # docs/chatops-teams.md.
   teamsAppId: ""
+
+# Multi-channel outbound alerting (email, Slack, Teams, Twilio, webhooks,
+# HTTP bridge). Off by default. Prefer channelsJson (NETRA_ALERT_CHANNELS);
+# legacy webhooksJson (NETRA_ALERT_WEBHOOKS) still works when channelsJson
+# is empty. Put secrets in existingSecret (key: channels-json) rather than
+# plain values. See docs/alerting.md. Distinct from chatops (inbound).
+alerting:
+  enabled: false
+  pollInterval: "30s"
+  cooldown: "5m"
+  workers: 2
+  queueSize: 256
+  # JSON array of channel objects, or leave empty and use existingSecret.
+  channelsJson: ""
+  # Legacy webhook-only JSON (ignored when channelsJson / secret is set).
+  webhooksJson: ""
+  existingSecret: ""
 service:
   type: ClusterIP
   port: 30870

@@ -209,6 +209,29 @@ spec:
         {{- end }}
         {{- end }}
         {{- end }}
+        {{- if .Values.alerting.enabled }}
+        - name: NETRA_ALERT_POLL_INTERVAL
+          value: {{ .Values.alerting.pollInterval | quote }}
+        - name: NETRA_ALERT_COOLDOWN
+          value: {{ .Values.alerting.cooldown | quote }}
+        - name: NETRA_ALERT_WORKERS
+          value: {{ .Values.alerting.workers | quote }}
+        - name: NETRA_ALERT_QUEUE_SIZE
+          value: {{ .Values.alerting.queueSize | quote }}
+        {{- if .Values.alerting.existingSecret }}
+        - name: NETRA_ALERT_CHANNELS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.alerting.existingSecret | quote }}
+              key: channels-json
+        {{- else if .Values.alerting.channelsJson }}
+        - name: NETRA_ALERT_CHANNELS
+          value: {{ .Values.alerting.channelsJson | quote }}
+        {{- else if .Values.alerting.webhooksJson }}
+        - name: NETRA_ALERT_WEBHOOKS
+          value: {{ .Values.alerting.webhooksJson | quote }}
+        {{- end }}
+        {{- end }}
         resources: {{- toYaml .Values.resources | nindent 10 }}
         {{- if or .Values.tls.enabled .Values.persistence.enabled .Values.gitops.enabled }}
         volumeMounts:
