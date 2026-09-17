@@ -15,6 +15,8 @@ Netra v0.10 includes cgroup-to-Pod attribution without giving the privileged age
 
 `scopeMode=all` preserves node-wide enforcement. `scopeMode=selected` populates an `enforced_cgroups` BPF map from namespace/pod/immediate-owner/label/cgroup-ID selectors. In selected mode, un-attributed cgroups fail open, and optional TCX/XDP remain observe-only because those hooks cannot provide the workload cgroup identity used by this policy gate. See `docs/workload-scoping.md`.
 
+The controller fetches each node's Pod inventory fresh on every agent sync (`GET /api/v1/ebpf/config?node=<node>`) rather than caching it client-side, so a transient Kubernetes API error doesn't leave a stale inventory in the agent. The controller itself keeps a last-known-good copy per node and serves that on a fetch error, instead of an empty inventory — see `docs/behavior-insights.md`'s dependency-graph troubleshooting section for the failure mode this avoids.
+
 ## Enforcement rules
 
 Rules are staged in controller state and synchronized to every agent. Observe mode keeps maps populated but returns allow verdicts. Enforce mode is always leased.

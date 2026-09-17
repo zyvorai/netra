@@ -109,6 +109,13 @@ listing: literal per-PID rows (raw host processes, not attributed to any
 workload) are an explicit non-goal of this feature, not an oversight —
 see **Limits** below.
 
+A single pod typically produces **multiple rows**: one for the pod-level
+cgroup slice (`ContainerID` empty) and one per container's own cgroup
+scope underneath it (`ContainerID` set). This mirrors the underlying
+cgroup v2 hierarchy directly rather than pre-aggregating per pod, so a
+multi-container pod's per-container split is visible rather than
+collapsed into one number.
+
 ## Semantics and limitations
 
 - **Stale nodes stay listed, but excluded from aggregates.** Unlike

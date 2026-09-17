@@ -16,6 +16,13 @@ Only workload-attributed egress counters are used for the graph. The controller 
 
 The graph is an observation product, not a service-discovery authority. Headless Services do not have a ClusterIP and therefore cannot be resolved through ClusterIP matching alone.
 
+### Troubleshooting an empty graph
+
+`GET /api/v1/insights/dependencies` (and the dashboard's Topology page) can render with no nodes/edges for two different reasons:
+
+1. **Transient Kubernetes API failures blanking workload attribution.** `GET /api/v1/ebpf/config?node=<node>` fetches that node's Pod inventory from the Kubernetes API on every agent sync; the agent then joins its scanned cgroups against that inventory (`internal/workload.Resolve`) to attribute flow counters to a Namespace/Pod/WorkloadName. A single failed fetch (429, timeout, brief apiserver unavailability) used to leave that inventory empty for the request, which `Resolve` treats as "this node genuinely has zero workloads" and blanks every cgroup's identity — silently dropping that node's counters from the dependency graph until the next successful fetch. The controller now keeps a last-known-good inventory per node (`internal/api.workloadInventoryCache`) and falls back to it on a fetch error instead, so a single transient failure no longer empties the graph. If you still see this, check the controller logs for `"load node workload inventory"`: a `using last-known-good` message means the cache caught a real fetch failure (worth investigating apiserver health/rate limits); a plain failure message with no fallback means that node has never had a successful fetch at all (check the controller's Kubernetes RBAC/connectivity).
+2. **Attribution disabled or unsupported at the agent.** Only workload-attributed egress counters feed the graph (see above). If `NETRA_CGROUP_ENABLED` is off, or the node's cgroup-skb hooks aren't attaching, no attributed counters exist to graph in the first place — this is a deployment/config issue, not a controller bug, and won't be fixed by the cache above.
+
 ## Known-good baseline
 
 `POST /api/v1/insights/baseline` captures a persistent set of behaviors from non-stale agents:
