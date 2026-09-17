@@ -45,6 +45,8 @@ enforce mode or apply deny rules.
 
 Shared package: [`internal/features`](../internal/features).
 
+Local / CI gate: `./scripts/ci-features-unit.sh` (also `make test-features`).
+
 ## Status
 
 `netractl status` prints a human-readable board (banner when TTY): version,
