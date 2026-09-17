@@ -21,8 +21,16 @@ jobs:
       # lease-race + mid-test handoff a few independent shots under the
       # race detector rather than relying on a single pass.
       run: go test ./cmd/netrad/... -run TestElectionLoopNeverDoubleShipsPushSinks -race -count=5
+    - name: Race-detect the recent detector/sink batch (denysim, dnsdetect, scandetect, tlsfp, slo, snowflakesink)
+      # These packages are new and hold mutex-protected state shared between
+      # a background poller goroutine and an HTTP handler (the same shape
+      # the netrad race step above exists for) — scoped here rather than
+      # broadened onto the main `go test ./...` step above so a real but
+      # unrelated pre-existing race elsewhere in the module can't turn this
+      # batch's CI red for a reason having nothing to do with it.
+      run: go test ./internal/denysim/... ./internal/dnsdetect/... ./internal/scandetect/... ./internal/tlsfp/... ./internal/slo/... ./internal/snowflakesink/... -race
     - run: go vet ./...
-    - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor
+    - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor ./cmd/netra-mcp
   web:
     runs-on: ubuntu-latest
     steps:
@@ -72,6 +80,12 @@ jobs:
         awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 ~ /"true"/) exit 1}' /tmp/netra.yaml
         grep -q 'name: NETRA_CILIUM_ENABLED' /tmp/netra.yaml
         grep -q 'name: NETRA_HUBBLE_ENABLED' /tmp/netra.yaml
+    - name: Default render must not enable dns/scan detectors
+      run: |
+        if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then
+          echo "dnsdetect/scandetect env vars unexpectedly rendered when disabled by default" >&2
+          exit 1
+        fi
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true >/tmp/netra-agent.yaml
     - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.enabled=true --set cilium.enabled=true --set hubble.enabled=true >/tmp/netra-cilium.yaml
     - name: Optional Cilium render must include policy RBAC
@@ -80,6 +94,13 @@ jobs:
       run: |
         awk '/name: NETRA_CILIUM_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
         awk '/name: NETRA_HUBBLE_ENABLED/{getline; if ($0 !~ /"true"/) exit 1}' /tmp/netra-cilium.yaml
+    - run: helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set dnsdetect.enabled=true --set scandetect.enabled=true >/tmp/netra-detectors.yaml
+    - name: Optional detector env vars render when enabled
+      run: |
+        grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra-detectors.yaml
+        grep -q 'name: NETRA_DNSDETECT_INTERVAL' /tmp/netra-detectors.yaml
+        grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra-detectors.yaml
+        grep -q 'name: NETRA_SCANDETECT_INTERVAL' /tmp/netra-detectors.yaml
     - name: Standalone render must expose workload attribution safely
       run: |
         grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml
