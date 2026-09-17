@@ -148,6 +148,36 @@ spec:
         - name: NETRA_GITOPS_INTERVAL
           value: {{ .Values.gitops.interval | quote }}
         {{- end }}
+        {{- if .Values.dnsdetect.enabled }}
+        - name: NETRA_DNSDETECT_ENABLED
+          value: "true"
+        - name: NETRA_DNSDETECT_INTERVAL
+          value: {{ .Values.dnsdetect.interval | quote }}
+        - name: NETRA_DNSDETECT_MAX_UNIQUE_SUBDOMAINS
+          value: {{ .Values.dnsdetect.maxUniqueSubdomains | quote }}
+        - name: NETRA_DNSDETECT_NXDOMAIN_RATIO
+          value: {{ .Values.dnsdetect.nxdomainRatio | quote }}
+        - name: NETRA_DNSDETECT_SERVFAIL_RATIO
+          value: {{ .Values.dnsdetect.servfailRatio | quote }}
+        - name: NETRA_DNSDETECT_MAX_DOMAINS
+          value: {{ .Values.dnsdetect.maxDomains | quote }}
+        - name: NETRA_DNSDETECT_FINDINGS_TTL
+          value: {{ .Values.dnsdetect.findingsTTL | quote }}
+        {{- end }}
+        {{- if .Values.scandetect.enabled }}
+        - name: NETRA_SCANDETECT_ENABLED
+          value: "true"
+        - name: NETRA_SCANDETECT_INTERVAL
+          value: {{ .Values.scandetect.interval | quote }}
+        - name: NETRA_SCANDETECT_WINDOW
+          value: {{ .Values.scandetect.window | quote }}
+        - name: NETRA_SCANDETECT_MAX_DEST_IPS
+          value: {{ .Values.scandetect.maxDestIps | quote }}
+        - name: NETRA_SCANDETECT_MAX_DEST_PORTS
+          value: {{ .Values.scandetect.maxDestPorts | quote }}
+        - name: NETRA_SCANDETECT_MIN_ATTEMPTS
+          value: {{ .Values.scandetect.minAttempts | quote }}
+        {{- end }}
         {{- if .Values.chatops.enabled }}
         - name: NETRA_CHATOPS_ALLOW_MUTATIONS
           value: {{ .Values.chatops.allowMutations | quote }}

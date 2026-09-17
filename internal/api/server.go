@@ -24,6 +24,7 @@ import (
 	"github.com/zyvorai/netra/internal/capdrift"
 	"github.com/zyvorai/netra/internal/chatops"
 	"github.com/zyvorai/netra/internal/detective"
+	"github.com/zyvorai/netra/internal/dnsdetect"
 	"github.com/zyvorai/netra/internal/dropdiag"
 	"github.com/zyvorai/netra/internal/exehash"
 	"github.com/zyvorai/netra/internal/flowstats"
@@ -40,6 +41,7 @@ import (
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/policy"
+	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/shielddiag"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
@@ -64,6 +66,8 @@ type Server struct {
 	consoleEnabled      bool
 	metricsData         *telemetry
 	captureHub          *captureHub
+	dnsDetector         *dnsdetect.Detector
+	scanDetector        *scandetect.Detector
 }
 
 func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *Server {
@@ -122,16 +126,36 @@ func (s *Server) WithGitOps(r *gitops.Reconciler) *Server {
 	return s
 }
 
+// WithDNSDetect attaches the shared *dnsdetect.Detector instance a
+// cmd/netrad poller is (or isn't) feeding — optional, since dnsdetect is
+// off unless NETRA_DNSDETECT_ENABLED=true. Both the API handler and the
+// poller read/write the same pointer, the same "long-lived object shared
+// between an HTTP-exposed piece and a background-running piece" shape
+// gitops already uses. Returns s for chaining onto New(...).
+func (s *Server) WithDNSDetect(d *dnsdetect.Detector) *Server {
+	s.dnsDetector = d
+	return s
+}
+
+// WithScanDetect attaches the shared *scandetect.Detector instance a
+// cmd/netrad poller is (or isn't) feeding — optional, since scandetect is
+// off unless NETRA_SCANDETECT_ENABLED=true. Same sharing shape as
+// WithDNSDetect. Returns s for chaining onto New(...).
+func (s *Server) WithScanDetect(d *scandetect.Detector) *Server {
+	s.scanDetector = d
+	return s
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.95"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.96"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.95"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.96"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.95"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.96"})
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 	if s.chatopsHandler != nil {
@@ -187,6 +211,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/topology", s.auth(http.HandlerFunc(s.ebpfTopology)))
 	mux.Handle("PUT /api/v1/ebpf/mode", s.auth(http.HandlerFunc(s.ebpfMode)))
 	mux.Handle("POST /api/v1/ebpf/deny", s.auth(http.HandlerFunc(s.ebpfDenyAdd)))
+	mux.Handle("POST /api/v1/ebpf/deny/preview", s.auth(http.HandlerFunc(s.ebpfDenyPreview)))
 	mux.Handle("DELETE /api/v1/ebpf/deny/{ip}", s.auth(http.HandlerFunc(s.ebpfDenyDelete)))
 	mux.Handle("POST /api/v1/ebpf/deny/import", s.auth(http.HandlerFunc(s.ebpfDenyImport)))
 	mux.Handle("POST /api/v1/ebpf/allow", s.auth(http.HandlerFunc(s.ebpfAllowAdd)))
@@ -244,6 +269,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/kernel-network", s.auth(http.HandlerFunc(s.ebpfKernelNetworkDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/kernel-network/sparkline", s.auth(http.HandlerFunc(s.ebpfKernelNetworkSparkline)))
 	mux.Handle("GET /api/v1/ebpf/sysctl-audit", s.auth(http.HandlerFunc(s.ebpfSysctlAudit)))
+	mux.Handle("GET /api/v1/ebpf/dns-findings", s.auth(http.HandlerFunc(s.ebpfDNSFindings)))
+	mux.Handle("GET /api/v1/ebpf/scan-findings", s.auth(http.HandlerFunc(s.ebpfScanFindings)))
 	mux.Handle("GET /api/v1/ebpf/ipv6", s.auth(http.HandlerFunc(s.ebpfIPv6Diagnostics)))
 	mux.Handle("GET /api/v1/ebpf/shield", s.auth(http.HandlerFunc(s.ebpfShieldDiagnostics)))
 	mux.Handle("GET /api/v1/ebpf/interfaces", s.auth(http.HandlerFunc(s.ebpfInterfaceFlows)))
@@ -401,7 +428,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.95", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.96", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2500,6 +2527,43 @@ func (s *Server) ebpfSysctlAudit(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	writeJSON(w, 200, sysctlaudit.Build(s.store.AgentStatuses(time.Now(), s.agentStaleAfter), limit))
+}
+
+// errDNSDetectDisabled/errScanDetectDisabled mirror errGitOpsDisabled's
+// "optional feature, off unless configured" 409 convention.
+var (
+	errDNSDetectDisabled  = errors.New("dns-detect is not enabled (set NETRA_DNSDETECT_ENABLED=true)")
+	errScanDetectDisabled = errors.New("scan-detect is not enabled (set NETRA_SCANDETECT_ENABLED=true)")
+)
+
+// ebpfDNSFindings reads from the shared *dnsdetect.Detector a cmd/netrad
+// poller is continuously feeding (see WithDNSDetect) — unlike every other
+// ebpf* handler in this file, this is not a fresh Build(agents) call: the
+// detector holds its own rolling state (LRU + sliding time buckets) across
+// requests, so two calls a minute apart can legitimately return different
+// findings for the same underlying traffic.
+func (s *Server) ebpfDNSFindings(w http.ResponseWriter, _ *http.Request) {
+	if s.dnsDetector == nil {
+		errorJSON(w, http.StatusConflict, errDNSDetectDisabled.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"findings": s.dnsDetector.Findings(),
+		"snapshot": s.dnsDetector.Snapshot(),
+	})
+}
+
+// ebpfScanFindings is scandetect's analog of ebpfDNSFindings above — same
+// shared-detector-instance shape (see WithScanDetect).
+func (s *Server) ebpfScanFindings(w http.ResponseWriter, _ *http.Request) {
+	if s.scanDetector == nil {
+		errorJSON(w, http.StatusConflict, errScanDetectDisabled.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"findings": s.scanDetector.Findings(),
+		"snapshot": s.scanDetector.Snapshot(),
+	})
 }
 
 func (s *Server) ebpfIPv6Diagnostics(w http.ResponseWriter, r *http.Request) {

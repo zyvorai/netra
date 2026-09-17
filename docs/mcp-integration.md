@@ -197,6 +197,9 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_export_status` | `GET /api/v1/export/status` | — | Whether syslog push is configured |
 | `netra_ebpf_coverage` | `GET /api/v1/ebpf/coverage` | — | Per-node hook/program coverage matrix |
 | `netra_intel_preview` | `POST /api/v1/intel/preview` | `text` (raw feed body) | Parse JSON/CSV/bare IPs into deny-import entries. Applies nothing |
+| `netra_ebpf_deny_preview` | `POST /api/v1/ebpf/deny/preview` | `kind`, `value`, optional direction/protocol/scope | Observed-counter blast radius for a proposed deny. Applies nothing |
+| `netra_ebpf_dns_findings` | `GET /api/v1/ebpf/dns-findings` | — | Metadata-only DNS anomaly findings (tunneling, DGA, beaconing, storms) from a continuously-running detector. Returns 409 if disabled |
+| `netra_ebpf_scan_findings` | `GET /api/v1/ebpf/scan-findings` | — | Port-scan/fan-out/lateral-movement/SYN-flood findings from a continuously-running detector. Returns 409 if disabled |
 | `netra_pods` | `GET /api/v1/pods` | `namespace` | Lockdown status included per pod |
 | `netra_vms` | `GET /api/v1/vms` | `namespace` | Result's `available` field indicates whether KubeVirt is installed |
 | `netra_workload_detail` | `GET /api/v1/workloads/{kind}/{namespace}/{name}` | `kind` **(path, required, `pod`\|`vm`)**, `namespace` **(path, required)**, `name` **(path, required)** | Phase, node, IP, labels, recommended selector, matching policies |

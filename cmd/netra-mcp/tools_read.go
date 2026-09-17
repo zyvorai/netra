@@ -310,6 +310,16 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_ebpf_dns_findings", method: "GET", path: "/api/v1/ebpf/dns-findings",
+			description: "Metadata-only DNS anomaly findings (tunneling, DGA, beaconing, NXDOMAIN/SERVFAIL storms) from a continuously-running detector fed by matched DNS-response events. Observe-only; a miss does not prove a domain is benign. Returns 409 if NETRA_DNSDETECT_ENABLED is not set. Distinct from netra_dns_board, which is per-name query/failure counters, not behavioral detection.",
+			schema:      emptySchema(),
+		},
+		{
+			name: "netra_ebpf_scan_findings", method: "GET", path: "/api/v1/ebpf/scan-findings",
+			description: "Port-scan, fan-out, lateral-movement, and SYN-flood findings from a continuously-running detector fed by per-connection-attempt TCP flag data. Allowed (non-blocked) traffic is only sampled by the datapath, so absence of a finding is not proof a workload made no such attempts. Returns 409 if NETRA_SCANDETECT_ENABLED is not set.",
+			schema:      emptySchema(),
+		},
+		{
 			name: "netra_ebpf_ipv6", method: "GET", path: "/api/v1/ebpf/ipv6",
 			description: "IPv6 extension-header and fragmentation diagnostics: extension-header counts, fragmentation rate, and truncated-chain counts per node, with anomaly detection.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-500. Default 50.")}),
@@ -567,6 +577,23 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 				"kind":      enumProp("Workload kind. Default \"pod\".", "pod", "vm"),
 				"selector":  map[string]any{"type": "object", "description": "Pod label selector. Auto-detected from the live workload if omitted.", "additionalProperties": map[string]any{"type": "string"}},
 			}, "name"),
+			bodyFields: true,
+		},
+		{
+			name: "netra_ebpf_deny_preview", method: "POST", path: "/api/v1/ebpf/deny/preview",
+			description: "Review-only blast radius for a proposed emergency deny. Matches live non-stale agent flow counters, connect-attempt, DNS, TLS SNI, or sampled process events. Applies nothing, writes nothing, does not flip enforce mode. Absence of a hit is not proof the destination is unused.",
+			schema: objSchema(map[string]any{
+				"kind":         enumProp("Deny kind to preview.", "ip", "cidr", "port", "dns", "sni", "process"),
+				"value":        strProp("IP, CIDR, port number, DNS name, SNI, or process comm."),
+				"direction":    enumProp("Packet direction to match. Default both.", "egress", "ingress", "both"),
+				"protocol":     enumProp("Optional L4 protocol filter for ip/cidr/port.", "TCP", "UDP", "ANY"),
+				"port":         intProp("Optional destination port for kind=port when value is not the port."),
+				"namespace":    strProp("Optional workload namespace filter."),
+				"pod":          strProp("Optional pod name filter."),
+				"workloadKind": strProp("Optional owner kind filter."),
+				"workloadName": strProp("Optional owner name filter."),
+				"limit":        intProp("Max hits to return, 1-200. Default 50."),
+			}, "kind", "value"),
 			bodyFields: true,
 		},
 		{

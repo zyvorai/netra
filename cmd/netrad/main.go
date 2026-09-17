@@ -17,18 +17,21 @@ import (
 
 	"github.com/zyvorai/netra/internal/alert"
 	"github.com/zyvorai/netra/internal/api"
+	"github.com/zyvorai/netra/internal/dnsdetect"
 	"github.com/zyvorai/netra/internal/gitops"
 	"github.com/zyvorai/netra/internal/ha"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/siem"
 	"github.com/zyvorai/netra/internal/snowflakesink"
 	"github.com/zyvorai/netra/internal/store"
+	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/webhook"
 )
 
-const version = "0.27.95"
+const version = "0.27.96"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -85,7 +88,9 @@ func main() {
 	if gitopsEnabled {
 		gr = gitops.New(log, k, st, gitopsCfg)
 	}
-	handler := api.New(log, k, h, st).WithGitOps(gr).Handler()
+	dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
+	scanDet, scanInterval, scanEnabled := buildScanDetect()
+	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).Handler()
 
 	if dispatcher != nil {
 		var pollerWG sync.WaitGroup
@@ -118,6 +123,31 @@ func main() {
 	if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
 		defer stop()
 		defer snowflakeWG.Wait()
+	}
+	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+	if dnsEnabled {
+		var dnsWG sync.WaitGroup
+		dctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		dnsWG.Add(1)
+		go func() {
+			defer dnsWG.Done()
+			log.Info("dns-detect started", "interval", dnsInterval)
+			dnsDet.Run(dctx, dnsInterval, func() []models.AgentStatus { return st.AgentStatuses(time.Now(), staleAfter) })
+		}()
+		defer dnsWG.Wait()
+	}
+	if scanEnabled {
+		var scanWG sync.WaitGroup
+		sctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		scanWG.Add(1)
+		go func() {
+			defer scanWG.Done()
+			log.Info("scan-detect started", "interval", scanInterval)
+			scanDet.Run(sctx, scanInterval, func() []models.AgentStatus { return st.AgentStatuses(time.Now(), staleAfter) })
+		}()
+		defer scanWG.Wait()
 	}
 
 	runHTTP(ctx, log, handler, st.Persistent(), false)
@@ -155,6 +185,15 @@ func startSyslog(ctx context.Context, log *slog.Logger, st *store.Store, wg *syn
 	return cancel
 }
 
+// sysctlExportDefaultTopN is the default row cap for the sysctl-audit
+// Snowflake export. It is deliberately much larger than
+// sysctlaudit.Build's own HTTP-handler default of 50 (see
+// internal/api/server.go's ebpfSysctlAudit) — that default sizes an
+// operator-facing HTTP page, and reusing it here would silently
+// truncate findings per node, contradicting this export's contract of
+// pushing the full current snapshot every tick.
+const sysctlExportDefaultTopN = 100000
+
 // startSnowflake starts the optional audit-event export sink when
 // NETRA_SNOWFLAKE_ACCOUNT is set. Off by default. Same optional-feature
 // shape as startSyslog: env-var gated, best-effort per flush, and
@@ -163,10 +202,20 @@ func startSyslog(ctx context.Context, log *slog.Logger, st *store.Store, wg *syn
 // at startup, so a bad account/credential/warehouse config fails fast
 // here — matching NETRA_API_KEY's fail-closed startup check — rather
 // than being discovered later as a stream of failed-flush warnings.
+//
+// When NETRA_SNOWFLAKE_SYSCTL_ENABLED is also set, a second export loop
+// runs alongside the audit loop, reusing the same Snowflake connection
+// to push sysctl-audit findings into their own table. See
+// docs/snowflake-export.md for why that table carries no watermark.
 func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *sync.WaitGroup) func() {
 	account := strings.TrimSpace(os.Getenv("NETRA_SNOWFLAKE_ACCOUNT"))
 	if account == "" || st == nil || wg == nil {
 		return nil
+	}
+	extraCols, err := snowflakesink.ParseExtraColumns(env("NETRA_SNOWFLAKE_EXTRA_COLUMNS", ""))
+	if err != nil {
+		log.Error("snowflake extra columns config", "error", err)
+		os.Exit(1)
 	}
 	cfg := snowflakesink.Config{
 		Account:        account,
@@ -177,6 +226,7 @@ func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *
 		Schema:         env("NETRA_SNOWFLAKE_SCHEMA", ""),
 		Table:          env("NETRA_SNOWFLAKE_TABLE", "NETRA_AUDIT"),
 		BatchSize:      envInt("NETRA_SNOWFLAKE_BATCH_SIZE", 50),
+		ExtraColumns:   extraCols,
 	}
 	sink, err := snowflakesink.New(ctx, cfg, log)
 	if err != nil {
@@ -185,15 +235,58 @@ func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *
 	}
 	interval := envDuration("NETRA_SNOWFLAKE_INTERVAL", 15*time.Second)
 	sctx, cancel := context.WithCancel(ctx)
+
+	// inner tracks only the export loops below, so sink.Close() (which
+	// closes the *sql.DB both loops share) runs strictly after both have
+	// fully returned regardless of goroutine scheduling order — without
+	// this, one loop returning and closing the shared DB while the other
+	// is still mid-flush would be a use-after-close race.
+	var inner sync.WaitGroup
+
+	inner.Add(1)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer sink.Close()
-		log.Info("snowflake sink started", "account", account, "table", cfg.Table, "interval", interval)
+		defer inner.Done()
+		log.Info("snowflake sink started", "account", account, "table", cfg.Table, "interval", interval, "extraColumns", len(cfg.ExtraColumns))
 		sink.Run(sctx, interval, func() []models.AuditEvent {
 			return st.Audit(200)
 		})
 	}()
+
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_SNOWFLAKE_SYSCTL_ENABLED")), "true") {
+		sysctlCfg := snowflakesink.SysctlConfig{
+			Table:     env("NETRA_SNOWFLAKE_SYSCTL_TABLE", "NETRA_SYSCTL_AUDIT"),
+			BatchSize: envInt("NETRA_SNOWFLAKE_SYSCTL_BATCH_SIZE", 50),
+		}
+		sysctlSink, err := sink.NewSysctlSink(ctx, sysctlCfg)
+		if err != nil {
+			log.Error("snowflake sysctl sink config", "error", err)
+			os.Exit(1)
+		}
+		sysctlInterval := envDuration("NETRA_SNOWFLAKE_SYSCTL_INTERVAL", 30*time.Second)
+		staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+		topN := envInt("NETRA_SNOWFLAKE_SYSCTL_TOPN", sysctlExportDefaultTopN)
+
+		inner.Add(1)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer inner.Done()
+			log.Info("snowflake sysctl sink started", "table", sysctlCfg.Table, "interval", sysctlInterval)
+			sysctlSink.Run(sctx, sysctlInterval, func() models.SysctlAuditResponse {
+				return sysctlaudit.Build(st.AgentStatuses(time.Now(), staleAfter), topN)
+			})
+		}()
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		inner.Wait()
+		sink.Close()
+	}()
+
 	return cancel
 }
 
@@ -245,6 +338,58 @@ func buildAlerting(log *slog.Logger) (*webhook.Dispatcher, alert.Config) {
 		d.Add(sink)
 	}
 	return d, cfg
+}
+
+// buildDNSDetect reads NETRA_DNSDETECT_* env vars and constructs a
+// dnsdetect.Detector when enabled. Off by default via a plain feature
+// flag — matching gitops/chatops's "enabled: false" shape rather than a
+// "presence of one required value" gate, since there's no single natural
+// required config value here (every dnsdetect.Config field already has a
+// sane default).
+func buildDNSDetect() (*dnsdetect.Detector, time.Duration, bool) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_DNSDETECT_ENABLED")), "true") {
+		return nil, 0, false
+	}
+	cfg := dnsdetect.DefaultConfig()
+	if v := envInt("NETRA_DNSDETECT_MAX_UNIQUE_SUBDOMAINS", 0); v > 0 {
+		cfg.MaxUniqueSubdomains = v
+	}
+	if v := envFloat("NETRA_DNSDETECT_NXDOMAIN_RATIO", 0); v > 0 {
+		cfg.NXDomainRatio = v
+	}
+	if v := envFloat("NETRA_DNSDETECT_SERVFAIL_RATIO", 0); v > 0 {
+		cfg.ServfailRatio = v
+	}
+	if v := envInt("NETRA_DNSDETECT_MAX_DOMAINS", 0); v > 0 {
+		cfg.MaxDomains = v
+	}
+	if v := envDuration("NETRA_DNSDETECT_FINDINGS_TTL", 0); v > 0 {
+		cfg.FindingsTTL = v
+	}
+	interval := envDuration("NETRA_DNSDETECT_INTERVAL", 30*time.Second)
+	return dnsdetect.New(cfg), interval, true
+}
+
+// buildScanDetect is scandetect's analog of buildDNSDetect above.
+func buildScanDetect() (*scandetect.Detector, time.Duration, bool) {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_SCANDETECT_ENABLED")), "true") {
+		return nil, 0, false
+	}
+	cfg := scandetect.DefaultConfig()
+	if v := envDuration("NETRA_SCANDETECT_WINDOW", 0); v > 0 {
+		cfg.Window = v
+	}
+	if v := envInt("NETRA_SCANDETECT_MAX_DEST_IPS", 0); v > 0 {
+		cfg.MaxDestIPs = v
+	}
+	if v := envInt("NETRA_SCANDETECT_MAX_DEST_PORTS", 0); v > 0 {
+		cfg.MaxDestPorts = v
+	}
+	if v := envUint64("NETRA_SCANDETECT_MIN_ATTEMPTS", 0); v > 0 {
+		cfg.MinAttempts = v
+	}
+	interval := envDuration("NETRA_SCANDETECT_INTERVAL", 30*time.Second)
+	return scandetect.New(cfg), interval, true
 }
 
 func runHA(ctx context.Context, log *slog.Logger, k *kube.Client, h *hubble.Client, stateFile string, dispatcher *webhook.Dispatcher, alertCfg alert.Config, gitopsCfg gitops.Config, gitopsEnabled bool) {
@@ -308,6 +453,10 @@ func electionLoop(
 	var syslogWG sync.WaitGroup
 	var snowflakeCancel func()
 	var snowflakeWG sync.WaitGroup
+	var dnsDetectCancel func()
+	var dnsDetectWG sync.WaitGroup
+	var scanDetectCancel func()
+	var scanDetectWG sync.WaitGroup
 
 	demote := func(reason string) {
 		if !gate.IsLeader() {
@@ -333,6 +482,16 @@ func electionLoop(
 			snowflakeCancel()
 			snowflakeWG.Wait()
 			snowflakeCancel = nil
+		}
+		if dnsDetectCancel != nil {
+			dnsDetectCancel()
+			dnsDetectWG.Wait()
+			dnsDetectCancel = nil
+		}
+		if scanDetectCancel != nil {
+			scanDetectCancel()
+			scanDetectWG.Wait()
+			scanDetectCancel = nil
 		}
 		if st != nil {
 			if err := st.Close(); err != nil {
@@ -384,7 +543,9 @@ func electionLoop(
 		if gitopsEnabled {
 			gr = gitops.New(log, k, st, gitopsCfg)
 		}
-		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).Handler())
+		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
+		scanDet, scanInterval, scanEnabled := buildScanDetect()
+		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).Handler())
 		if dispatcher != nil {
 			pctx, cancel := context.WithCancel(ctx)
 			pollerCancel = cancel
@@ -408,6 +569,32 @@ func electionLoop(
 		}
 		if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
 			snowflakeCancel = stop
+		}
+		staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+		// leaderSt pins this stint's specific *store.Store: st is an outer
+		// variable electionLoop reassigns (to nil on demote, to a new store
+		// on the next promotion), so a closure capturing st directly would
+		// read whatever the *next* stint left there instead of this one's —
+		// exactly the failure alert.New(log, st, ...) avoids by taking st as
+		// a plain argument, copied once, at call time.
+		leaderSt := st
+		if dnsEnabled {
+			dctx, dcancel := context.WithCancel(ctx)
+			dnsDetectCancel = dcancel
+			dnsDetectWG.Add(1)
+			go func() {
+				defer dnsDetectWG.Done()
+				dnsDet.Run(dctx, dnsInterval, func() []models.AgentStatus { return leaderSt.AgentStatuses(time.Now(), staleAfter) })
+			}()
+		}
+		if scanEnabled {
+			sctx, scancel := context.WithCancel(ctx)
+			scanDetectCancel = scancel
+			scanDetectWG.Add(1)
+			go func() {
+				defer scanDetectWG.Done()
+				scanDet.Run(sctx, scanInterval, func() []models.AgentStatus { return leaderSt.AgentStatuses(time.Now(), staleAfter) })
+			}()
 		}
 		log.Info("controller promoted", "identity", identity, "lease", namespace+"/"+leaseName, "stateFile", stateFile)
 	}

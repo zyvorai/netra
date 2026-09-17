@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.95"
+  tag: "0.27.96"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.95"
+  tag: "0.27.96"
 replicaCount: 1
 ha:
   enabled: false
@@ -53,6 +53,30 @@ gitops:
   dir: /gitops/policies
   autoApply: false
   interval: 60s
+# Optional metadata-only DNS anomaly detection (tunneling, DGA, beaconing,
+# NXDOMAIN/SERVFAIL storms). Off by default. Observe-only — findings feed
+# alerting/SIEM, never enforcement. Fed by matched DNS-response events on
+# the interval below; every threshold not listed here keeps
+# internal/dnsdetect.DefaultConfig()'s own default.
+dnsdetect:
+  enabled: false
+  interval: 30s
+  maxUniqueSubdomains: 200
+  nxdomainRatio: 0.7
+  servfailRatio: 0.7
+  maxDomains: 50000
+  findingsTTL: 30m
+# Optional port-scan / fan-out / lateral-movement / SYN-flood detection
+# from per-connection-attempt TCP flag data. Off by default. Observe-only.
+# Allowed (non-blocked) traffic is only sampled by the datapath, so this
+# sees every blocked/reset attempt but a sampled fraction of allowed ones.
+scandetect:
+  enabled: false
+  interval: 30s
+  window: 60s
+  maxDestIps: 50
+  maxDestPorts: 50
+  minAttempts: 20
 # Optional Slack ChatOps slash-commands (/netra ...). Off by default. Needs
 # a Slack app's signing secret to verify inbound requests reached the
 # POST /chatops/slack webhook, and a dedicated API key so a compromised

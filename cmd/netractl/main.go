@@ -124,8 +124,9 @@ func usage() {
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
   drops [explain]
-  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | sysctl-audit | ipv6 | shield | interfaces | l7 | capabilities
+  ebpf stats | summary | coverage | reasons | census | health | capdrift | nsdrift | exehash | path | drops | kernel-network [1m|5m|15m|1h] | sysctl-audit | dns-findings | scan-findings | ipv6 | shield | interfaces | l7 | capabilities
   ebpf mode observe | mode enforce [lease]
+  ebpf deny-preview KIND VALUE [direction] [--protocol P] [--port N] [--namespace NS] [--pod POD] [--kind K] [--workload NAME] [--limit N]
   ebpf deny add IP [egress|ingress|both] | deny del IP | deny import FILE
   ebpf allow add IP | allow del IP
   ebpf allow-cidr add CIDR [direction] | allow-cidr del CIDR [direction]
@@ -682,6 +683,10 @@ func ebpf() error {
 		return request("GET", path, nil)
 	case "sysctl-audit":
 		return request("GET", "/api/v1/ebpf/sysctl-audit", nil)
+	case "dns-findings":
+		return request("GET", "/api/v1/ebpf/dns-findings", nil)
+	case "scan-findings":
+		return request("GET", "/api/v1/ebpf/scan-findings", nil)
 	case "ipv6":
 		return request("GET", "/api/v1/ebpf/ipv6", nil)
 	case "shield":
@@ -990,6 +995,52 @@ func ebpf() error {
 		}
 		b, _ := json.Marshal(map[string]string{"mode": os.Args[3]})
 		return request("PUT", p, b)
+	case "deny-preview":
+		if len(os.Args) < 5 {
+			return fmt.Errorf("deny-preview KIND VALUE [direction] [--protocol P] [--port N] [--namespace NS] [--pod POD] [--kind K] [--workload NAME] [--limit N]")
+		}
+		body := map[string]any{"kind": os.Args[3], "value": os.Args[4]}
+		i := 5
+		if i < len(os.Args) && !strings.HasPrefix(os.Args[i], "--") {
+			body["direction"] = os.Args[i]
+			i++
+		}
+		for ; i < len(os.Args); i++ {
+			flag := os.Args[i]
+			if i+1 >= len(os.Args) {
+				return fmt.Errorf("%s requires a value", flag)
+			}
+			value := os.Args[i+1]
+			i++
+			switch flag {
+			case "--protocol":
+				body["protocol"] = value
+			case "--port":
+				n, err := strconv.ParseUint(value, 10, 16)
+				if err != nil {
+					return fmt.Errorf("valid --port required")
+				}
+				body["port"] = uint16(n)
+			case "--namespace":
+				body["namespace"] = value
+			case "--pod":
+				body["pod"] = value
+			case "--kind":
+				body["workloadKind"] = value
+			case "--workload":
+				body["workloadName"] = value
+			case "--limit":
+				n, err := strconv.Atoi(value)
+				if err != nil {
+					return fmt.Errorf("valid --limit required")
+				}
+				body["limit"] = n
+			default:
+				return fmt.Errorf("unknown deny-preview flag %s", flag)
+			}
+		}
+		b, _ := json.Marshal(body)
+		return request("POST", "/api/v1/ebpf/deny/preview", b)
 	case "deny":
 		if len(os.Args) < 5 {
 			return fmt.Errorf("deny add|del IP | deny import FILE")

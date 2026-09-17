@@ -31,6 +31,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Optional Cilium / Hubble integration](#optional-cilium--hubble-integration)
 - [HTTPS default](#https-default)
 - [Signing in](#signing-in)
+- [Suite placement (PacketWolf)](#suite-placement-packetwolf)
 - [Architecture](#architecture)
 - [Repository](#repository)
 - [Prerequisites](#prerequisites)
@@ -117,6 +118,8 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Per-workload new-TCP-connection-rate ceiling (namespace/pod/owner/labels selector, checked on `connect()` only; UDP excluded).
 - Optional XDP early-ingress CIDR/port drop on explicitly selected interfaces.
 - Workload-scoped enforcement by namespace, pod, immediate owner, exact labels, or cgroup ID.
+- Review-only deny blast-radius preview (`POST /api/v1/ebpf/deny/preview`, `netractl ebpf deny-preview`) matching a proposed IP/CIDR/port/DNS/SNI/process deny against live non-stale agent counters. Applies nothing. See `docs/deny-preview.md`.
+- Optional, off-by-default metadata-only DNS anomaly detection (tunneling, DGA, beaconing, NXDOMAIN/SERVFAIL storms — `NETRA_DNSDETECT_ENABLED`, `GET /api/v1/ebpf/dns-findings`, `netractl ebpf dns-findings`) and port-scan/fan-out/lateral-movement/SYN-flood detection (`NETRA_SCANDETECT_ENABLED`, `GET /api/v1/ebpf/scan-findings`, `netractl ebpf scan-findings`). Both are continuously-running, observe-only detectors — never enforcement. See `docs/dns-detect.md` and `docs/scan-detect.md`.
 - Scope preview plus per-node selected-cgroup coverage before enforcement.
 - Observe/enforce lease, controller failsafe and local node failsafe.
 
@@ -235,6 +238,23 @@ including what the login maps to server-side and how to rotate the
 credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev)
 mark; Netra is Zyvor's open-source eBPF observability product.
 
+## Suite placement (PacketWolf)
+
+Netra and **PacketWolf** cover the same eBPF territory from opposite directions:
+PacketWolf is the Cilium-dependent suite flagship; Netra is the standalone
+Apache-2.0 layer that works on cgroup v2 alone (Cilium/Hubble optional). They are
+**counterparts, not a wired pipeline** — no shared API, CRD, or install pair.
+
+| Choose **Netra** when… | Choose **PacketWolf** when… |
+| --- | --- |
+| CNI-independent observe + leased emergency kill-switch | Cilium is already the CNI of record |
+| Path/Drop/Congestion diagnostics without a full platform | Full AutoPolicy / healer / operator stack |
+
+On a Cilium cluster both may run with clear ownership (PacketWolf for day-2
+intelligence; Netra for short-lease deny and CNI-independent diagnostics). Full
+rules: [docs/packetwolf.md](docs/packetwolf.md) · site:
+[Suite placement](https://zyvorai.github.io/netra/docs/core-concepts/packetwolf).
+
 ## Architecture
 
 ```text
@@ -297,6 +317,7 @@ bpf/netra_tc.c          standalone eBPF programs/maps
 web/                     React/Vite dashboard
 helm/netra/             Helm chart
 deploy/                  plain manifests
+docs/packetwolf.md       suite placement vs PacketWolf (counterparts, not a pipeline)
 docs/standalone-ebpf.md  eBPF hook/map/limitation reference
 docs/workload-scoping.md workload attribution/scoping runbook
 docs/l7-metadata.md      metadata-only L7 behavior and limitations
