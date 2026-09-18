@@ -43,6 +43,16 @@ jobs:
       run: ./scripts/ci-p1-p5-unit.sh
     - name: TLS fingerprint unit + race (scripted)
       run: ./scripts/ci-tlsfp-unit.sh
+    - name: OIDC login + RBAC + metrics-token unit + race (scripted)
+      # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
+      # the role table over the real route set, spoof-proof audit actor and
+      # the /metrics gate. Same command locally: ./scripts/ci-auth-unit.sh
+      run: ./scripts/ci-auth-unit.sh
+    - name: OTLP push unit + race (scripted)
+      # /metrics→OTLP conversion, watermark/retry/batching, HA leader-only
+      # lifecycle (repeated under -race). Same command locally:
+      # ./scripts/ci-otlp-unit.sh
+      run: ./scripts/ci-otlp-unit.sh
     - name: Race-detect HA leader election (no-double-ship push sinks)
       # electionLoop's promote/demote wiring is what both startSyslog and
       # startSnowflake rely on to guarantee only the active leader ever
@@ -156,6 +166,26 @@ jobs:
           --set otlp.enabled=true --set otlp.endpoint=http://otel:4318 --set otlp.existingSecret=otel-auth >/tmp/netra-otlp.yaml
         grep -q 'name: NETRA_OTLP_ENDPOINT' /tmp/netra-otlp.yaml
         grep -q 'key: headers' /tmp/netra-otlp.yaml
+    - name: OIDC is off by default and validated when on
+      run: |
+        if grep -q 'NETRA_OIDC' /tmp/netra.yaml; then
+          echo "OIDC env vars unexpectedly rendered when auth.oidc.enabled is false" >&2
+          exit 1
+        fi
+        # /metrics token is an optional Secret key so an existing Secret keeps working.
+        awk '/name: NETRA_METRICS_TOKEN/{f=1} f&&/optional: true/{ok=1} END{exit !ok}' /tmp/netra.yaml
+        if helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set auth.oidc.enabled=true >/dev/null 2>&1; then
+          echo "auth.oidc.enabled=true without issuer/audience unexpectedly rendered" >&2
+          exit 1
+        fi
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set auth.oidc.enabled=true --set auth.oidc.issuer=https://idp.example --set auth.oidc.audience=netra \
+          --set auth.oidc.roleMap='admins=admin' >/tmp/netra-oidc.yaml
+        grep -q 'name: NETRA_OIDC_ISSUER' /tmp/netra-oidc.yaml
+        grep -q 'name: NETRA_OIDC_AUDIENCE' /tmp/netra-oidc.yaml
+        grep -q 'name: NETRA_OIDC_ROLE_MAP' /tmp/netra-oidc.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set auth.metricsToken=ci-metrics >/tmp/netra-mt.yaml
+        grep -q 'metrics-token: "ci-metrics"' /tmp/netra-mt.yaml
     - name: Default render must not enable dns/scan detectors
       run: |
         if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then
@@ -388,6 +418,7 @@ jobs:
         helm install netra helm/netra --namespace netra-system --create-namespace \
           --set image.tag=ci --set image.pullPolicy=Never \
           --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set auth.metricsToken=ci-metrics-token \
           --set agent.enabled=false --set persistence.enabled=false \
           --wait --timeout 5m
     - name: API answers and enforces auth
@@ -403,8 +434,27 @@ jobs:
         code=$(curl -ks -o /dev/null -w '%{http_code}' https://127.0.0.1:30870/api/v1/status)
         [ "$code" = 401 ] || { echo "unauthenticated /api/v1/status returned $code, want 401"; exit 1; }
         curl -ksf -H 'Authorization: Bearer ci-api-key' https://127.0.0.1:30870/api/v1/status
+        # The Secret-provided metrics token really reached the pod's env.
+        code=$(curl -ks -o /dev/null -w '%{http_code}' https://127.0.0.1:30870/metrics)
+        [ "$code" = 401 ] || { echo "unauthenticated /metrics returned $code, want 401"; exit 1; }
+        curl -ksf -H 'Authorization: Bearer ci-metrics-token' https://127.0.0.1:30870/metrics | grep -q '^netra_rbac_denied_total '
+        curl -ksf https://127.0.0.1:30870/healthz >/dev/null
+        curl -ksf -H 'Authorization: Bearer ci-api-key' https://127.0.0.1:30870/api/v1/whoami | grep -q '"role":"admin"'
     - name: Dump cluster state on failure
       if: failure()
       run: |
         kubectl -n netra-system get all,pvc,events -o wide || true
         kubectl -n netra-system logs deploy/netra --all-containers --tail=200 || true
+  oidc-live:
+    # The real netrad binary against a throwaway OIDC provider
+    # (cmd/netra-ci-idp): role ladder, every way a token can be wrong, IdP
+    # outage/recovery, audit attribution a header cannot spoof, /metrics gate.
+    # No root, cluster, or real IdP. Same command locally:
+    # ./scripts/ci-oidc-live.sh
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: OIDC + RBAC against a live netrad
+      run: ./scripts/ci-oidc-live.sh

@@ -403,12 +403,18 @@ func (p *Pusher) warnPartial(sig Signal, body []byte) {
 
 // ScrapeHandler returns a Sources.Metrics feed that calls h in-process for a
 // GET of path, so metrics are read from the running API rather than over the
-// network. A non-200 is an error.
-func ScrapeHandler(h http.Handler, path string) func() ([]byte, error) {
+// network. hdr, if any, is sent with each request (for an endpoint that
+// requires a bearer token). A non-200 is an error.
+func ScrapeHandler(h http.Handler, path string, hdr http.Header) func() ([]byte, error) {
 	return func() ([]byte, error) {
 		req, err := http.NewRequest(http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
+		}
+		for k, vs := range hdr {
+			for _, v := range vs {
+				req.Header.Add(k, v)
+			}
 		}
 		w := &memResponse{header: http.Header{}, code: http.StatusOK}
 		h.ServeHTTP(w, req)

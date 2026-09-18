@@ -99,6 +99,9 @@ func (s *Server) setFeature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	who := strings.TrimSpace(r.Header.Get("X-Netra-Actor"))
+	if verified, ok := verifiedActor(r); ok {
+		who = verified // never let an unverified header override a verified identity
+	}
 	if who == "" {
 		who = "api"
 	}

@@ -459,14 +459,14 @@ func TestScrapeHandler(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		_, _ = io.WriteString(w, "x 1\n")
-	}), "/metrics")
+	}), "/metrics", nil)
 	b, err := ok()
 	if err != nil || string(b) != "x 1\n" {
 		t.Fatalf("scrape = %q, %v", b, err)
 	}
 	bad := ScrapeHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	}), "/metrics")
+	}), "/metrics", nil)
 	if _, err := bad(); err == nil {
 		t.Fatal("non-200 scrape must be an error")
 	}
@@ -515,5 +515,19 @@ func TestRunRefusesToStartTwice(t *testing.T) {
 	case <-second:
 	case <-time.After(time.Second):
 		t.Fatal("a second Run on the same Pusher should return immediately")
+	}
+}
+
+func TestScrapeHandlerSendsConfiguredHeaders(t *testing.T) {
+	var got string
+	scrape := ScrapeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, "x 1\n")
+	}), "/metrics", http.Header{"Authorization": {"Bearer scrape-secret"}})
+	if _, err := scrape(); err != nil {
+		t.Fatal(err)
+	}
+	if got != "Bearer scrape-secret" {
+		t.Fatalf("Authorization = %q, want the configured bearer", got)
 	}
 }

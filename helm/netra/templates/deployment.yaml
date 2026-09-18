@@ -124,6 +124,39 @@ spec:
             secretKeyRef:
               name: {{ include "netra.authSecretName" . }}
               key: agent-key
+        # optional: absent key => env var not set => /metrics stays open.
+        - name: NETRA_METRICS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "netra.authSecretName" . }}
+              key: metrics-token
+              optional: true
+        {{- if .Values.auth.oidc.enabled }}
+        - name: NETRA_OIDC_ISSUER
+          value: {{ required "auth.oidc.issuer is required when auth.oidc.enabled=true" .Values.auth.oidc.issuer | quote }}
+        - name: NETRA_OIDC_AUDIENCE
+          value: {{ required "auth.oidc.audience is required when auth.oidc.enabled=true" .Values.auth.oidc.audience | quote }}
+        {{- if .Values.auth.oidc.jwksURL }}
+        - name: NETRA_OIDC_JWKS_URL
+          value: {{ .Values.auth.oidc.jwksURL | quote }}
+        {{- end }}
+        {{- if .Values.auth.oidc.rolesClaim }}
+        - name: NETRA_OIDC_ROLES_CLAIM
+          value: {{ .Values.auth.oidc.rolesClaim | quote }}
+        {{- end }}
+        {{- if .Values.auth.oidc.roleMap }}
+        - name: NETRA_OIDC_ROLE_MAP
+          value: {{ .Values.auth.oidc.roleMap | quote }}
+        {{- end }}
+        {{- if .Values.auth.oidc.defaultRole }}
+        - name: NETRA_OIDC_DEFAULT_ROLE
+          value: {{ .Values.auth.oidc.defaultRole | quote }}
+        {{- end }}
+        {{- if .Values.auth.oidc.identityClaim }}
+        - name: NETRA_OIDC_IDENTITY_CLAIM
+          value: {{ .Values.auth.oidc.identityClaim | quote }}
+        {{- end }}
+        {{- end }}
         {{- if .Values.ai.enabled }}
         - name: NETRA_AI_BASE_URL
           value: {{ .Values.ai.baseURL | quote }}

@@ -5,10 +5,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -226,4 +229,89 @@ func TestElectionLoopStopsOTLPExporterOnDemote(t *testing.T) {
 	if after := rec.count("/v1/metrics"); after != before {
 		t.Fatalf("exporter kept pushing after both replicas exited: %d -> %d", before, after)
 	}
+}
+
+// Locking /metrics with NETRA_METRICS_TOKEN must not break the OTLP push,
+// which reads that same endpoint in-process.
+func TestStartOTLPStillPushesWhenMetricsAreTokenGated(t *testing.T) {
+	rec := newOTLPRecorder(t)
+	t.Setenv("NETRA_OTLP_ENDPOINT", rec.URL)
+	t.Setenv("NETRA_OTLP_INTERVAL", "20ms")
+	t.Setenv("NETRA_OTLP_SIGNALS", "metrics")
+	t.Setenv("NETRA_API_KEY", "k")
+	t.Setenv("NETRA_METRICS_TOKEN", "scrape-secret")
+
+	st := store.New()
+	handler := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil, st).Handler()
+
+	// Sanity: the gate really is closed to an unauthenticated reader.
+	probe := httptest.NewRecorder()
+	handler.ServeHTTP(probe, httptest.NewRequest("GET", "/metrics", nil))
+	if probe.Code != http.StatusUnauthorized {
+		t.Fatalf("/metrics without a token = %d, want 401 (gate not active)", probe.Code)
+	}
+
+	var wg sync.WaitGroup
+	stop := startOTLP(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), st, handler, &wg)
+	if stop == nil {
+		t.Fatal("startOTLP returned nil")
+	}
+	defer func() { stop(); wg.Wait() }()
+	waitFor(t, "a metrics push through the token gate", func() bool { return rec.count("/v1/metrics") >= 1 })
+	if !strings.Contains(string(rec.first("/v1/metrics")), "netra_agents_total") {
+		t.Fatalf("pushed body has no netra metrics: %s", rec.first("/v1/metrics"))
+	}
+}
+
+// buildOIDC exits the process on bad config so a half-configured login never
+// runs silently with only the static key. os.Exit cannot be observed
+// in-process, so each case re-executes the test binary.
+func TestBuildOIDCFailsFastOnBadConfig(t *testing.T) {
+	if os.Getenv("NETRA_TEST_BUILD_OIDC") == "1" {
+		buildOIDC(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		os.Exit(0) // reached only if config was accepted
+	}
+	base := []string{"NETRA_OIDC_ISSUER=https://idp.example", "NETRA_OIDC_AUDIENCE=netra"}
+	cases := []struct {
+		name     string
+		env      []string
+		wantExit int
+	}{
+		{"valid", base, 0},
+		{"off when no issuer", []string{"NETRA_OIDC_ISSUER="}, 0},
+		{"missing audience", []string{"NETRA_OIDC_ISSUER=https://idp.example"}, 1},
+		{"http issuer without the dev flag", []string{"NETRA_OIDC_ISSUER=http://idp.example", "NETRA_OIDC_AUDIENCE=netra"}, 1},
+		{"http issuer with the dev flag", []string{"NETRA_OIDC_ISSUER=http://idp.example", "NETRA_OIDC_AUDIENCE=netra", "NETRA_OIDC_ALLOW_INSECURE_HTTP=true"}, 0},
+		{"malformed role map", append([]string{"NETRA_OIDC_ROLE_MAP=admins"}, base...), 1},
+		{"role map naming an unknown role", append([]string{"NETRA_OIDC_ROLE_MAP=admins=root"}, base...), 1},
+		{"unknown default role", append([]string{"NETRA_OIDC_DEFAULT_ROLE=superuser"}, base...), 1},
+		{"valid role map and default role", append([]string{"NETRA_OIDC_ROLE_MAP=a=admin,b=viewer", "NETRA_OIDC_DEFAULT_ROLE=viewer"}, base...), 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestBuildOIDCFailsFastOnBadConfig$")
+			cmd.Env = append(cleanOIDCEnv(), append(tc.env, "NETRA_TEST_BUILD_OIDC=1")...)
+			err := cmd.Run()
+			code := 0
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				code = ee.ExitCode()
+			} else if err != nil {
+				t.Fatalf("running child: %v", err)
+			}
+			if code != tc.wantExit {
+				t.Fatalf("exit code = %d, want %d", code, tc.wantExit)
+			}
+		})
+	}
+}
+
+func cleanOIDCEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "NETRA_OIDC_") && !strings.HasPrefix(kv, "NETRA_TEST_BUILD_OIDC") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

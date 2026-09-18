@@ -26,6 +26,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/notify"
+	"github.com/zyvorai/netra/internal/oidcauth"
 	"github.com/zyvorai/netra/internal/otlppush"
 	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/siem"
@@ -34,7 +35,7 @@ import (
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 )
 
-const version = "0.27.98"
+const version = "0.27.99"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -95,7 +96,7 @@ func main() {
 	dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 	scanDet, scanInterval, scanEnabled := buildScanDetect()
 	autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
-	handler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
+	handler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
 
 	if shouldRunAlertPoller(dispatcher) {
 		var pollerWG sync.WaitGroup
@@ -312,6 +313,57 @@ func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *
 	return cancel
 }
 
+// scrapeHeaders authenticates the exporter's in-process /metrics read when
+// NETRA_METRICS_TOKEN gates that endpoint. Without it the push would start
+// failing with 401 the moment an operator locks /metrics down.
+func scrapeHeaders() http.Header {
+	h := http.Header{}
+	if tok := strings.TrimSpace(os.Getenv("NETRA_METRICS_TOKEN")); tok != "" {
+		h.Set("Authorization", "Bearer "+tok)
+	}
+	return h
+}
+
+// buildOIDC reads NETRA_OIDC_* and returns the JWT verifier, or nil when
+// NETRA_OIDC_ISSUER is unset (OIDC off — the default). Like the other
+// security-relevant settings it fails fast: a half-configured or malformed
+// setup exits at startup instead of silently running with only the static
+// API key. The IdP itself is contacted lazily, so a briefly unreachable IdP
+// does not stop the controller from starting.
+func buildOIDC(log *slog.Logger) *oidcauth.Verifier {
+	issuer := strings.TrimSpace(os.Getenv("NETRA_OIDC_ISSUER"))
+	if issuer == "" {
+		return nil
+	}
+	roleMap, err := oidcauth.ParseRoleMap(env("NETRA_OIDC_ROLE_MAP", ""))
+	if err != nil {
+		log.Error("oidc role map config", "error", err)
+		os.Exit(1)
+	}
+	defaultRole, err := oidcauth.ParseRole(env("NETRA_OIDC_DEFAULT_ROLE", ""))
+	if err != nil {
+		log.Error("oidc default role config", "error", err)
+		os.Exit(1)
+	}
+	v, err := oidcauth.New(oidcauth.Config{
+		Issuer:            issuer,
+		Audience:          env("NETRA_OIDC_AUDIENCE", ""),
+		JWKSURL:           env("NETRA_OIDC_JWKS_URL", ""),
+		RolesClaim:        env("NETRA_OIDC_ROLES_CLAIM", ""),
+		RoleMap:           roleMap,
+		DefaultRole:       defaultRole,
+		IdentityClaim:     env("NETRA_OIDC_IDENTITY_CLAIM", ""),
+		AllowInsecureHTTP: strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_OIDC_ALLOW_INSECURE_HTTP")), "true"),
+		Logger:            log,
+	})
+	if err != nil {
+		log.Error("oidc config", "error", err)
+		os.Exit(1)
+	}
+	log.Info("oidc authentication enabled", "issuer", issuer, "audience", env("NETRA_OIDC_AUDIENCE", ""), "rolesClaim", env("NETRA_OIDC_ROLES_CLAIM", "roles"))
+	return v
+}
+
 // startOTLP starts the optional OTLP/HTTP push exporter when
 // NETRA_OTLP_ENDPOINT is set. Off by default. Same optional-feature shape as
 // startSyslog: env-var gated, best-effort per push, fail-fast on a bad config,
@@ -354,7 +406,7 @@ func startOTLP(ctx context.Context, log *slog.Logger, st *store.Store, apiHandle
 	interval := envDuration("NETRA_OTLP_INTERVAL", 30*time.Second)
 	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 	src := otlppush.Sources{
-		Metrics: otlppush.ScrapeHandler(apiHandler, "/metrics"),
+		Metrics: otlppush.ScrapeHandler(apiHandler, "/metrics", scrapeHeaders()),
 		Audit:   func() []models.AuditEvent { return st.Audit(200) },
 		Blocks: func() map[string][]models.FastPathEvent {
 			out := map[string][]models.FastPathEvent{}
@@ -753,7 +805,7 @@ func electionLoop(
 		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 		scanDet, scanInterval, scanEnabled := buildScanDetect()
 		autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
-		apiHandler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
+		apiHandler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
 		gate.Promote(apiHandler)
 		if shouldRunAlertPoller(dispatcher) {
 			pctx, cancel := context.WithCancel(ctx)

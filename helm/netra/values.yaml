@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.98"
+  tag: "0.27.99"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.98"
+  tag: "0.27.99"
 replicaCount: 1
 ha:
   enabled: false
@@ -29,6 +29,23 @@ auth:
   existingSecret: ""
   apiKey: ""
   agentKey: ""
+  # Optional bearer token that gates GET /metrics. Empty (default) leaves
+  # /metrics open exactly as before. With existingSecret, add a "metrics-token"
+  # key to that Secret instead; a missing key means "not set".
+  metricsToken: ""
+  # Optional OIDC/JWT login alongside the static keys, which keep working as
+  # admin (break-glass). Callers send an IdP-issued JWT as a Bearer token;
+  # its claims map to viewer < operator < admin (docs/auth-oidc-rbac.md).
+  # `issuer` and `audience` are both required when enabled.
+  oidc:
+    enabled: false
+    issuer: ""
+    audience: ""
+    jwksURL: ""            # optional; discovered from issuer when empty
+    rolesClaim: roles      # e.g. groups, or realm_access.roles for Keycloak
+    roleMap: ""            # "netra-admins=admin,sre=operator,all=viewer"; empty = literal viewer/operator/admin
+    defaultRole: ""        # role for valid tokens that map to nothing; empty = deny (403)
+    identityClaim: ""      # empty = email, falling back to sub
 policy:
   requirePreflight: true
 # Optional OpenAI-compatible rewrite for /api/v1/ai/ask. Off by default.

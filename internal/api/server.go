@@ -42,6 +42,7 @@ import (
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/nsdrift"
 	"github.com/zyvorai/netra/internal/observability"
+	"github.com/zyvorai/netra/internal/oidcauth"
 	"github.com/zyvorai/netra/internal/pathdiag"
 	"github.com/zyvorai/netra/internal/policy"
 	"github.com/zyvorai/netra/internal/scandetect"
@@ -63,6 +64,8 @@ type Server struct {
 	apiKey              string
 	agentKey            string
 	chatopsAPIKey       string
+	metricsToken        string
+	oidc                *oidcauth.Verifier
 	webDir              string
 	agentStaleAfter     time.Duration
 	requirePreflight    bool
@@ -97,6 +100,7 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	// authenticated with its own dedicated key so a compromised Slack/Teams
 	// app credential can't be replayed as full operator access.
 	s.chatopsAPIKey = os.Getenv("NETRA_CHATOPS_API_KEY")
+	s.metricsToken = strings.TrimSpace(os.Getenv("NETRA_METRICS_TOKEN"))
 	chatopsTarget := strings.TrimSpace(os.Getenv("NETRA_CHATOPS_TARGET_URL"))
 	if chatopsTarget == "" {
 		chatopsTarget = "https://127.0.0.1:30870"
@@ -174,15 +178,15 @@ func (s *Server) WithArtifacts(a *capture.ArtifactStore) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.98"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.99"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.98"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.99"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.98"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.99"})
 	})
-	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.Handle("GET /metrics", s.metricsAuth(http.HandlerFunc(s.metrics)))
 	if s.chatopsHandler != nil {
 		// Outside s.auth(...) — Slack can't send our bearer token, it signs
 		// requests with its own HMAC scheme instead (verified inside
@@ -197,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("POST /chatops/teams", s.chatopsTeamsHandler)
 	}
 	mux.Handle("GET /api/v1/status", s.auth(http.HandlerFunc(s.status)))
+	mux.Handle("GET /api/v1/whoami", s.auth(http.HandlerFunc(s.whoami)))
 	mux.Handle("GET /api/v1/features", s.auth(http.HandlerFunc(s.listFeatures)))
 	mux.Handle("POST /api/v1/features/{id}", s.auth(http.HandlerFunc(s.setFeature)))
 	mux.Handle("GET /api/v1/policies", s.auth(s.cilium(http.HandlerFunc(s.listPolicies))))
@@ -416,28 +421,37 @@ func (s *Server) cilium(next http.Handler) http.Handler {
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.apiKey != "" && !s.validBearer(bearer(r)) {
+		if !s.authRequired() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		p, res := s.authenticate(r)
+		switch res {
+		case authOK:
+		case authForbidden:
+			s.metricsData.authFailures.Add(1)
+			errorJSON(w, http.StatusForbidden, "token is valid but carries no Netra role")
+			return
+		case authUnavailable:
+			errorJSON(w, http.StatusServiceUnavailable, "identity provider keys unavailable; retry")
+			return
+		default:
 			s.metricsData.authFailures.Add(1)
 			errorJSON(w, 401, "invalid API token")
 			return
 		}
-		next.ServeHTTP(w, r)
+		if need := requiredRole(r); !p.role.AtLeast(need) {
+			s.metricsData.rbacDenied.Add(1)
+			if s.log != nil {
+				s.log.Warn("request denied by role", "actor", p.name, "kind", p.kind, "role", p.role.String(), "need", need.String(), "route", r.Method+" "+r.URL.Path)
+			}
+			errorJSON(w, http.StatusForbidden, "role "+p.role.String()+" cannot perform this action; "+need.String()+" required")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), p)))
 	})
 }
 
-// validBearer accepts either the operator's own NETRA_API_KEY or the
-// dedicated NETRA_CHATOPS_API_KEY internal/chatops.Client authenticates
-// its loopback calls with — a second, distinct trust domain, the same
-// separate-key convention NETRA_AGENT_KEY already establishes, so a
-// compromised Slack app credential can't be replayed as full operator
-// access. A bearer that equals neither still fails the same way it always
-// has.
-func (s *Server) validBearer(token string) bool {
-	if secureEq(token, s.apiKey) {
-		return true
-	}
-	return s.chatopsAPIKey != "" && secureEq(token, s.chatopsAPIKey)
-}
 func (s *Server) agentAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.agentKey != "" && !secureEq(r.Header.Get("X-Netra-Agent-Key"), s.agentKey) {
@@ -450,11 +464,12 @@ func (s *Server) agentAuth(next http.Handler) http.Handler {
 }
 func (s *Server) authOrAgent(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.apiKey == "" && s.agentKey == "" {
+		if !s.authRequired() && s.agentKey == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		apiOK := s.apiKey != "" && secureEq(bearer(r), s.apiKey)
+		p, res := s.authenticate(r)
+		apiOK := res == authOK && p.role.AtLeast(oidcauth.RoleViewer)
 		agentOK := s.agentKey != "" && secureEq(r.Header.Get("X-Netra-Agent-Key"), s.agentKey)
 		if !apiOK && !agentOK {
 			s.metricsData.authFailures.Add(1)
@@ -493,7 +508,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.98", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.99", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2748,6 +2763,9 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
 }
 
 func actor(r *http.Request) string {
+	if who, ok := verifiedActor(r); ok {
+		return who
+	}
 	if v := strings.TrimSpace(r.Header.Get("X-Netra-Actor")); v != "" {
 		return v
 	}
