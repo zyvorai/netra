@@ -7,7 +7,7 @@ Customer-facing Netra materials (Zyvor perspective visual system).
 | **Buyers guide** | [Markdown](./buyers-guide.md) | Evaluation narrative: who should buy, P0–P5 observe surfaces, how Netra works, checklist |
 | **Product Perspective** | [PDF](./Zyvor-Netra-Product-Perspective.pdf) · [PPTX](./Zyvor-Netra-Product-Perspective.pptx) | Executive deck (Netra-only) including Surfaces / encrypted-traffic boards |
 | **Product Brochure** | [PDF](./Zyvor-Netra-Product-Brochure.pdf) · [DOCX](./Zyvor-Netra-Product-Brochure.docx) | Longer brochure + PacketWolf suite placement + P0–P5 feature map |
-| **Enterprise pricing** | [JPEG sheets](./enterprise-pricing.md) | Packaging, editions, services, and ship plan in orange, white, and black |
+| **Enterprise pricing** | [PDF](./Zyvor-Netra-Enterprise-Pricing.pdf) · [JPEG sheets](./enterprise-pricing.md) | Packaging, editions, services, and ship plan |
 
 Technical depth for the same features: [`../p0-p5-surfaces.md`](../p0-p5-surfaces.md).
 

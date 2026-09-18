@@ -5,6 +5,8 @@ Orange, white, and black sheets for GitHub — open dataplane, enterprise operat
 
 Community stays Apache-2.0. Enterprise is an annual subscription by nodes and clusters, not by user, packet, flow, or seat.
 
+[Download the PDF](./Zyvor-Netra-Enterprise-Pricing.pdf).
+
 ![Packaging, Community versus Enterprise, and the recommended entry price](./enterprise-pricing/01-packaging.jpg)
 
 ![Enterprise v1 launch scope and what stays in Community](./enterprise-pricing/02-launch-scope.jpg)
