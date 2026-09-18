@@ -2365,35 +2365,54 @@ static __always_inline int l7_handle(struct __sk_buff *skb, __u8 direction)
 SEC("cgroup_skb/egress") int netra_l7_cgroup_egress(struct __sk_buff *skb) { return l7_handle(skb, DIR_EGRESS); }
 SEC("cgroup_skb/ingress") int netra_l7_cgroup_ingress(struct __sk_buff *skb) { return l7_handle(skb, DIR_INGRESS); }
 
+/* Copy 16 bytes at a compile-time offset. A variable offset makes the
+ * verifier explore every byte and stalls collection load for minutes. */
+#define NETRA_HTTP_STATUS_AT(skb, off, line) \
+    (bpf_skb_load_bytes((skb), (off), (line), 16) < 0)
+
 /* Status counting is its own program so it still loads on kernels that
  * reject the SNI/Host scan loops above. The status line is copied with
- * bpf_skb_load_bytes so a non-linear skb still counts. Returns 1 always:
- * this program never drops a packet. */
+ * bpf_skb_load_bytes so a non-linear skb still counts. IPv4 options are
+ * skipped (IHL must be 5). TCP headers are 20–40 bytes (doff 5–10), which
+ * covers timestamps and a SACK block. Returns 1 always: never drops. */
 static __always_inline int http_status_skb(struct __sk_buff *skb)
 {
     unsigned char hdr[20];
-    unsigned char line[16];
+    unsigned char line[16] = {};
     if (skb->len < 40) return 1;
     if (bpf_skb_load_bytes(skb, 0, hdr, 20) < 0) return 1;
-    __u32 off = 0;
+    __u32 doff = 0;
     if ((hdr[0] >> 4) == 4) {
-        __u32 ihl = hdr[0] & 0x0f;
-        if (ihl < 5 || ihl > 15 || hdr[9] != IPPROTO_TCP) return 1;
-        off = ihl * 4;
+        if ((hdr[0] & 0x0f) != 5 || hdr[9] != IPPROTO_TCP) return 1;
+        if (bpf_skb_load_bytes(skb, 20, hdr, 20) < 0) return 1;
+        doff = hdr[12] >> 4;
+        if (doff < 5 || doff > 10) return 1;
+        switch (doff) {
+        case 5: if (NETRA_HTTP_STATUS_AT(skb, 40, line)) return 1; break;
+        case 6: if (NETRA_HTTP_STATUS_AT(skb, 44, line)) return 1; break;
+        case 7: if (NETRA_HTTP_STATUS_AT(skb, 48, line)) return 1; break;
+        case 8: if (NETRA_HTTP_STATUS_AT(skb, 52, line)) return 1; break;
+        case 9: if (NETRA_HTTP_STATUS_AT(skb, 56, line)) return 1; break;
+        case 10: if (NETRA_HTTP_STATUS_AT(skb, 60, line)) return 1; break;
+        default: return 1;
+        }
     } else if ((hdr[0] >> 4) == 6) {
         if (hdr[6] != IPPROTO_TCP) return 1;
-        off = 40;
+        if (bpf_skb_load_bytes(skb, 40, hdr, 20) < 0) return 1;
+        doff = hdr[12] >> 4;
+        if (doff < 5 || doff > 10) return 1;
+        switch (doff) {
+        case 5: if (NETRA_HTTP_STATUS_AT(skb, 60, line)) return 1; break;
+        case 6: if (NETRA_HTTP_STATUS_AT(skb, 64, line)) return 1; break;
+        case 7: if (NETRA_HTTP_STATUS_AT(skb, 68, line)) return 1; break;
+        case 8: if (NETRA_HTTP_STATUS_AT(skb, 72, line)) return 1; break;
+        case 9: if (NETRA_HTTP_STATUS_AT(skb, 76, line)) return 1; break;
+        case 10: if (NETRA_HTTP_STATUS_AT(skb, 80, line)) return 1; break;
+        default: return 1;
+        }
     } else {
         return 1;
     }
-    if (off > 60) return 1;
-    if (bpf_skb_load_bytes(skb, off, hdr, 20) < 0) return 1;
-    __u32 doff = hdr[12] >> 4;
-    if (doff < 5 || doff > 15) return 1;
-    off += doff * 4;
-    off &= 0x7f;
-    if (off < 40) return 1;
-    if (bpf_skb_load_bytes(skb, off, line, 16) < 0) return 1;
     __u64 cgroup_id = bpf_get_current_cgroup_id();
     int st = netra_l7_http_status(line, line + 16);
     if (st > 0) track_http_status(cgroup_id, (__u16)st);

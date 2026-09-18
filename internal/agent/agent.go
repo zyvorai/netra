@@ -258,29 +258,41 @@ func (a *Agent) loadAndAttach() error {
 	}
 	l7Mode := strings.ToLower(env("NETRA_L7", "auto")) // auto|off|required
 	l7Progs := []string{"netra_l7_cgroup_ingress", "netra_l7_cgroup_egress"}
+	statusProgs := []string{"netra_http_status_ingress", "netra_http_status_egress"}
 	l7Stripped := false
 	if l7Mode == "off" {
+		// Status programs share this object. Drop them too so a smoke that
+		// turns L7 off does not pay the verifier cost, and does not attach.
 		for _, p := range l7Progs {
+			delete(spec.Programs, p)
+		}
+		for _, p := range statusProgs {
 			delete(spec.Programs, p)
 		}
 		l7Stripped = true
 	}
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
-	if err != nil && l7Mode == "auto" && mentionsAny(err.Error(), l7Progs) {
+	if err != nil && l7Mode == "auto" && (mentionsAny(err.Error(), l7Progs) || mentionsAny(err.Error(), statusProgs)) {
 		// A kernel verifier rejection of one program fails the WHOLE
 		// collection load, unlike an attach-time failure (handled below via
 		// NETRA_L7's documented attach-with-fallback) which only affects that
 		// one hook — the L7 cgroup programs' un-unrolled SNI/HTTP scan loops
 		// are the ones known to vary in verifier acceptance across kernel
-		// versions (see docs/l7-metadata.md). Drop them from the spec and
-		// retry so a rejection degrades to "no L7 observability" as intended,
-		// rather than crash-looping the whole agent, unless the operator has
-		// explicitly opted into NETRA_L7=required.
-		a.log.Warn("L7/DNS cgroup programs failed verifier load; retrying without L7 observability", "error", err)
-		for _, p := range l7Progs {
-			delete(spec.Programs, p)
+		// versions (see docs/l7-metadata.md). Drop the rejected programs and
+		// retry so a rejection degrades rather than crash-looping the agent,
+		// unless the operator has explicitly opted into NETRA_L7=required.
+		a.log.Warn("L7/DNS or HTTP status programs failed verifier load; retrying without them", "error", err)
+		if mentionsAny(err.Error(), l7Progs) {
+			for _, p := range l7Progs {
+				delete(spec.Programs, p)
+			}
+			l7Stripped = true
 		}
-		l7Stripped = true
+		if mentionsAny(err.Error(), statusProgs) {
+			for _, p := range statusProgs {
+				delete(spec.Programs, p)
+			}
+		}
 		coll, err = ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: repl})
 	}
 	if err != nil {

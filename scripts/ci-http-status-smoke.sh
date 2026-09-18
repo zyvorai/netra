@@ -50,10 +50,10 @@ fi
 
 cleanup() {
   set +e
-  [[ -n "${HTTP_PID:-}" ]] && kill "$HTTP_PID" 2>/dev/null
-  [[ -n "${AGENT_PID:-}" ]] && kill "$AGENT_PID" 2>/dev/null
-  [[ -n "${NETRAD_PID:-}" ]] && kill "$NETRAD_PID" 2>/dev/null
-  wait "${HTTP_PID:-}" "${AGENT_PID:-}" "${NETRAD_PID:-}" 2>/dev/null
+  [[ -n "${HTTP_PID:-}" ]] && kill -9 "$HTTP_PID" 2>/dev/null
+  [[ -n "${AGENT_PID:-}" ]] && kill -9 "$AGENT_PID" 2>/dev/null
+  [[ -n "${NETRAD_PID:-}" ]] && kill -9 "$NETRAD_PID" 2>/dev/null
+  # Do not wait: a BPF verifier stall is uninterruptible and would hang CI.
   rm -rf "$PIN_PATH" 2>/dev/null
 }
 trap cleanup EXIT
