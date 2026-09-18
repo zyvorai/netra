@@ -328,6 +328,19 @@ type HTTPMetadataStat struct {
 	WorkloadName string `json:"workloadName,omitempty"`
 }
 
+// HTTPStatusStat counts one cleartext HTTP/1 status code seen when the
+// status line starts the skb. Not HTTP/2, HTTP/3, or a reassembled response.
+type HTTPStatusStat struct {
+	CgroupID     uint64 `json:"cgroupId,omitempty"`
+	Status       uint16 `json:"status"`
+	Count        uint64 `json:"count"`
+	LastSeenNS   uint64 `json:"lastSeenNs"`
+	Namespace    string `json:"namespace,omitempty"`
+	Pod          string `json:"pod,omitempty"`
+	WorkloadKind string `json:"workloadKind,omitempty"`
+	WorkloadName string `json:"workloadName,omitempty"`
+}
+
 type ConnectionAttemptStat struct {
 	CgroupID     uint64 `json:"cgroupId,omitempty"`
 	Family       string `json:"family"`
@@ -347,6 +360,7 @@ type L7ObservabilitySummary struct {
 	TLSHandshakes   uint64       `json:"tlsHandshakes"`
 	TLSBlocked      uint64       `json:"tlsBlocked"`
 	HTTPRequests    uint64       `json:"httpRequests"`
+	HTTP5xx         uint64       `json:"http5xx"`
 	ConnectAttempts uint64       `json:"connectAttempts"`
 	ConnectBlocked  uint64       `json:"connectBlocked"`
 	UniqueSNI       int          `json:"uniqueSni"`
@@ -360,6 +374,7 @@ type L7ObservabilityResponse struct {
 	Summary     L7ObservabilitySummary  `json:"summary"`
 	TLS         []TLSMetadataStat       `json:"tls"`
 	HTTP        []HTTPMetadataStat      `json:"http"`
+	HTTPStatus  []HTTPStatusStat        `json:"httpStatus,omitempty"`
 	Connections []ConnectionAttemptStat `json:"connections"`
 }
 
@@ -1077,6 +1092,7 @@ type AgentReport struct {
 	TLSMetadata        []TLSMetadataStat       `json:"tlsMetadata,omitempty"`
 	TLSFingerprints    []TLSFingerprintStat    `json:"tlsFingerprints,omitempty"`
 	HTTPMetadata       []HTTPMetadataStat      `json:"httpMetadata,omitempty"`
+	HTTPStatus         []HTTPStatusStat        `json:"httpStatus,omitempty"`
 	ConnectionAttempts []ConnectionAttemptStat `json:"connectionAttempts,omitempty"`
 	KernelDrops        []KernelDropStat        `json:"kernelDrops,omitempty"`
 	ICMPTypes          []NamedCount            `json:"icmpTypes,omitempty"`

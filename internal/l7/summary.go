@@ -32,6 +32,12 @@ func Build(agents []models.AgentStatus, limit int) models.L7ObservabilityRespons
 			out.Summary.HTTPRequests += row.Requests
 			hosts[row.Host] += row.Requests
 		}
+		for _, row := range a.HTTPStatus {
+			out.HTTPStatus = append(out.HTTPStatus, row)
+			if row.Status >= 500 {
+				out.Summary.HTTP5xx += row.Count
+			}
+		}
 		for _, row := range a.ConnectionAttempts {
 			out.Connections = append(out.Connections, row)
 			out.Summary.ConnectAttempts += row.Attempts
@@ -46,12 +52,16 @@ func Build(agents []models.AgentStatus, limit int) models.L7ObservabilityRespons
 	out.Summary.TopRemotePorts = top(ports, 15)
 	sort.Slice(out.TLS, func(i, j int) bool { return out.TLS[i].Handshakes > out.TLS[j].Handshakes })
 	sort.Slice(out.HTTP, func(i, j int) bool { return out.HTTP[i].Requests > out.HTTP[j].Requests })
+	sort.Slice(out.HTTPStatus, func(i, j int) bool { return out.HTTPStatus[i].Count > out.HTTPStatus[j].Count })
 	sort.Slice(out.Connections, func(i, j int) bool { return out.Connections[i].Attempts > out.Connections[j].Attempts })
 	if len(out.TLS) > limit {
 		out.TLS = out.TLS[:limit]
 	}
 	if len(out.HTTP) > limit {
 		out.HTTP = out.HTTP[:limit]
+	}
+	if len(out.HTTPStatus) > limit {
+		out.HTTPStatus = out.HTTPStatus[:limit]
 	}
 	if len(out.Connections) > limit {
 		out.Connections = out.Connections[:limit]

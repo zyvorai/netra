@@ -15,7 +15,7 @@ Not versus cloud SSE or perimeter NGFW. Those are already non-goals in
 |---|---|---|
 | Job | Stored flows, request metrics, sometimes traces and profiles | Live observe + node-stack diagnostics + leased emergency deny |
 | History | Hours or days of filterable flows (Relay, Loki, ClickHouse) | 7-day flow sidecar next to controller state, queryable by pod/peer/port. Not a column store |
-| L7 | HTTP status, gRPC, Kafka, Redis, SQL | HTTP/1 Host, TLS SNI, DNS health, QUIC flag, plus a well-known-port hint (mysql, postgres, redis, kafka, grpc) |
+| L7 | HTTP status, gRPC, Kafka, Redis, SQL | HTTP/1 Host, cleartext HTTP/1 status when the status line starts the packet, TLS SNI, DNS health, QUIC flag, plus a well-known-port hint (mysql, postgres, redis, kafka, grpc) |
 | Process | A process on each connection | Comm and pid on a flow when TCP health matches that peer and port. No argv |
 | Payload | Some products keep bodies | Explicitly **no** payloads, argv, Secrets |
 
@@ -58,8 +58,10 @@ The live Connections sample is unchanged.
 `GET /api/v1/insights/red` and `netractl insights red` give rate, errors,
 and duration per workload over a window. Rate is flow deltas. Errors are
 blocked packets plus TCP retransmission and RTO deltas. Duration is
-average TCP SRTT. HTTP status is still unavailable: no TCP reassembly,
-no HTTP/2, no HTTP/3 ([`l7-metadata.md`](l7-metadata.md)).
+average TCP SRTT. Cleartext HTTP/1 status is counted when `HTTP/1.x NNN`
+starts the packet (`GET /api/v1/ebpf/l7` field `httpStatus`, RED
+`http5xx`). HTTP/2, HTTP/3, and a status line split across packets are
+still invisible ([`l7-metadata.md`](l7-metadata.md)).
 
 ### 3. Protocol labels beyond HTTP Host
 
@@ -108,7 +110,7 @@ Filterable history is the flow API, not the metrics scrape.
 
 ## Still not done
 
-- HTTP status, HTTP/2, HTTP/3, and TCP reassembly.
+- HTTP/2, HTTP/3, TCP reassembly, and any HTTP status line that does not start the packet.
 - Flow history past 7 days, or a column-store warehouse.
 - User-space CPU flame graphs (`wchan` is one kernel wait symbol, not a graph).
 - A 5-tuple on `kfree_skb`.

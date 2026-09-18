@@ -229,7 +229,7 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 var mapNames = []string{
-	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
+	"dest_stats", "flow_stats", "workload_flow_stats", "tcp_health", "tcp_pressure", "connect_health", "tcp_signals", "dns_pending", "dns_health", "tls_sni_stats", "http_host_stats", "http_status_stats", "connect_attempts", "socket_owner", "kernel_drops", "ipv6_ext_stats",
 	"conntrack", "policy_drops", "shield_cfg", "shield_protected4", "shield_protected6", "shield_sources", "shield_stats", "netpol_deny4", "netpol_enabled",
 	"netpol_rules4", "netpol_default4", "netpol_v2_enabled",
 	"blocked_v4", "blocked_v6", "allowed_v4", "allowed_v6", "allowed_cidr_v4", "allowed_cidr_v6", "allowed_ports", "allowed_uids", "allowed_comms", "blocked_ingress_v4", "blocked_ingress_v6", "blocked_cidr_v4", "blocked_cidr_v6", "blocked_ports", "blocked_uids", "blocked_dns", "blocked_comms",
@@ -932,6 +932,10 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	httpStatus, err := a.readHTTPStatus()
+	if err != nil {
+		return err
+	}
 	connAttempts, err := a.readConnectionAttempts()
 	if err != nil {
 		return err
@@ -1036,7 +1040,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
-		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta,
+		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
 		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
@@ -1897,6 +1901,14 @@ func (a *Agent) enrichHTTPMetadata(st *models.HTTPMetadataStat) {
 		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
 	}
 }
+func (a *Agent) enrichHTTPStatus(st *models.HTTPStatusStat) {
+	if st.CgroupID == 0 {
+		return
+	}
+	if w, ok := a.workloadIdentity(st.CgroupID); ok {
+		st.Namespace, st.Pod, st.WorkloadKind, st.WorkloadName = w.Namespace, w.Pod, w.WorkloadKind, w.WorkloadName
+	}
+}
 func (a *Agent) enrichConnectionAttempt(st *models.ConnectionAttemptStat) {
 	if st.CgroupID == 0 {
 		return
@@ -2279,6 +2291,43 @@ func (a *Agent) readHTTPMetadata() ([]models.HTTPMetadataStat, error) {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Requests > out[j].Requests })
+	if len(out) > 1000 {
+		out = out[:1000]
+	}
+	return out, nil
+}
+
+func (a *Agent) readHTTPStatus() ([]models.HTTPStatusStat, error) {
+	m := a.collection.Maps["http_status_stats"]
+	if m == nil {
+		return nil, nil
+	}
+	it := m.Iterate()
+	var k [16]byte
+	var v [16]byte
+	out := make([]models.HTTPStatusStat, 0, 64)
+	for it.Next(&k, &v) {
+		st := models.HTTPStatusStat{
+			CgroupID:   native.Uint64(k[0:8]),
+			Status:     native.Uint16(k[8:10]),
+			Count:      native.Uint64(v[0:8]),
+			LastSeenNS: native.Uint64(v[8:16]),
+		}
+		if st.Status < 100 || st.Status > 599 || st.Count == 0 {
+			continue
+		}
+		a.enrichHTTPStatus(&st)
+		out = append(out, st)
+	}
+	if err := mapIterErr(it.Err()); err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count == out[j].Count {
+			return out[i].Status < out[j].Status
+		}
+		return out[i].Count > out[j].Count
+	})
 	if len(out) > 1000 {
 		out = out[:1000]
 	}

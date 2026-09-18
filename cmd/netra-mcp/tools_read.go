@@ -397,7 +397,7 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_ebpf_l7", method: "GET", path: "/api/v1/ebpf/l7",
-			description: "Best-effort L7 observability: TLS SNI and cleartext HTTP/1 method+Host metadata sampled from agents.",
+			description: "Best-effort L7 observability: TLS SNI, cleartext HTTP/1 method+Host, and HTTP/1 status when the status line starts the packet.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max items, 1-1000. Default 100.")}),
 			queryParams: []string{"limit"},
 		},

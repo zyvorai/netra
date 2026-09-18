@@ -12,7 +12,7 @@ import (
 
 // REDRow is rate, errors, and duration for one workload over a window.
 // Rate and errors come from flow deltas. Duration is average TCP SRTT.
-// HTTP status is not a field: Netra does not reassemble HTTP.
+// HTTP status is a separate cumulative field for cleartext HTTP/1 only.
 type REDRow struct {
 	Namespace    string   `json:"namespace,omitempty"`
 	Pod          string   `json:"pod,omitempty"`
@@ -26,6 +26,7 @@ type REDRow struct {
 	AvgSRTTUS    uint64   `json:"avgSrttUs,omitempty"`
 	DNSFailures  uint64   `json:"dnsFailures,omitempty"`
 	HTTPRequests uint64   `json:"httpRequests,omitempty"`
+	HTTP5xx      uint64   `json:"http5xx,omitempty"`
 	AppProtocols []string `json:"appProtocols,omitempty"`
 }
 
@@ -40,9 +41,9 @@ type REDResult struct {
 func redLimitations() []string {
 	return []string{
 		"Rate is flow-counter deltas over the window, not an HTTP request trace.",
-		"Errors are blocked packets plus TCP retransmission and RTO deltas. HTTP status codes are not available (no TCP reassembly).",
+		"Errors are blocked packets plus TCP retransmission and RTO deltas. Cleartext HTTP/1 5xx counts are a separate field, and only when the status line starts the packet.",
 		"Duration is average TCP SRTT on flows that reported one, not a request latency histogram.",
-		"DNS failures and HTTP request counts are the latest cumulative agent counters, not window deltas.",
+		"DNS failures, HTTP request counts, and HTTP/1 5xx counts are the latest cumulative agent counters, not window deltas. HTTP/2, HTTP/3, and split status lines are not decoded.",
 		"App protocol is a well-known-port hint.",
 	}
 }
@@ -84,12 +85,18 @@ func RED(recs []Record, agents []models.AgentStatus, window time.Duration) REDRe
 	}
 	dnsFail := map[string]uint64{}
 	httpReq := map[string]uint64{}
+	http5xx := map[string]uint64{}
 	for _, ag := range agents {
 		for _, d := range ag.DNSHealth {
 			dnsFail[d.Namespace+"/"+d.Pod] += d.Failures
 		}
 		for _, h := range ag.HTTPMetadata {
 			httpReq[h.Namespace+"/"+h.Pod] += h.Requests
+		}
+		for _, h := range ag.HTTPStatus {
+			if h.Status >= 500 {
+				http5xx[h.Namespace+"/"+h.Pod] += h.Count
+			}
 		}
 	}
 	sec := window.Seconds()
@@ -107,6 +114,7 @@ func RED(recs []Record, agents []models.AgentStatus, window time.Duration) REDRe
 		}
 		a.row.DNSFailures = dnsFail[key]
 		a.row.HTTPRequests = httpReq[key]
+		a.row.HTTP5xx = http5xx[key]
 		for app := range a.apps {
 			a.row.AppProtocols = append(a.row.AppProtocols, app)
 		}

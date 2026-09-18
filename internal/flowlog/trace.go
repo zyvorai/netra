@@ -51,7 +51,7 @@ func traceLimitations(podMap bool) []string {
 	out := []string{
 		"Inferred from flow edges. No W3C traceparent is read or written.",
 		"A child span is the callee pod's next egress within 5 seconds. It can be wrong.",
-		"HTTP status is not a span attribute.",
+		"HTTP status is not a span attribute. Cleartext HTTP/1 status counts live on the RED and L7 boards, not on these spans.",
 		"This is not the SIEM otlp-trace export, which is still one parentless span per blocked event.",
 	}
 	if !podMap {

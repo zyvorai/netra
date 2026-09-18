@@ -81,12 +81,13 @@ func TestRED(t *testing.T) {
 	agents := []models.AgentStatus{{AgentReport: models.AgentReport{
 		DNSHealth:    []models.DNSHealthStat{{Namespace: "app", Pod: "api", Failures: 2}},
 		HTTPMetadata: []models.HTTPMetadataStat{{Namespace: "app", Pod: "api", Requests: 9, Method: "GET", Host: "example"}},
+		HTTPStatus:   []models.HTTPStatusStat{{Namespace: "app", Pod: "api", Status: 503, Count: 4}},
 	}}}
 	got := RED(recs, agents, time.Minute)
 	if got.Count != 1 || got.Rows[0].Packets != 150 || got.Rows[0].Errors != 10 {
 		t.Fatalf("%+v", got.Rows)
 	}
-	if got.Rows[0].DNSFailures != 2 || got.Rows[0].HTTPRequests != 9 || got.Rows[0].AvgSRTTUS == 0 {
+	if got.Rows[0].DNSFailures != 2 || got.Rows[0].HTTPRequests != 9 || got.Rows[0].HTTP5xx != 4 || got.Rows[0].AvgSRTTUS == 0 {
 		t.Fatalf("%+v", got.Rows[0])
 	}
 	if got.Rows[0].RatePerSec != 150.0/60 {

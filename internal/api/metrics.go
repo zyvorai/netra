@@ -168,6 +168,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_tls_sni_handshakes", "Best-effort TLS ClientHello records with parsed SNI.", float64(l7s.TLSHandshakes))
 	metricGauge(w, "netra_tls_sni_blocked", "Best-effort TLS ClientHello records blocked by exact SNI rules.", float64(l7s.TLSBlocked))
 	metricGauge(w, "netra_http1_requests", "Best-effort cleartext HTTP/1 requests with parsed Host metadata.", float64(l7s.HTTPRequests))
+	metricGauge(w, "netra_http1_status_5xx", "Cleartext HTTP/1 responses whose status line started the packet and was 500-599. No HTTP/2 or HTTP/3.", float64(l7s.HTTP5xx))
 	metricGauge(w, "netra_l7_unique_sni", "Unique parsed TLS SNI names in latest node maps.", float64(l7s.UniqueSNI))
 	metricGauge(w, "netra_l7_unique_http_hosts", "Unique parsed cleartext HTTP Host values in latest node maps.", float64(l7s.UniqueHTTPHosts))
 	baseline := s.store.Baseline()

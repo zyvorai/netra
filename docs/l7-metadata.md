@@ -31,7 +31,9 @@ For an egress TCP skb that begins with a recognized HTTP/1 request method, Netra
 
 Request paths, query strings, cookies, authorization headers, bodies and response content are not exported. HTTPS, HTTP/2 and HTTP/3 are not decoded as HTTP metadata.
 
-Map: `http_host_stats`.
+A response whose first bytes are `HTTP/1.0 ` or `HTTP/1.1 ` plus a three-digit code is counted in `http_status_stats`, keyed by cgroup and status. That is a fixed offset, not a header scan and not stream reassembly. A status line split across packets is invisible. The reason phrase is not stored.
+
+Map: `http_host_stats` for method and Host. Map: `http_status_stats` for the status code.
 
 ## Connection attempts
 

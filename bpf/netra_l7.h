@@ -121,6 +121,24 @@ netra_l7_http_method(void *payload, void *data_end, char out[8])
     return 0;
 }
 
+// netra_l7_http_status reads an HTTP/1 status line that begins the skb.
+// "HTTP/1.1 200" and "HTTP/1.0 204" sit at a fixed offset. This is not a
+// scan, not TCP reassembly, and not HTTP/2 or HTTP/3. Returns 0 when the
+// prefix is absent or the code is not 100-599.
+static __inline__ __attribute__((always_inline)) int
+netra_l7_http_status(void *payload, void *data_end)
+{
+    unsigned char *p = payload;
+    if ((void *)(p + 12) > data_end) return 0;
+    if (p[0] != 'H' || p[1] != 'T' || p[2] != 'T' || p[3] != 'P' || p[4] != '/' || p[5] != '1' || p[6] != '.' || p[8] != ' ') return 0;
+    if (p[7] < '0' || p[7] > '9') return 0;
+    if (p[9] < '0' || p[9] > '9' || p[10] < '0' || p[10] > '9' || p[11] < '0' || p[11] > '9') return 0;
+    if ((void *)(p + 13) <= data_end && p[12] != ' ' && p[12] != '\r') return 0;
+    int code = (p[9] - '0') * 100 + (p[10] - '0') * 10 + (p[11] - '0');
+    if (code < 100 || code > 599) return 0;
+    return code;
+}
+
 // netra_l7_http_host_value parses the header value starting at byte offset
 // pos in p (right after "host:"), once the caller has already found that
 // literal at the current scan position. Return value: >0 is success (the

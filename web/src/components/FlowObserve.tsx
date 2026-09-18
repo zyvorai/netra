@@ -26,6 +26,7 @@ type RED = {
     ratePerSec?: number;
     errors?: number;
     avgSrttUs?: number;
+    http5xx?: number;
     appProtocols?: string[];
   }>;
   limitations?: string[];
@@ -116,6 +117,7 @@ export default function FlowObserve() {
             </span>
             <span>
               {(row.ratePerSec || 0).toFixed(2)}/s · {row.errors || 0} errors
+              {row.http5xx ? ` · ${row.http5xx} http 5xx` : ''}
               {row.avgSrttUs ? ` · ${row.avgSrttUs} µs` : ''}
             </span>
           </button>

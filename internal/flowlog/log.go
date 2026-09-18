@@ -69,7 +69,7 @@ func Limitations() []string {
 	return []string{
 		"Flow deltas are kept for 7 days, capped at 100000 records, in a sidecar file next to the controller state. Not a column store. The first sample after a restart is a new baseline.",
 		"First sample of a flow sets a baseline and is not emitted, so rates start on the second report.",
-		"App protocol is a well-known-port hint, not a payload decode. HTTP status, HTTP/2, and HTTP/3 are not decoded.",
+		"App protocol is a well-known-port hint, not a payload decode. HTTP/2 and HTTP/3 are not decoded. Cleartext HTTP/1 status is counted only when the status line starts the packet.",
 		"Process comm and pid are copied from TCP health when the peer and port match. No argv or cmdline.",
 		"No packet payloads. Kernel kfree_skb drops stay reason counts. Application journal is not collected.",
 	}

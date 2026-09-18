@@ -636,6 +636,15 @@ struct {
     __type(value, struct http_meta_value);
 } http_host_stats SEC(".maps");
 
+struct http_status_key { __u64 cgroup_id; __u16 status; __u16 pad; };
+struct http_status_value { __u64 count; __u64 last_ns; };
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 8192);
+    __type(key, struct http_status_key);
+    __type(value, struct http_status_value);
+} http_status_stats SEC(".maps");
+
 struct connect_attempt_key {
     __u64 cgroup_id;
     __u8 family;
@@ -1029,6 +1038,8 @@ struct netra_pkt_scratch {
     struct tls_meta_value tlsv;
     struct http_meta_key httpk;
     struct http_meta_value httpv;
+    struct http_status_key httpsk;
+    struct http_status_value httpsv;
     struct dns_health_key dnshk;
     struct dns_health_value dnshv;
     struct dns_pending_key dnspk;
@@ -1780,6 +1791,22 @@ static __always_inline void track_http(__u64 cgroup_id, const char method[8], co
     v->last_ns = bpf_ktime_get_ns();
 }
 
+static __always_inline void track_http_status(__u64 cgroup_id, __u16 status)
+{
+    if (!cgroup_id || status < 100) return;
+    struct netra_pkt_scratch *sc = netra_scratch();
+    if (!sc) return;
+    __builtin_memset(&sc->httpsk, 0, sizeof(sc->httpsk));
+    sc->httpsk.cgroup_id = cgroup_id;
+    sc->httpsk.status = status;
+    __builtin_memset(&sc->httpsv, 0, sizeof(sc->httpsv));
+    struct http_status_value *v = bpf_map_lookup_elem(&http_status_stats, &sc->httpsk);
+    if (!v) { bpf_map_update_elem(&http_status_stats, &sc->httpsk, &sc->httpsv, BPF_NOEXIST); v = bpf_map_lookup_elem(&http_status_stats, &sc->httpsk); }
+    if (!v) return;
+    __sync_fetch_and_add(&v->count, 1);
+    v->last_ns = bpf_ktime_get_ns();
+}
+
 static __always_inline void track_connect_attempt(__u64 cgroup_id, __u8 family, __u8 proto,
                                                    const __u8 remote[16], __u16 port, int blocked)
 {
@@ -2197,6 +2224,10 @@ static __always_inline int l7_handle_v4(struct __sk_buff *skb, __u8 direction)
     if (direction == DIR_INGRESS) {
         if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
             dns_response_track(cgroup_id, FAMILY_V4, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
+        if (proto == IPPROTO_TCP && payload) {
+            int http_status = netra_l7_http_status(payload, data_end);
+            if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
+        }
         return 1;
     }
 
@@ -2218,6 +2249,8 @@ static __always_inline int l7_handle_v4(struct __sk_buff *skb, __u8 direction)
     }
 
     if (proto == IPPROTO_TCP && payload) {
+        int http_status = netra_l7_http_status(payload, data_end);
+        if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
         int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
         if (sni_len > 0) {
             if (!blocked && enforcing() && scope_allows(cgroup_id)) {
@@ -2277,6 +2310,10 @@ static __always_inline int l7_handle_v6(struct __sk_buff *skb, __u8 direction)
     if (direction == DIR_INGRESS) {
         if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
             dns_response_track(cgroup_id, FAMILY_V6, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
+        if (proto == IPPROTO_TCP && payload) {
+            int http_status = netra_l7_http_status(payload, data_end);
+            if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
+        }
         return 1;
     }
 
@@ -2298,6 +2335,8 @@ static __always_inline int l7_handle_v6(struct __sk_buff *skb, __u8 direction)
     }
 
     if (proto == IPPROTO_TCP && payload) {
+        int http_status = netra_l7_http_status(payload, data_end);
+        if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
         int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
         if (sni_len > 0) {
             if (!blocked && enforcing() && scope_allows(cgroup_id)) {

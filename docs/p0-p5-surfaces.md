@@ -225,7 +225,7 @@ Queryable deltas kept for 7 days (100 000 records) in a sidecar next to the cont
 | Surface | How it works | API |
 |---|---|---|
 | **Flow history** | Pod, peer, port, protocol, bytes, drops. First sample is a baseline and is not stored | `GET /api/v1/flows/history` |
-| **RED** | Rate, drop/retransmit errors, average TCP SRTT. No HTTP status | `GET /api/v1/insights/red` |
+| **RED** | Rate, drop/retransmit errors, average TCP SRTT, plus cumulative cleartext HTTP/1 5xx when the status line starts the packet | `GET /api/v1/insights/red` |
 | **Port hint** | Well-known port name on the flow (`mysql`, `redis`, `kafka`, `grpc` on 50051). Not a payload parser | field `appProtocol` on history |
 | **Process** | Comm and pid when TCP health matches the peer and port. No argv | fields `comm`, `pid` |
 | **Traces** | Inferred parent/child from flow edges and pod IPs. No `traceparent` | `GET /api/v1/insights/traces` |

@@ -44,6 +44,7 @@ export default function L7() {
         <div><b>{sum.tlsHandshakes || 0}</b><span>TLS SNI handshakes</span></div>
         <div><b>{sum.uniqueSni || 0}</b><span>unique SNI</span></div>
         <div><b>{sum.httpRequests || 0}</b><span>HTTP/1 requests</span></div>
+        <div><b>{sum.http5xx || 0}</b><span>HTTP/1 5xx</span></div>
         <div><b>{sum.uniqueHttpHosts || 0}</b><span>HTTP hosts</span></div>
         <div><b>{sum.connectAttempts || 0}</b><span>socket attempts</span></div>
         <div><b>{sum.connectBlocked || 0}</b><span>blocked attempts</span></div>
@@ -149,6 +150,26 @@ export default function L7() {
           return <div className="datarow obs" key={i}>
             <span className="truncate" title={who} aria-label={who}>{who}</span><span>{x.method}</span><span className="truncate" title={x.host} aria-label={x.host}>{x.host}</span><span>{x.requests}</span><span>{x.cgroupId || 0}</span>
             <ExplainFinding page="l7" kind="http-host" subject={who} message={`${x.method || ''} ${x.host || ''}`} />
+          </div>;
+        })}
+      </div>}
+    </section>
+
+    <section className="card span3">
+      <p className="eyebrow">HTTP/1 STATUS</p><h3>Status line at the start of the packet</h3>
+      <p>Cleartext HTTP/1.0 and HTTP/1.1 only. A split status line, HTTP/2, and HTTP/3 are not counted. The reason phrase is not stored.</p>
+      {(data?.httpStatus || []).length === 0 && <p className="empty-state">No HTTP/1 status lines yet.</p>}
+      {(data?.httpStatus || []).length > 0 && <div className="datatable-scroll">
+        <div className="datahead obs"><span>WORKLOAD</span><span>STATUS</span><span>CLASS</span><span>COUNT</span><span>CGROUP</span></div>
+        {(data?.httpStatus || []).map((x: any, i: number) => {
+          const who = x.namespace ? `${x.namespace}/${x.pod}` : 'node/unresolved';
+          const klass = x.status ? `${Math.floor(x.status / 100)}xx` : '';
+          return <div className="datarow obs" key={i}>
+            <span className="truncate" title={who} aria-label={who}>{who}</span>
+            <span className={x.status >= 500 ? 'blocked' : ''}>{x.status}</span>
+            <span>{klass}</span>
+            <span>{x.count}</span>
+            <span>{x.cgroupId || 0}</span>
           </div>;
         })}
       </div>}

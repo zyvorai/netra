@@ -82,6 +82,7 @@ v0.8 limitations: no IPv6 extension-header walk, no TCP DNS parser, no DoH/DoT i
 
 - `tls_sni_stats`: exact counters keyed by cgroup ID + parsed TLS ClientHello SNI.
 - `http_host_stats`: exact counters keyed by cgroup ID + cleartext HTTP/1 Host + method.
+- `http_status_stats`: cleartext HTTP/1 status code when the status line starts the skb. No HTTP/2, HTTP/3, or reassembly.
 - `connect_attempts`: cgroup socket-attempt counters keyed by family/protocol/remote IP/remote port.
 - `blocked_sni`: exact normalized TLS SNI emergency deny entries.
 - `tls_hello_events` / `tls_hello_rate` (additive, **standalone**

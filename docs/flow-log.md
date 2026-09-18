@@ -43,8 +43,10 @@ paths.
 | Duration | Average TCP SRTT, weighted by packets |
 
 DNS failure counts and HTTP request counts on the same row are the
-latest cumulative agent counters, not window deltas. HTTP status is
-not present.
+latest cumulative agent counters, not window deltas. Cleartext HTTP/1
+5xx counts are a separate `http5xx` field, also cumulative, and only
+when the status line starts the packet. HTTP/2 and HTTP/3 are not
+decoded.
 
 ## Traces
 

@@ -215,6 +215,26 @@ static void http_host_missing_returns_zero(void)
     assert(netra_l7_http_host((void *)req, (void *)(req + strlen(req)), out) == 0);
 }
 
+static void http_status_ok(void)
+{
+    const char *resp = "HTTP/1.1 503 Service Unavailable\r\n";
+    assert(netra_l7_http_status((void *)resp, (void *)(resp + strlen(resp))) == 503);
+    const char *old = "HTTP/1.0 204\r\n";
+    assert(netra_l7_http_status((void *)old, (void *)(old + strlen(old))) == 204);
+}
+
+static void http_status_http2_rejected(void)
+{
+    const char *resp = "HTTP/2 200\r\n";
+    assert(netra_l7_http_status((void *)resp, (void *)(resp + strlen(resp))) == 0);
+}
+
+static void http_status_short_rejected(void)
+{
+    const char *resp = "HTTP/1.1";
+    assert(netra_l7_http_status((void *)resp, (void *)(resp + strlen(resp))) == 0);
+}
+
 int main(void)
 {
     dns_qname_multi_label();
@@ -236,6 +256,9 @@ int main(void)
     http_host_case_insensitive_header_name();
     http_host_with_control_byte_is_rejected();
     http_host_missing_returns_zero();
+    http_status_ok();
+    http_status_http2_rejected();
+    http_status_short_rejected();
 
     puts("netra l7 parsers: ok");
     return 0;
