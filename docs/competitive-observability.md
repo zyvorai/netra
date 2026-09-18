@@ -14,7 +14,7 @@ Not versus cloud SSE or perimeter NGFW. Those are already non-goals in
 | | **eBPF NPM / APM class** | **Netra (today)** |
 |---|---|---|
 | Job | Stored flows, request metrics, sometimes traces and profiles | Live observe + node-stack diagnostics + leased emergency deny |
-| History | Hours or days of filterable flows (Relay, Loki, ClickHouse) | In-memory flow history, default 6 hours, queryable by pod/peer/port. Lost on restart |
+| History | Hours or days of filterable flows (Relay, Loki, ClickHouse) | 7-day flow sidecar next to controller state, queryable by pod/peer/port. Not a column store |
 | L7 | HTTP status, gRPC, Kafka, Redis, SQL | HTTP/1 Host, TLS SNI, DNS health, QUIC flag, plus a well-known-port hint (mysql, postgres, redis, kafka, grpc) |
 | Process | A process on each connection | Comm and pid on a flow when TCP health matches that peer and port. No argv |
 | Payload | Some products keep bodies | Explicitly **no** payloads, argv, Secrets |
@@ -44,10 +44,11 @@ each item are still true.
 ### 1. Queryable flow history
 
 `GET /api/v1/flows/history` and `netractl flows history` keep pod, peer,
-port, protocol, bytes, and drops for a default of 6 hours (20 000
-deltas) in controller memory. The first sample of a flow is a baseline
-and is not stored. The ring is not written to the state file and does
-not survive a restart. It is not ClickHouse. See
+port, protocol, bytes, and drops for 7 days (100 000 deltas) in a
+sidecar file next to the controller state. The first sample of a flow
+is a baseline and is not stored. The baseline map itself is not in the
+file, so the first report after a restart starts a new baseline. It is
+not ClickHouse. See
 [`flow-log.md`](flow-log.md). Linux smoke:
 `scripts/ci-flow-observe-veth.sh` (GitHub job `flow-observe-veth`).
 The live Connections sample is unchanged.
@@ -86,15 +87,18 @@ event ([`siem-export.md`](siem-export.md)).
 
 `GET /api/v1/insights/profiles` returns `/proc/<pid>/stack` for the top
 CPU comms on the latest agent tick (at most five, depth 16). Kernel
-frames only. Not a continuous user-space flame graph. A PID is skipped
-when the file is unreadable. Not on `GET /api/v1/node-resources`.
+frames only, plus `wchan` when the process is waiting in the kernel.
+Not a continuous user-space flame graph. A PID is skipped when both
+the stack and `wchan` are empty. Not on `GET /api/v1/node-resources`.
 
 ### 7. Kubernetes Warning events
 
 `GET /api/v1/insights/workload-events` lists Pod warnings (OOMKilled,
 Unhealthy, BackOff, Failed, and any other `type=Warning`). The
-controller role can list `events`. Journal and dmesg are still not
-collected. A message that contains password, secret, token, bearer, or
+controller role can list `events`. The application journal is still not
+collected. `GET /api/v1/insights/kernel-notes` keeps a scrubbed tail of
+kernel lines about netdev, TCP, UDP, conntrack, and OOM — not a dmesg
+dump. A message that contains password, secret, token, bearer, or
 authorization is omitted.
 
 ### 8. High cardinality stays off Prometheus
@@ -105,10 +109,10 @@ Filterable history is the flow API, not the metrics scrape.
 ## Still not done
 
 - HTTP status, HTTP/2, HTTP/3, and TCP reassembly.
-- A durable multi-day flow warehouse.
-- User-space CPU flame graphs.
+- Flow history past 7 days, or a column-store warehouse.
+- User-space CPU flame graphs (`wchan` is one kernel wait symbol, not a graph).
 - A 5-tuple on `kfree_skb`.
-- Journal collection.
+- Application journal collection (kernel-net and OOM lines only).
 - Payload parsers for Kafka, Redis, or SQL.
 
 ## Leave alone

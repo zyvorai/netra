@@ -31,10 +31,11 @@ func SampleStacks(root string, tops models.HostProcessTops, n, depth int) []mode
 			continue
 		}
 		folded, frames := readKernelStack(root, p.PID, p.Comm, depth)
-		if frames == 0 {
+		wchan := readWchan(root, p.PID)
+		if frames == 0 && wchan == "" {
 			continue
 		}
-		out = append(out, models.StackSample{PID: p.PID, Comm: p.Comm, Folded: folded, Frames: frames})
+		out = append(out, models.StackSample{PID: p.PID, Comm: p.Comm, Folded: folded, Frames: frames, Wchan: wchan})
 	}
 	if len(out) == 0 {
 		return nil
@@ -88,4 +89,19 @@ func stackFrame(line string) string {
 		return ""
 	}
 	return line
+}
+
+func readWchan(root string, pid uint32) string {
+	b, err := os.ReadFile(filepath.Join(root, "proc", strconv.FormatUint(uint64(pid), 10), "wchan"))
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "0" {
+		return ""
+	}
+	if len(s) > 64 {
+		s = s[:64]
+	}
+	return s
 }

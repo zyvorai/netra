@@ -94,6 +94,7 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/insights/traces"},
 		{"GET", "/api/v1/insights/profiles"},
 		{"GET", "/api/v1/insights/workload-events"},
+		{"GET", "/api/v1/insights/kernel-notes"},
 		{"GET", "/api/v1/insights/destination-risk"},
 		{"GET", "/api/v1/insights/policy-packs"},
 		{"GET", "/api/v1/insights/identity-drafts"},

@@ -21,9 +21,12 @@ func TestSampleStacks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proc, "stack"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(proc, "wchan"), []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	tops := models.HostProcessTops{ByCPU: []models.HostProcessStat{{PID: 42, Comm: "ksoftirqd"}}}
 	got := SampleStacks(root, tops, 5, 16)
-	if len(got) != 1 || got[0].Frames != 2 || got[0].Comm != "ksoftirqd" {
+	if len(got) != 1 || got[0].Frames != 2 || got[0].Comm != "ksoftirqd" || got[0].Wchan != "" {
 		t.Fatalf("%+v", got)
 	}
 	if got[0].Folded != "ksoftirqd;net_rx_action;consume_skb" {
@@ -31,5 +34,16 @@ func TestSampleStacks(t *testing.T) {
 	}
 	if SampleStacks(root, models.HostProcessTops{ByCPU: []models.HostProcessStat{{PID: 7, Comm: "gone"}}}, 1, 4) != nil {
 		t.Fatal("missing stack should be skipped")
+	}
+	wait := filepath.Join(root, "proc", "9")
+	if err := os.MkdirAll(wait, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wait, "wchan"), []byte("ep_poll\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = SampleStacks(root, models.HostProcessTops{ByCPU: []models.HostProcessStat{{PID: 9, Comm: "nginx"}}}, 1, 4)
+	if len(got) != 1 || got[0].Wchan != "ep_poll" || got[0].Frames != 0 {
+		t.Fatalf("wchan only %+v", got)
 	}
 }

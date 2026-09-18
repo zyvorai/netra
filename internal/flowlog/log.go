@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	DefaultRetain = 6 * time.Hour
-	DefaultMax    = 20000
+	// DefaultRetain is how long flow deltas stay on disk and in memory.
+	DefaultRetain = 7 * 24 * time.Hour
+	DefaultMax    = 100000
 )
 
 // Record is one observed delta, not a cumulative counter and not a packet.
@@ -66,11 +67,11 @@ type Result struct {
 // Limitations is the honest contract for every history response.
 func Limitations() []string {
 	return []string{
-		"In-memory ring on the controller: default 6 hours and 20000 deltas. Lost on restart. Not a days-long warehouse.",
+		"Flow deltas are kept for 7 days, capped at 100000 records, in a sidecar file next to the controller state. Not a column store. The first sample after a restart is a new baseline.",
 		"First sample of a flow sets a baseline and is not emitted, so rates start on the second report.",
-		"App protocol is a well-known-port hint, not a payload decode. HTTP status is not available.",
+		"App protocol is a well-known-port hint, not a payload decode. HTTP status, HTTP/2, and HTTP/3 are not decoded.",
 		"Process comm and pid are copied from TCP health when the peer and port match. No argv or cmdline.",
-		"No packet payloads.",
+		"No packet payloads. Kernel kfree_skb drops stay reason counts. Application journal is not collected.",
 	}
 }
 
@@ -80,11 +81,15 @@ type prevStat struct {
 
 // Log is safe for concurrent ingest and query.
 type Log struct {
-	mu     sync.Mutex
-	retain time.Duration
-	max    int
-	recs   []Record
-	prev   map[string]prevStat
+	mu       sync.Mutex
+	retain   time.Duration
+	max      int
+	recs     []Record
+	prev     map[string]prevStat
+	dirty    bool
+	gen      uint64
+	lastSave time.Time
+	saveMu   sync.Mutex
 }
 
 func New() *Log { return NewLimited(DefaultRetain, DefaultMax) }
@@ -170,6 +175,8 @@ func (l *Log) Ingest(now time.Time, r models.AgentReport) {
 			continue
 		}
 		l.recs = append(l.recs, rec)
+		l.dirty = true
+		l.gen++
 	}
 	l.pruneLocked(now)
 	if len(l.prev) > l.max*2 {

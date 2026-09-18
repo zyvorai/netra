@@ -22,7 +22,7 @@ func (s *Server) flowHistory(w http.ResponseWriter, r *http.Request) {
 		} else if t, err := time.Parse(time.RFC3339, v); err == nil {
 			since = t.UTC()
 		} else {
-			http.Error(w, "since must be a duration up to 6h or RFC3339", http.StatusBadRequest)
+			http.Error(w, "since must be a duration up to 168h or RFC3339", http.StatusBadRequest)
 			return
 		}
 	}
@@ -48,7 +48,7 @@ func (s *Server) insightsRED(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("window"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 || d > flowlog.DefaultRetain {
-			http.Error(w, "window must be a duration up to 6h", http.StatusBadRequest)
+			http.Error(w, "window must be a duration up to 168h", http.StatusBadRequest)
 			return
 		}
 		window = d
@@ -64,7 +64,7 @@ func (s *Server) insightTraces(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("since"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 || d > flowlog.DefaultRetain {
-			http.Error(w, "since must be a duration up to 6h", http.StatusBadRequest)
+			http.Error(w, "since must be a duration up to 168h", http.StatusBadRequest)
 			return
 		}
 		since = now.Add(-d)
@@ -104,9 +104,9 @@ func (s *Server) insightProfiles(w http.ResponseWriter, _ *http.Request) {
 		"samples": samples,
 		"count":   len(samples),
 		"limitations": []string{
-			"Kernel stacks from /proc/<pid>/stack for the top CPU comms on the latest agent tick. Not a continuous profile.",
+			"Kernel stacks from /proc/<pid>/stack for the top CPU comms on the latest agent tick, plus wchan when the process is waiting. Not a continuous profile and not a user-space flame graph.",
 			"User-space frames are not collected. No argv or cmdline.",
-			"A PID is skipped when the kernel withholds /proc/<pid>/stack.",
+			"A PID is skipped when both the kernel stack and wchan are empty.",
 		},
 	})
 }
@@ -138,4 +138,32 @@ func (s *Server) workloadEvents(w http.ResponseWriter, r *http.Request) {
 	out.Available = true
 	out.Events = ev
 	writeJSON(w, 200, out)
+}
+
+func (s *Server) kernelNotes(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now().UTC()
+	var notes []models.KernelNote
+	for _, a := range s.store.AgentStatuses(now, s.agentStaleAfter) {
+		for _, n := range a.KernelNotes {
+			if n.Node == "" {
+				n.Node = a.Node
+			}
+			notes = append(notes, n)
+		}
+	}
+	if len(notes) > 100 {
+		notes = notes[len(notes)-100:]
+	}
+	if notes == nil {
+		notes = []models.KernelNote{}
+	}
+	writeJSON(w, 200, map[string]any{
+		"notes": notes,
+		"count": len(notes),
+		"limitations": []string{
+			"Kernel log lines about netdev, TCP, UDP, conntrack, and OOM only.",
+			"The application journal and dmesg dumps of other subsystems are not collected.",
+			"Lines that look like credentials are dropped.",
+		},
+	})
 }

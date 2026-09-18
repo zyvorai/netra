@@ -360,7 +360,7 @@ docs/p0-p5-surfaces.md    P0–P5 observe surface catalog (what / how / UX / API
 docs/p5-surfaces.md       P5 residual boards (JA3 risk, ECH, exfil, lateral, …)
 docs/sales/               buyer guide + PDFs/PPTX/DOCX — also on GitHub Pages /resources
 docs/sales/buyers-guide.md evaluation narrative for buyers (P0–P5 + checklist)
-docs/flow-log.md              queryable flow history, RED, inferred traces, stacks, pod warnings
+docs/flow-log.md              queryable 7-day flow history, RED, inferred traces, stacks, kernel notes, pod warnings
 scripts/ci-flow-observe-veth.sh  Linux root smoke for that history (GitHub job `flow-observe-veth`)
 docs/competitive-observability.md  shipped observe versus Hubble-class and eBPF APM peers
 scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)

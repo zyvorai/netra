@@ -77,6 +77,12 @@ func Open(path string) (*Store, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	s.flowPath = abs + ".flows"
+	if err := s.flowLog.Load(s.flowPath); err != nil {
+		// A damaged flow sidecar must not stop the controller. History
+		// starts empty; the next reports rebuild a baseline.
+		_ = os.Rename(s.flowPath, s.flowPath+".bad")
+	}
 	return s, nil
 }
 
@@ -200,6 +206,9 @@ func (s *Store) load() error {
 func (s *Store) Close() error {
 	if s == nil || s.backend == nil || s.backend.lock == nil {
 		return nil
+	}
+	if s.flowPath != "" && s.flowLog != nil {
+		_ = s.flowLog.Save(s.flowPath)
 	}
 	lock := s.backend.lock
 	s.backend.lock = nil

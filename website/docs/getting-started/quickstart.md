@@ -45,7 +45,7 @@ See [netractl CLI](./netractl) for PATH install, `~/.netra/env`, and
 | L7 Metadata | TLS SNI / HTTP Host observation and leased SNI deny |
 | Insights | Dependency graph, behavior/rate baselines, drift, exposure scoring, review-only policy drafts |
 | Firewall | Every eBPF-enforced rule in one place — deny lists, DDoS shield, NetPol allow/default-deny |
-| Live flows | Hubble stream when Cilium/Hubble is present, plus an in-memory flow history (pod, peer, port, RED, inferred paths). See the repo doc `docs/flow-log.md` |
+| Live flows | Hubble stream when Cilium/Hubble is present, plus a 7-day flow history (pod, peer, port, RED, inferred paths). See the repo doc `docs/flow-log.md` |
 | Policies | Guided `CiliumNetworkPolicy` builder + JSON workbench with preflight receipts |
 | Audit | Bounded control-plane audit feed |
 

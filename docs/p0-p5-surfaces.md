@@ -220,7 +220,7 @@ Detail: [`p5-surfaces.md`](p5-surfaces.md).
 
 ## Flow log
 
-Queryable deltas kept in controller memory (default 6 hours, 20 000 records, lost on restart). Not a days-long warehouse, and not the Connections live sample.
+Queryable deltas kept for 7 days (100 000 records) in a sidecar next to the controller state (`<state>.flows`). Not a column store, and not the Connections live sample. The first report after a restart is a new baseline.
 
 | Surface | How it works | API |
 |---|---|---|
@@ -229,8 +229,9 @@ Queryable deltas kept in controller memory (default 6 hours, 20 000 records, los
 | **Port hint** | Well-known port name on the flow (`mysql`, `redis`, `kafka`, `grpc` on 50051). Not a payload parser | field `appProtocol` on history |
 | **Process** | Comm and pid when TCP health matches the peer and port. No argv | fields `comm`, `pid` |
 | **Traces** | Inferred parent/child from flow edges and pod IPs. No `traceparent` | `GET /api/v1/insights/traces` |
-| **Profiles** | Kernel stack for the hottest host comms. Not on node-resources | `GET /api/v1/insights/profiles` |
-| **Pod warnings** | Kubernetes `Warning` events. Not journal or dmesg | `GET /api/v1/insights/workload-events` |
+| **Profiles** | Kernel stack plus `wchan` for the hottest host comms. Not a user-space flame graph. Not on node-resources | `GET /api/v1/insights/profiles` |
+| **Pod warnings** | Kubernetes `Warning` events. Not the application journal | `GET /api/v1/insights/workload-events` |
+| **Kernel notes** | Scrubbed kernel lines: netdev, TCP, UDP, conntrack, OOM. Not `journalctl` | `GET /api/v1/insights/kernel-notes` |
 
 Prometheus keeps one unlabeled gauge, `netra_flowlog_records`. Detail: [`flow-log.md`](flow-log.md). UX: Flows page (history, RED, inferred paths).
 

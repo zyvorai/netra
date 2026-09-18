@@ -14,10 +14,12 @@ retransmissions, RTOs, and the latest TCP SRTT. The first time a flow
 is seen it only sets a baseline, so it does not appear until the next
 report.
 
-Default retention is 6 hours and 20 000 records, in controller memory.
-A restart drops it. It is not written to the state file.
+Default retention is 7 days and 100 000 records. The controller writes
+them to a sidecar next to the state file (`<state>.flows`). A restart
+loads that file. The baseline map is not stored, so the first report
+after a restart does not emit a delta. This is not a column store.
 
-Filters: `since` (`1h` or RFC3339, max 6h), `namespace`, `pod`, `peer`,
+Filters: `since` (`1h` or RFC3339, max 168h), `namespace`, `pod`, `peer`,
 `protocol`, `app`, `node`, `limit` (max 2000).
 
 `app` / `appProtocol` is a well-known-port hint: mysql 3306, postgres
@@ -60,8 +62,11 @@ Pod IPs come from the Kubernetes API. Without it, spans are not linked.
 `GET /api/v1/insights/profiles` and `netractl insights profiles`.
 
 Kernel stacks from `/proc/<pid>/stack` for up to five hottest host
-comms on the latest agent tick. Not a user-space flame graph. Not on
-`GET /api/v1/node-resources`.
+comms on the latest agent tick, plus `wchan` (the kernel wait channel,
+one symbol). Not a user-space flame graph. Not on
+`GET /api/v1/node-resources`. A sample is kept when the stack is
+unreadable if `wchan` is set. `wchan` of `0` means not waiting and is
+omitted.
 
 ## Workload events
 
@@ -69,9 +74,17 @@ comms on the latest agent tick. Not a user-space flame graph. Not on
 `netractl insights workload-events [namespace] [pod]`.
 
 Kubernetes `Warning` events whose involved object is a Pod. The
-controller ClusterRole lists `events`. Journal and dmesg are not
+controller ClusterRole lists `events`. The application journal is not
 read. Messages that look like credentials are dropped; the reason
 remains.
+
+## Kernel notes
+
+`GET /api/v1/insights/kernel-notes` and `netractl insights kernel-notes`.
+
+A bounded tail of kernel log lines about netdev, TCP, UDP, conntrack,
+and OOM. Credential-like lines are dropped. This is not `journalctl`
+and not a full `dmesg` dump. MCP: `netra_insights_kernel_notes`.
 
 ## Prometheus
 

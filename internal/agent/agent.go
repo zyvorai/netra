@@ -1048,6 +1048,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		NodeResources:      nodeResources,
 		HostProcesses:      hostProcesses,
 		StackSamples:       stackSamplesFor(a.node, hostProcesses),
+		KernelNotes:        kernelNotes(a.node),
 	})
 }
 

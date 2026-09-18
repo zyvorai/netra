@@ -31,6 +31,16 @@ type StackSample struct {
 	Comm   string `json:"comm,omitempty"`
 	Folded string `json:"folded,omitempty"`
 	Frames int    `json:"frames,omitempty"`
+	// Wchan is the kernel wait channel (/proc/<pid>/wchan), a single
+	// symbol for where a sleeping process sits. Not a user-space stack.
+	Wchan string `json:"wchan,omitempty"`
+}
+
+// KernelNote is one scrubbed kernel-log line about the network stack
+// or an OOM kill. Application journal lines are not collected.
+type KernelNote struct {
+	Node string `json:"node,omitempty"`
+	Text string `json:"text"`
 }
 
 // DropIncidentTrigger is the alert that caused the capture.

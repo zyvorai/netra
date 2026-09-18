@@ -90,8 +90,10 @@ type Store struct {
 	// above, this IS persisted (see persistence.go) since it's a small,
 	// bounded audit-style log rather than live session state.
 	captureHistory []models.CaptureHistoryEntry
-	// flowLog is an in-memory ring. It is not written to the state file.
-	flowLog *flowlog.Log
+	// flowLog is a ring of flow deltas. Records live in memory and in
+	// flowPath (state file + ".flows"), not inside the state JSON.
+	flowLog  *flowlog.Log
+	flowPath string
 }
 
 func New() *Store {
@@ -1625,6 +1627,12 @@ func (s *Store) SetNetPolDefaultDeny(selector models.EBPFWorkloadScope, enabled 
 
 func (s *Store) Report(r models.AgentReport) {
 	s.mu.Lock()
+	var flowPath string
+	defer func() {
+		if flowPath != "" && s.flowLog != nil {
+			_ = s.flowLog.SaveDebounced(flowPath, 15*time.Second)
+		}
+	}()
 	defer s.mu.Unlock()
 	r.Stats = append([]models.DestinationStat(nil), r.Stats...)
 	r.TCPHealth = append([]models.TCPHealthStat(nil), r.TCPHealth...)
@@ -1651,9 +1659,10 @@ func (s *Store) Report(r models.AgentReport) {
 		}
 		s.flowLog.Ingest(at, r)
 	}
+	flowPath = s.flowPath
 }
 
-// FlowQuery reads the in-memory flow history. It does not touch the state file.
+// FlowQuery reads retained flow deltas. Disk IO is Save/Load, not this call.
 func (s *Store) FlowQuery(q flowlog.Query) flowlog.Result {
 	if s == nil || s.flowLog == nil {
 		return flowlog.Result{Records: []flowlog.Record{}, Limitations: flowlog.Limitations()}

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Flow history, RED, protocol hints, process on the flow, inferred traces, kernel stacks, and pod Warning events.** `GET /api/v1/flows/history` keeps in-memory deltas (default 6h, no payloads, lost on restart). RED, traces, profiles, and workload events are read-only insight APIs. Prometheus gains only `netra_flowlog_records`, with no pod or destination labels. Linux smoke: `scripts/ci-flow-observe-veth.sh` (GitHub job `flow-observe-veth`). Lab on host `NLDW4-4-16-36` (2026-09-18) passed all eight steps — see `docs/flow-log.md`.
+- **Flow history, RED, protocol hints, process on the flow, inferred traces, kernel stacks, and pod Warning events.** `GET /api/v1/flows/history` keeps deltas for 7 days in a sidecar next to controller state (no payloads). RED, traces, profiles, workload events, and scrubbed kernel-net notes are read-only insight APIs. Prometheus gains only `netra_flowlog_records`, with no pod or destination labels. Linux smoke: `scripts/ci-flow-observe-veth.sh` (GitHub job `flow-observe-veth`). Lab on host `NLDW4-4-16-36` (2026-09-18) passed all eight steps — see `docs/flow-log.md`.
 - **Drop-incident context beside auto-capture PCAPs.** A critical drop freezes `{id}.context.json` next to the PCAP: node, hostname, kernel, CPU/memory pressure, top workloads, comm-only host processes (no argv), and the drop counters already on the agent report. Download: `GET /api/v1/capture/artifacts/{id}/context`. The veth+iperf3 smoke asserts it. Lab on host `NLDW4-4-16-36` (2026-09-18), three runs, all passed — see `docs/capture.md`. Walkthrough: `docs/tutorials/drop-incident-context.md`. Peer gaps: `docs/competitive-observability.md`.
 
 ## 0.27.97 — 2026-09-18

@@ -1627,6 +1627,8 @@ func insightCmd() error {
 			p += "?" + enc
 		}
 		return request("GET", p, nil)
+	case "kernel-notes":
+		return request("GET", "/api/v1/insights/kernel-notes", nil)
 	case "destination-risk":
 		return request("GET", "/api/v1/insights/destination-risk", nil)
 	case "policy-packs":

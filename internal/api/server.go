@@ -323,6 +323,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/insights/traces", s.auth(http.HandlerFunc(s.insightTraces)))
 	mux.Handle("GET /api/v1/insights/profiles", s.auth(http.HandlerFunc(s.insightProfiles)))
 	mux.Handle("GET /api/v1/insights/workload-events", s.auth(http.HandlerFunc(s.workloadEvents)))
+	mux.Handle("GET /api/v1/insights/kernel-notes", s.auth(http.HandlerFunc(s.kernelNotes)))
 	mux.Handle("GET /api/v1/insights/destination-risk", s.auth(http.HandlerFunc(s.insightsDestinationRisk)))
 	mux.Handle("GET /api/v1/insights/policy-packs", s.auth(http.HandlerFunc(s.insightsPolicyPacks)))
 	mux.Handle("GET /api/v1/insights/identity-drafts", s.auth(http.HandlerFunc(s.insightsIdentityDrafts)))

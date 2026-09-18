@@ -484,9 +484,9 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_flow_history", method: "GET", path: "/api/v1/flows/history",
-			description: "Queryable flow history (pod, peer, port, protocol, bytes, drops, comm). In-memory, hours, no payloads.",
+			description: "Queryable flow history (pod, peer, port, protocol, bytes, drops, comm). 7-day sidecar, no payloads.",
 			schema: objSchema(map[string]any{
-				"since":     strProp("Duration (1h) or RFC3339. Default 1h. Max 6h."),
+				"since":     strProp("Duration (1h) or RFC3339. Default 1h. Max 168h."),
 				"namespace": strProp("Filter by namespace."),
 				"pod":       strProp("Filter by pod name."),
 				"peer":      strProp("Filter by peer IP."),
@@ -500,14 +500,14 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		{
 			name: "netra_insights_red", method: "GET", path: "/api/v1/insights/red",
 			description: "Per-workload rate, errors, and TCP SRTT over a window. Errors are drops and retransmits, not HTTP status.",
-			schema:      objSchema(map[string]any{"window": strProp("Duration, for example 5m. Max 6h.")}),
+			schema:      objSchema(map[string]any{"window": strProp("Duration, for example 5m. Max 168h.")}),
 			queryParams: []string{"window"},
 		},
 		{
 			name: "netra_insights_traces", method: "GET", path: "/api/v1/insights/traces",
 			description: "Inferred service-path spans from flow edges and pod IPs. Not propagated trace context.",
 			schema: objSchema(map[string]any{
-				"since":     strProp("Duration, for example 15m. Max 6h."),
+				"since":     strProp("Duration, for example 15m. Max 168h."),
 				"namespace": strProp("Filter by namespace."),
 				"pod":       strProp("Filter by pod name."),
 			}),
@@ -515,7 +515,7 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 		},
 		{
 			name: "netra_insights_profiles", method: "GET", path: "/api/v1/insights/profiles",
-			description: "Bounded kernel stacks for the hottest host comms. Not a user-space flame graph. No argv.",
+			description: "Bounded kernel stacks for the hottest host comms, plus the kernel wait channel (wchan). Not a user-space flame graph. No argv.",
 			schema:      objSchema(map[string]any{}),
 		},
 		{
@@ -526,6 +526,11 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 				"pod":       strProp("Restrict to this pod name."),
 			}),
 			queryParams: []string{"namespace", "pod"},
+		},
+		{
+			name: "netra_insights_kernel_notes", method: "GET", path: "/api/v1/insights/kernel-notes",
+			description: "Scrubbed kernel log lines about netdev, TCP, UDP, conntrack, and OOM. Not the application journal.",
+			schema:      objSchema(map[string]any{}),
 		},
 		{
 			name: "netra_insights_destination_risk", method: "GET", path: "/api/v1/insights/destination-risk",

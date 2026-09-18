@@ -1157,9 +1157,12 @@ type AgentReport struct {
 	// argv/cmdline.
 	HostProcesses HostProcessTops `json:"hostProcesses,omitempty"`
 	// StackSamples is a bounded /proc/<pid>/stack read for the hottest
-	// host comms on this tick. Kernel frames only. Not copied into
+	// host comms on this tick. Kernel frames only, plus wchan. Not copied into
 	// GET /api/v1/node-resources.
 	StackSamples []StackSample `json:"stackSamples,omitempty"`
+	// KernelNotes is a bounded, scrubbed tail of kernel log lines about
+	// the network stack. Not the application journal. No secrets.
+	KernelNotes []KernelNote `json:"kernelNotes,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

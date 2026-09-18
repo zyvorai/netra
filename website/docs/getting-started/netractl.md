@@ -69,10 +69,11 @@ netractl insights red 5m
 netractl insights traces 15m
 netractl insights profiles
 netractl insights workload-events
+netractl insights kernel-notes
 netractl ai brief
 ```
 
-Flow history, RED, traces, stacks, and pod warnings:
+Flow history, RED, traces, stacks, kernel notes, and pod warnings:
 [`docs/flow-log.md`](https://github.com/zyvorai/netra/blob/main/docs/flow-log.md).
 
 Map inventory details:
