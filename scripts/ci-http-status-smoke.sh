@@ -5,7 +5,7 @@
 #   1. Compile bpf/netra_tc.c.
 #   2. Start netrad + netra-agent. NETRA_L7 stays auto, so a verifier
 #      rejection of the scan programs must not drop the status programs.
-#   3. Serve one HTTP/1.1 503 on localhost and curl it.
+#   3. Serve one HTTP/1.1 503 on a veth peer (not loopback) and curl it.
 #   4. Assert the agent hooks include http-status-ingress and the L7 API
 #      reports status 503.
 #
@@ -26,6 +26,11 @@ BIN_DIR="${BIN_DIR:-$(mktemp -d /tmp/netra-httpst-bin.XXXXXX)}"
 BPF_DIR="${BPF_DIR:-$(mktemp -d /tmp/netra-httpst-bpf.XXXXXX)}"
 PIN_PATH="${PIN_PATH:-/sys/fs/bpf/netra-ci-http-status}"
 HTTP_PORT="${HTTP_PORT:-18773}"
+PEER_NS="${PEER_NS:-netra-httpst}"
+IFACE0="${IFACE0:-nhttp0}"
+IFACE1="${IFACE1:-nhttp1}"
+IP0="${IP0:-10.255.79.1}"
+IP1="${IP1:-10.255.79.2}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -38,6 +43,8 @@ need_cmd go
 need_cmd clang
 need_cmd curl
 need_cmd python3
+need_cmd ip
+need_cmd sysctl
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "this smoke test requires Linux (eBPF + cgroup)" >&2
@@ -54,6 +61,9 @@ cleanup() {
   [[ -n "${AGENT_PID:-}" ]] && kill -9 "$AGENT_PID" 2>/dev/null
   [[ -n "${NETRAD_PID:-}" ]] && kill -9 "$NETRAD_PID" 2>/dev/null
   # Do not wait: a BPF verifier stall is uninterruptible and would hang CI.
+  ip netns pids "$PEER_NS" 2>/dev/null | xargs -r kill -9 2>/dev/null
+  ip link del "$IFACE0" 2>/dev/null
+  ip netns del "$PEER_NS" 2>/dev/null
   rm -rf "$PIN_PATH" 2>/dev/null
 }
 trap cleanup EXIT
@@ -146,8 +156,23 @@ if [[ "$attached" -ne 1 ]]; then
   exit 1
 fi
 
-echo "==> HTTP/1.1 503 on 127.0.0.1:${HTTP_PORT}"
-python3 - "$HTTP_PORT" << 'PY' &
+echo "==> veth ${IP1}:${HTTP_PORT} HTTP/1.1 503"
+# Loopback on this runner does not hit cgroup_skb. A veth into another
+# netns does. Timestamps and SACK off so the TCP header is 20 bytes and
+# the status line sits at offset 40, which the program always accepts.
+sysctl -w net.ipv4.tcp_timestamps=0 net.ipv4.tcp_sack=0 >/dev/null
+ip netns del "$PEER_NS" 2>/dev/null || true
+ip link del "$IFACE0" 2>/dev/null || true
+ip netns add "$PEER_NS"
+ip link add "$IFACE0" type veth peer name "$IFACE1"
+ip addr add "${IP0}/24" dev "$IFACE0"
+ip link set "$IFACE0" up
+ip link set "$IFACE1" netns "$PEER_NS"
+ip -n "$PEER_NS" addr add "${IP1}/24" dev "$IFACE1"
+ip -n "$PEER_NS" link set "$IFACE1" up
+ip -n "$PEER_NS" link set lo up
+ip netns exec "$PEER_NS" sysctl -w net.ipv4.tcp_timestamps=0 net.ipv4.tcp_sack=0 >/dev/null
+cat > /tmp/netra-httpst.py << 'PY'
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port = int(sys.argv[1])
@@ -161,14 +186,15 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
     def log_message(self, *args):
         return
-ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+ThreadingHTTPServer(("0.0.0.0", port), H).serve_forever()
 PY
+ip netns exec "$PEER_NS" python3 /tmp/netra-httpst.py "$HTTP_PORT" >/tmp/netra-httpst-http.log 2>&1 &
 HTTP_PID=$!
 sleep 0.4
 for _ in 1 2 3 4 5 6; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HTTP_PORT}/" || true)
+  code=$(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "http://${IP1}:${HTTP_PORT}/" || true)
   if [[ "$code" != "503" ]]; then
-    echo "local HTTP/1.1 request returned ${code}, want 503" >&2
+    echo "HTTP/1.1 request to ${IP1} returned ${code}, want 503" >&2
     exit 1
   fi
 done

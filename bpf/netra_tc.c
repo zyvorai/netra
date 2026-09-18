@@ -1794,7 +1794,7 @@ static __always_inline void track_http(__u64 cgroup_id, const char method[8], co
 
 static __always_inline void track_http_status(__u64 cgroup_id, __u16 status)
 {
-    if (!cgroup_id || status < 100) return;
+    if (status < 100) return;
     struct netra_pkt_scratch *sc = netra_scratch();
     if (!sc) return;
     __builtin_memset(&sc->httpsk, 0, sizeof(sc->httpsk));

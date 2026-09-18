@@ -333,7 +333,7 @@ jobs:
     - uses: actions/setup-go@v5
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
-      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iproute2
     - name: HTTP/1 status smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-http-status-smoke.sh
   tlsfp-smoke:
