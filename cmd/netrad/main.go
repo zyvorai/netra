@@ -34,7 +34,7 @@ import (
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 )
 
-const version = "0.27.97"
+const version = "0.27.98"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))

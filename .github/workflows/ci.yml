@@ -142,6 +142,20 @@ jobs:
         fi
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.tlsfp=off >/tmp/netra-tlsfp-off.yaml
         awk '/name: NETRA_TLSFP$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-tlsfp-off.yaml
+    - name: OTLP push is off by default and validated when on
+      run: |
+        if grep -q 'NETRA_OTLP' /tmp/netra.yaml; then
+          echo "OTLP env vars unexpectedly rendered when otlp.enabled is false" >&2
+          exit 1
+        fi
+        if helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set otlp.enabled=true >/dev/null 2>&1; then
+          echo "otlp.enabled=true without an endpoint unexpectedly rendered" >&2
+          exit 1
+        fi
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set otlp.enabled=true --set otlp.endpoint=http://otel:4318 --set otlp.existingSecret=otel-auth >/tmp/netra-otlp.yaml
+        grep -q 'name: NETRA_OTLP_ENDPOINT' /tmp/netra-otlp.yaml
+        grep -q 'key: headers' /tmp/netra-otlp.yaml
     - name: Default render must not enable dns/scan detectors
       run: |
         if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then
