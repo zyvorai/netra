@@ -164,6 +164,7 @@ func TestRegisteredAPIRoutes(t *testing.T) {
 		{"GET", "/api/v1/vms/node-1/capture/ws"},
 		{"GET", "/api/v1/capture/status"},
 		{"GET", "/api/v1/capture/history"},
+		{"GET", "/api/v1/capture/artifacts/x/context"},
 		{"GET", "/api/v1/capture/artifacts/x"},
 		{"POST", "/api/v1/capture/bulk"},
 		{"GET", "/livez"},

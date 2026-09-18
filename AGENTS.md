@@ -73,7 +73,7 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-tlsfp-unit.sh` | `go` — tlsfp + API JA3 unit/race |
 | `scripts/ci-ebpf-tests.sh` | `ebpf` — C helpers, clang objects, bpfintegration |
 | `scripts/ci-tlsfp-smoke.sh` | `tlsfp-smoke` — agent + openssl + iperf3 |
-| `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 |
+| `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
 
 The auto-capture smoke needs Linux root + iperf3; run locally with
 `sudo ./scripts/ci-auto-capture-veth.sh` when changing alert/auto-capture

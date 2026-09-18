@@ -82,13 +82,39 @@ func TestAutoCaptureCooldownAndEnrichment(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// Cooldown should suppress second start; clear active to isolate cooldown.
+	var stagedNode string
+	auto.WithStage(func(node string, ctx models.DropIncidentContext) {
+		stagedNode = node
+		if ctx.Node.Name != "n1" {
+			t.Errorf("staged node name %q", ctx.Node.Name)
+		}
+	})
+	// Cooldown is still armed from the start above; reset it so the stage
+	// path runs, and clear the active session the same way the rest of
+	// this test does.
+	auto.mu.Lock()
+	delete(auto.lastByNode, "n1")
+	auto.mu.Unlock()
+	mu.Lock()
+	delete(active, "n1")
+	mu.Unlock()
+	auto.MaybeStart(now.Add(time.Minute), ev, agents)
+	if stagedNode != "n1" {
+		t.Fatalf("StageContext node=%q", stagedNode)
+	}
+	mu.Lock()
+	if len(started) != 2 {
+		t.Fatalf("stage start count=%d", len(started))
+	}
+	mu.Unlock()
+
+	// Cooldown should suppress a third start.
 	mu.Lock()
 	delete(active, "n1")
 	mu.Unlock()
 	auto.MaybeStart(now.Add(time.Minute), ev, agents)
 	mu.Lock()
-	if len(started) != 1 {
+	if len(started) != 2 {
 		t.Fatalf("cooldown failed, started=%d", len(started))
 	}
 	mu.Unlock()

@@ -16,6 +16,7 @@ type HistoryEntry = {
   artifactFrames?: number;
   triggerSource?: string;
   triggerKind?: string;
+  contextAvailable?: boolean;
 };
 
 const PAGE_SIZE = 20;
@@ -42,6 +43,20 @@ async function downloadArtifact(id: string) {
   const a = document.createElement('a');
   a.href = url;
   a.download = `${id}.pcap`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadContext(id: string) {
+  const res = await fetch(`/api/v1/capture/artifacts/${encodeURIComponent(id)}/context`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`context download failed: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${id}.context.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -101,6 +116,17 @@ export default function CaptureHistory({ onRepeat }: { onRepeat: (e: HistoryEntr
                       onClick={() => downloadArtifact(e.artifactId!).catch(() => {})}
                     >
                       Download{e.artifactFrames ? ` (${e.artifactFrames} pkt)` : ''}
+                    </button>
+                  </>
+                )}
+                {e.contextAvailable && e.artifactId && (
+                  <>
+                    {' '}
+                    <button
+                      className="btn-secondary"
+                      onClick={() => downloadContext(e.artifactId!).catch(() => {})}
+                    >
+                      Context
                     </button>
                   </>
                 )}

@@ -9,6 +9,6 @@ import "github.com/zyvorai/netra/internal/models"
 // purely so internal/agent keeps building and testing on a non-Linux
 // development machine, matching readProcessMeta's split in
 // procmeta_other.go.
-func (a *Agent) readNodeResources() models.NodeResourceSnapshot {
-	return models.NodeResourceSnapshot{}
+func (a *Agent) readNodeResources() (models.NodeResourceSnapshot, models.HostProcessTops) {
+	return models.NodeResourceSnapshot{}, models.HostProcessTops{}
 }

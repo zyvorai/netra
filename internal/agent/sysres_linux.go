@@ -16,9 +16,10 @@ import (
 // (prevHostCPU/prevWorkloadCPU) — see those fields' doc comments on the
 // Agent struct — rather than in internal/sysres.Build, which is
 // stateless and has no prior sample to diff against.
-func (a *Agent) readNodeResources() models.NodeResourceSnapshot {
+func (a *Agent) readNodeResources() (models.NodeResourceSnapshot, models.HostProcessTops) {
 	cur := sysres.Sample("/")
 	now := time.Now()
+	hadPrev := !a.prevResourceSampleAt.IsZero()
 	host := sysres.HostSnapshot(a.prevHostCPU, cur, a.prevResourceSampleAt, now)
 	elapsed := now.Sub(a.prevResourceSampleAt).Seconds()
 
@@ -58,6 +59,14 @@ func (a *Agent) readNodeResources() models.NodeResourceSnapshot {
 	}
 	a.prevHostCPU, a.prevResourceSampleAt = cur, now
 
+	procElapsed := 0.0
+	if hadPrev && elapsed > 0 {
+		procElapsed = elapsed
+	}
+	procs := sysres.SampleProcesses("/")
+	byCPU, byRSS, nextProcs := sysres.TopHostProcesses(a.prevProcJiffies, procs, procElapsed)
+	a.prevProcJiffies = nextProcs
+
 	sort.Slice(stats, func(i, j int) bool { return stats[i].CPUPercent > stats[j].CPUPercent })
-	return models.NodeResourceSnapshot{Host: host, Workloads: stats}
+	return models.NodeResourceSnapshot{Host: host, Workloads: stats}, models.HostProcessTops{ByCPU: byCPU, ByMemory: byRSS}
 }

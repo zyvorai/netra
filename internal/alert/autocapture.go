@@ -70,6 +70,10 @@ type CaptureActiveFunc func(node string) *models.CaptureSpec
 // CaptureCountFunc returns how many captures are currently active cluster-wide.
 type CaptureCountFunc func() int
 
+// StageContextFunc stores a drop-incident snapshot for node until the
+// auto-capture PCAP begins. Nil is allowed.
+type StageContextFunc func(node string, ctx models.DropIncidentContext)
+
 // AutoCapture starts filtered, time-bounded captures when critical
 // drop/congestion events fire. Safe for concurrent MaybeStart calls.
 type AutoCapture struct {
@@ -79,6 +83,7 @@ type AutoCapture struct {
 	active  CaptureActiveFunc
 	count   CaptureCountFunc
 	publish func(notify.Event) bool
+	stage   StageContextFunc
 
 	mu         sync.Mutex
 	lastByNode map[string]time.Time
@@ -99,6 +104,16 @@ func NewAutoCapture(log *slog.Logger, cfg AutoConfig, start CaptureStartFunc, ac
 		publish:    publish,
 		lastByNode: map[string]time.Time{},
 	}
+}
+
+// WithStage attaches the callback that freezes drop-incident context
+// before a capture starts. The blob is not placed on CaptureSpec, which
+// the agent pulls.
+func (a *AutoCapture) WithStage(stage StageContextFunc) *AutoCapture {
+	if a != nil {
+		a.stage = stage
+	}
+	return a
 }
 
 // Enabled reports whether auto-capture is configured on.
@@ -169,6 +184,9 @@ func (a *AutoCapture) MaybeStart(now time.Time, ev notify.Event, agents []models
 		Requestor: fmt.Sprintf("%s:%s/%s", autoCaptureActorPrefix, ev.Source, ev.Kind),
 		ExpiresAt: now.UTC().Add(a.cfg.Duration),
 	}
+	if a.stage != nil {
+		a.stage(node, BuildDropContext(now, ev, agentForNode(node, agents)))
+	}
 	if a.start == nil {
 		return
 	}
@@ -211,6 +229,15 @@ func resolveNode(ev notify.Event, agents []models.AgentStatus) string {
 		}
 	}
 	return subj
+}
+
+func agentForNode(node string, agents []models.AgentStatus) models.AgentStatus {
+	for i := range agents {
+		if agents[i].Node == node {
+			return agents[i]
+		}
+	}
+	return models.AgentStatus{AgentReport: models.AgentReport{Node: node}}
 }
 
 func enrichFromPolicyDrops(node string, agents []models.AgentStatus) (proto, host string, port uint16, ok bool) {

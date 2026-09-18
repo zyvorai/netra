@@ -84,7 +84,18 @@ Frames for auto-capture sessions are written to classic PCAP files under
 `NETRA_AUTO_CAPTURE_DIR`, retained with count/size caps, and listed on
 `GET /api/v1/capture/history` with `artifactId` / `artifactFrames` /
 `artifactBytes`. Download: `GET /api/v1/capture/artifacts/{id}` (UI **Download**
-badge). Empty (header-only) PCAPs are discarded on finalize.
+badge). Empty (header-only) PCAPs are discarded on finalize, and the sibling
+context file is discarded with them.
+
+The same moment also freezes a drop-incident JSON beside the PCAP
+(`{id}.context.json`). It records which node (name, hostname, kernel),
+whether CPU or memory was hot on the last agent sample, the top workloads
+by CPU and by memory, comm-only host processes (pid, CPU%, RSS — no
+argv/cmdline), policy-drop process attribution when the drop was egress
+TCP, and the softnet, qdisc, and kernel-drop counters already on that
+report. Download: `GET /api/v1/capture/artifacts/{id}/context` (UI
+**Context** when `contextAvailable` is set on the history row). This is
+not a Red Hat sosreport: no `dmesg`, journal, or package inventory.
 
 A notify event (`source=auto-capture`, `kind=started`) is published when a
 session begins (delivered through configured alert channels when present).
@@ -99,12 +110,16 @@ the full node agent:
 2. Starts `netrad` with `NETRA_AUTO_CAPTURE=true` and
    `NETRA_AUTO_CAPTURE_BACKEND=afpacket`.
 3. POSTs a synthetic agent report with `softnetDropped ≥ 1000` (reliable
-   trigger; real softnet counters are too flaky under CI load alone).
+   trigger; real softnet counters are too flaky under CI load alone). The
+   same report carries this host's hostname/kernel and the live `iperf3`
+   server's pid and comm from `/proc` (no cmdline).
 4. Runs `cmd/netra-ci-feeder` to stream AF_PACKET frames from the veth into
    `/api/v1/agents/capture/stream`, while `iperf3` generates TCP across the
    pair.
-5. Asserts a non-empty classic PCAP under the artifact dir and a history
-   entry with `artifactId` + `artifactFrames > 0`.
+5. Asserts a non-empty classic PCAP under the artifact dir, a history
+   entry with `artifactId` + `artifactFrames > 0` + `contextAvailable`,
+   and `GET /api/v1/capture/artifacts/{id}/context` naming that node and
+   the `iperf3` process.
 
 GitHub Actions job: `auto-capture-veth` in `.github/workflows/ci.yml`.
 
@@ -113,6 +128,20 @@ GitHub Actions job: `auto-capture-veth` in `.github/workflows/ci.yml`.
 sudo ./scripts/ci-auto-capture-veth.sh
 # Optional: CONTROLLER_PORT=31970 CAPTURE_DURATION=12s sudo -E ./scripts/ci-auto-capture-veth.sh
 ```
+
+### Lab, 2026-09-18 (`80.79.5.173`)
+
+Host `NLDW4-4-16-36`. Three back-to-back runs of
+`sudo CONTROLLER_PORT=31970 ./scripts/ci-auto-capture-veth.sh`. Each wrote a
+PCAP and a sibling context file. History `contextAvailable` was true every
+time. The context named node `ci-veth`, hostname `NLDW4-4-16-36`, and the
+live `iperf3` pid (no cmdline).
+
+| Run | Frames | PCAP bytes | iperf3 pid | Result |
+|---|---|---|---|---|
+| 1 | 775 | 152764 | 3225210 | pass |
+| 2 | 754 | 151232 | 3227934 | pass |
+| 3 | 763 | 151970 | 3230303 | pass |
 
 For manual traffic against a live capture (not CI), see
 `scripts/iperf3-traffic-gen.sh`.

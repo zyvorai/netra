@@ -12,9 +12,10 @@
 // percentages.
 //
 // Workload attribution is cgroup v2-based, reusing the CgroupPath every
-// WorkloadIdentity already carries — not a full host PID scan. Literal
-// per-process rows (like ps/top) are a deliberate non-goal of this
-// package; see docs/node-resources.md's Limits section.
+// WorkloadIdentity already carries — not a full host PID scan. The
+// node-resources view does not list raw processes. A separate bounded
+// comm-only top (SampleProcesses) exists only so a drop-incident snapshot
+// can name host daemons; it never includes argv or cmdline.
 package sysres
 
 import (
@@ -60,6 +61,8 @@ type HostSample struct {
 	MemCachedKB   uint64
 	UptimeSeconds uint64
 	CPUCores      int
+	Hostname      string
+	KernelRelease string
 }
 
 // Sample reads root's (typically "/", a fixture directory in tests)
@@ -75,6 +78,8 @@ func Sample(root string) HostSample {
 	s.MemTotalKB, s.MemFreeKB, s.MemAvailKB, s.MemCachedKB = readMemInfo(root)
 	s.UptimeSeconds = readUptime(root)
 	s.CPUCores = countCPUCores(root)
+	s.Hostname = readTrimmed(root, "proc/sys/kernel/hostname")
+	s.KernelRelease = readTrimmed(root, "proc/sys/kernel/osrelease")
 	return s
 }
 
@@ -174,6 +179,14 @@ func countCPUCores(root string) int {
 		}
 	}
 	return n
+}
+
+func readTrimmed(root, rel string) string {
+	b, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // ComputeCPUPercent returns the percentage of wall-clock time spent busy
@@ -290,6 +303,8 @@ func HostSnapshot(prev, cur HostSample, prevAt, now time.Time) models.HostResour
 		MemoryAvailableBytes: availKB * 1024,
 		MemoryCachedBytes:    cur.MemCachedKB * 1024,
 		UptimeSeconds:        cur.UptimeSeconds,
+		Hostname:             cur.Hostname,
+		KernelRelease:        cur.KernelRelease,
 	}
 }
 

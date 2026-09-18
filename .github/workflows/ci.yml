@@ -295,9 +295,10 @@ jobs:
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-ebpf-tests.sh
   auto-capture-veth:
     # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +
-    # AF_PACKET feeder → non-empty PCAP under NETRA_AUTO_CAPTURE_DIR.
-    # Softnet trigger is synthetic (≥1000) so CI does not depend on flaky
-    # real softnet counters under GitHub-hosted load.
+    # AF_PACKET feeder → non-empty PCAP under NETRA_AUTO_CAPTURE_DIR, plus
+    # the sibling drop-incident context JSON (node, CPU/memory hot, live
+    # iperf3 pid/comm). Softnet trigger is synthetic (≥1000) so CI does not
+    # depend on flaky real softnet counters under GitHub-hosted load.
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4

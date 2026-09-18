@@ -315,6 +315,7 @@ func (s *Server) finalizeAutoArtifact(node string, startedAt time.Time) {
 		e.ArtifactFrames = meta.Frames
 		e.TriggerSource = meta.TriggerSource
 		e.TriggerKind = meta.TriggerKind
+		e.ContextAvailable = meta.ContextPath != ""
 		if e.TriggerSubject == "" {
 			e.TriggerSubject = meta.TriggerSubject
 		}
@@ -337,6 +338,24 @@ func (s *Server) captureArtifactDownload(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pcap"`, meta.ID))
 	http.ServeContent(w, r, meta.ID+".pcap", meta.EndedAt, f)
+}
+
+// captureArtifactContext handles GET /api/v1/capture/artifacts/{id}/context.
+func (s *Server) captureArtifactContext(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" || s.artifacts == nil {
+		errorJSON(w, 404, "artifact not found")
+		return
+	}
+	f, meta, err := s.artifacts.OpenContext(id)
+	if err != nil {
+		errorJSON(w, 404, "artifact not found")
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.context.json"`, meta.ID))
+	http.ServeContent(w, r, meta.ID+".context.json", meta.EndedAt, f)
 }
 
 // proxyCaptureStream handles GET /api/v1/vms/{node}/capture/ws — the

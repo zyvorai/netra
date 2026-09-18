@@ -163,8 +163,9 @@ func (s *Server) WithAutoMitigate(e *automitigate.Engine) *Server {
 	return s
 }
 
-// WithArtifacts attaches the auto-capture PCAP store used by agentCaptureStream
-// and GET /api/v1/capture/artifacts/{id}. Nil disables server-side recording.
+// WithArtifacts attaches the auto-capture PCAP store used by agentCaptureStream,
+// GET /api/v1/capture/artifacts/{id}, and .../artifacts/{id}/context.
+// Nil disables server-side recording.
 func (s *Server) WithArtifacts(a *capture.ArtifactStore) *Server {
 	s.artifacts = a
 	return s
@@ -229,6 +230,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/vms/{node}/capture/ws", s.auth(http.HandlerFunc(s.proxyCaptureStream)))
 	mux.Handle("GET /api/v1/capture/status", s.auth(http.HandlerFunc(s.captureStatus)))
 	mux.Handle("GET /api/v1/capture/history", s.auth(http.HandlerFunc(s.captureHistory)))
+	mux.Handle("GET /api/v1/capture/artifacts/{id}/context", s.auth(http.HandlerFunc(s.captureArtifactContext)))
 	mux.Handle("GET /api/v1/capture/artifacts/{id}", s.auth(http.HandlerFunc(s.captureArtifactDownload)))
 	mux.Handle("POST /api/v1/capture/bulk", s.auth(http.HandlerFunc(s.captureBulkStart)))
 	mux.Handle("GET /api/v1/agents/capture/stream", s.agentAuth(http.HandlerFunc(s.agentCaptureStream)))

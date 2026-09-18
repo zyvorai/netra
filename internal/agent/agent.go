@@ -149,6 +149,9 @@ type Agent struct {
 	// prevWorkloadCPU mirrors prevHostCPU per-workload: cgroup ID -> last
 	// cpu.stat usage_usec sample.
 	prevWorkloadCPU map[uint64]uint64
+	// prevProcJiffies mirrors prevWorkloadCPU for the bounded host-process
+	// top: pid -> last utime+stime jiffies. Dropped pids are pruned each tick.
+	prevProcJiffies map[uint32]uint64
 	// startedAt is set once here at process boot, reported on every cycle as
 	// AgentReport.AgentStartedAt — lets consumers (internal/capdrift) detect
 	// a recent restart, which resets prevCaps and opens a real blind-spot
@@ -1002,7 +1005,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	qdiscStats := a.readQdiscStats()
 	kernelNetwork := kerneldiag.Collect("/")
 	sysctlAudit := sysctlaudit.Collect("/")
-	nodeResources := a.readNodeResources()
+	nodeResources, hostProcesses := a.readNodeResources()
 	histReport := histograms.FromAgentSamples(tcpHealth, connectLatency, a.readHostHistogramCounters())
 	histJSON := models.NetworkHistogramReport{
 		TCPRetransmissions: models.HistogramSnapshot{
@@ -1043,6 +1046,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		KernelNetwork:      kernelNetwork,
 		SysctlNetworkAudit: sysctlAudit,
 		NodeResources:      nodeResources,
+		HostProcesses:      hostProcesses,
 	})
 }
 

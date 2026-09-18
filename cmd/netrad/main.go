@@ -103,7 +103,7 @@ func main() {
 		pollerWG.Add(1)
 		go func() {
 			defer pollerWG.Done()
-			newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods).Run(pctx)
+			newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods, artifacts).Run(pctx)
 		}()
 		defer pollerWG.Wait()
 	}
@@ -393,7 +393,7 @@ func buildArtifactStore(log *slog.Logger) *capture.ArtifactStore {
 	return store
 }
 
-func newAlertPoller(log *slog.Logger, st *store.Store, dispatcher *notify.Dispatcher, alertCfg alert.Config, listPods func(ctx context.Context, ns string) ([]models.PodInfo, error)) *alert.Poller {
+func newAlertPoller(log *slog.Logger, st *store.Store, dispatcher *notify.Dispatcher, alertCfg alert.Config, listPods func(ctx context.Context, ns string) ([]models.PodInfo, error), artifacts *capture.ArtifactStore) *alert.Poller {
 	publish := func(ev notify.Event) bool {
 		if dispatcher == nil {
 			return true
@@ -421,6 +421,9 @@ func newAlertPoller(log *slog.Logger, st *store.Store, dispatcher *notify.Dispat
 		func() int { return len(st.Captures()) },
 		publish,
 	)
+	if artifacts != nil {
+		auto.WithStage(artifacts.StageContext)
+	}
 	return p.WithAutoCapture(auto)
 }
 
@@ -682,7 +685,7 @@ func electionLoop(
 			pollerWG.Add(1)
 			go func() {
 				defer pollerWG.Done()
-				newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods).Run(pctx)
+				newAlertPoller(log, st, dispatcher, alertCfg, k.ListPods, artifacts).Run(pctx)
 			}()
 		}
 		if gr != nil {

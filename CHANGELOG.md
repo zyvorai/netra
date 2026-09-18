@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Drop-incident context beside auto-capture PCAPs.** A critical drop freezes `{id}.context.json` next to the PCAP: node, hostname, kernel, CPU/memory pressure, top workloads, comm-only host processes (no argv), and the drop counters already on the agent report. Download: `GET /api/v1/capture/artifacts/{id}/context`. The veth+iperf3 smoke asserts it. Lab on `80.79.5.173` (2026-09-18), three runs, all passed — see `docs/capture.md`.
+
 ## 0.27.97 — 2026-09-18
 
 - **Fix: netractl unit tests no longer dial a live controller URL.** `ensureConfig`'s

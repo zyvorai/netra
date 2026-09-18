@@ -136,7 +136,9 @@ collapsed into one number.
 - **No per-process (`ps`/`top`-style) rows.** Only cgroup-v2-attributed
   workloads are reported. A process outside any tracked cgroup (rare on
   a Kubernetes node, but possible for host-level daemons) is invisible
-  here.
+  here. A bounded comm-only host process top (pid, CPU%, RSS — no
+  argv/cmdline) is frozen only inside a drop-incident context file, not
+  on this endpoint. See [Capture](capture.md).
 - **In-memory only.** A `netrad` restart or HA failover, and an agent
   restart, both reset all delta-tracking state to zero — the next
   report after either event starts back at `cpuPercent: 0` for

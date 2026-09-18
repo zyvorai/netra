@@ -10,6 +10,8 @@
 #   4. Stream real AF_PACKET frames from the veth into the agent capture WS.
 #   5. Assert a non-empty classic PCAP landed under NETRA_AUTO_CAPTURE_DIR
 #      and capture history links an artifact.
+#   6. Assert the drop-incident context JSON frozen beside that PCAP names
+#      this node and the live iperf3 process (pid/comm from /proc, no cmdline).
 #
 # Requires: Linux, root (or CAP_NET_ADMIN + CAP_NET_RAW), go, iperf3, iproute2, curl, python3.
 # Usage:
@@ -137,12 +139,56 @@ if [[ "$ok" -ne 1 ]]; then
 fi
 
 echo "==> POST synthetic softnet critical report for node=${NODE}"
+# Softnet ≥1000 is synthetic (real counters are flaky in CI). Process identity
+# is the live iperf3 server: pid and comm come from /proc, not a made-up name.
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+HOST_NAME="$(hostname -s 2>/dev/null || hostname)"
+KERNEL="$(uname -r)"
+IPERF_COMM="$(tr -d '\n' <"/proc/${IPERF_PID}/comm")"
+IPERF_RSS_KB="$(awk '/^VmRSS:/ {print $2}' "/proc/${IPERF_PID}/status")"
+IPERF_RSS_KB="${IPERF_RSS_KB:-0}"
+NODE="$NODE" NOW="$NOW" HOST_NAME="$HOST_NAME" KERNEL="$KERNEL" \
+  IPERF_PID="$IPERF_PID" IPERF_COMM="$IPERF_COMM" IPERF_RSS_KB="$IPERF_RSS_KB" \
+  python3 - <<'PY'
+import json, os
+rss = int(os.environ.get("IPERF_RSS_KB") or "0") * 1024
+proc = {
+    "pid": int(os.environ["IPERF_PID"]),
+    "comm": os.environ.get("IPERF_COMM") or "iperf3",
+    "cpuPercent": 90.0,
+    "rssBytes": rss,
+}
+report = {
+    "node": os.environ["NODE"],
+    "standalone": True,
+    "mode": "observe",
+    "observedAt": os.environ["NOW"],
+    "stack": {"softnetProcessed": 10000, "softnetDropped": 1500, "softnetTimeSqueeze": 0},
+    "stats": [],
+    "events": [],
+    "nodeResources": {
+        "host": {
+            "hostname": os.environ["HOST_NAME"],
+            "kernelRelease": os.environ["KERNEL"],
+            "cpuCores": 2,
+            "cpuPercent": 180,
+            "memoryTotalBytes": 1000000000,
+            "memoryUsedBytes": 950000000,
+            "loadAvg1": 3.5,
+        },
+        "workloads": [{"pod": "iperf", "cpuPercent": 40, "memoryUsedBytes": 1000000}],
+    },
+    "hostProcesses": {"byCpu": [proc], "byMemory": [proc]},
+}
+with open("/tmp/netra-ci-report.json", "w", encoding="utf-8") as f:
+    json.dump(report, f)
+print(f"report process pid={proc['pid']} comm={proc['comm']} rss={rss}")
+PY
 curl -sf -X POST \
   -H "Content-Type: application/json" \
   -H "X-Netra-Agent-Key: ${AGENT_KEY}" \
   "${CONTROLLER}/api/v1/agents/report" \
-  -d "{\"node\":\"${NODE}\",\"standalone\":true,\"mode\":\"observe\",\"observedAt\":\"${NOW}\",\"stack\":{\"softnetProcessed\":10000,\"softnetDropped\":1500,\"softnetTimeSqueeze\":0},\"stats\":[],\"events\":[]}" \
+  -d @/tmp/netra-ci-report.json \
   >/dev/null
 
 echo "==> wait for auto-capture session"
@@ -229,9 +275,9 @@ assert size > 24, f"pcap only has global header ({size} bytes) — no frames rec
 print(f"ok: {path} ({size} bytes)")
 PY
 
-echo "==> assert capture history links an artifact"
+echo "==> assert capture history links an artifact and a drop context"
 hist="$(curl -sf -H "Authorization: Bearer ${API_KEY}" "${CONTROLLER}/api/v1/capture/history?limit=5")"
-echo "$hist" | python3 -c "
+aid="$(echo "$hist" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 entries = d.get('entries') or []
@@ -243,11 +289,49 @@ if not auto:
 e = auto[0]
 frames = int(e.get('artifactFrames') or 0)
 aid = e.get('artifactId') or ''
-print(f\"history: requestor={e.get('requestor')} artifactId={aid!r} frames={frames}\")
+print(f\"history: requestor={e.get('requestor')} artifactId={aid!r} frames={frames} context={e.get('contextAvailable')}\", file=sys.stderr)
 if frames < 1 or not aid:
     print('FAIL: history missing artifact link', file=sys.stderr)
     sys.exit(1)
-"
+if not e.get('contextAvailable'):
+    print('FAIL: history missing contextAvailable', file=sys.stderr)
+    sys.exit(1)
+print(aid)
+")"
+ctx="$(curl -sf -H "Authorization: Bearer ${API_KEY}" "${CONTROLLER}/api/v1/capture/artifacts/${aid}/context")"
+printf '%s\n' "$ctx" >/tmp/netra-ci-context.json
+NODE="$NODE" HOST_NAME="$HOST_NAME" IPERF_PID="$IPERF_PID" IPERF_COMM="$IPERF_COMM" ARTIFACT_DIR="$ARTIFACT_DIR" AID="$aid" \
+  python3 - <<'PY'
+import json, os, sys
+with open("/tmp/netra-ci-context.json", encoding="utf-8") as f:
+    ctx = json.load(f)
+node = ctx.get("node") or {}
+want_node = os.environ["NODE"]
+if node.get("name") != want_node:
+    print(f"FAIL: context node {node.get('name')!r} != {want_node}", file=sys.stderr)
+    sys.exit(1)
+if node.get("hostname") != os.environ["HOST_NAME"]:
+    print(f"FAIL: hostname {node.get('hostname')!r}", file=sys.stderr)
+    sys.exit(1)
+if not ctx.get("cpuHot") or not ctx.get("memoryHot"):
+    print(f"FAIL: pressure cpuHot={ctx.get('cpuHot')} memoryHot={ctx.get('memoryHot')}", file=sys.stderr)
+    sys.exit(1)
+procs = ctx.get("topProcessesByCpu") or []
+want_pid = int(os.environ["IPERF_PID"])
+want_comm = os.environ["IPERF_COMM"]
+if not procs or procs[0].get("pid") != want_pid or procs[0].get("comm") != want_comm:
+    print(f"FAIL: top process {procs[:1]!r} want pid={want_pid} comm={want_comm}", file=sys.stderr)
+    sys.exit(1)
+raw = json.dumps(ctx)
+if '"cmdline"' in raw or '"argv"' in raw:
+    print("FAIL: context includes cmdline/argv", file=sys.stderr)
+    sys.exit(1)
+path = os.path.join(os.environ["ARTIFACT_DIR"], os.environ["AID"] + ".context.json")
+if not os.path.isfile(path) or os.path.getsize(path) < 20:
+    print(f"FAIL: missing context file {path}", file=sys.stderr)
+    sys.exit(1)
+print(f"ok: context node={node.get('name')} host={node.get('hostname')} process={want_comm} pid={want_pid} file={path}")
+PY
 
 echo "==> PASS auto-capture veth+iperf3 smoke"
 echo "    artifacts: ${ARTIFACT_DIR}"

@@ -27,6 +27,8 @@ func TestSampleReadsAllHostFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "proc/meminfo"), "MemTotal:       16000000 kB\nMemFree:         2000000 kB\nMemAvailable:    8000000 kB\nCached:          3000000 kB\n")
 	mustWrite(t, filepath.Join(root, "proc/uptime"), "12345.67 98765.43\n")
 	mustWrite(t, filepath.Join(root, "proc/cpuinfo"), "processor\t: 0\nmodel name\t: x\n\nprocessor\t: 1\nmodel name\t: x\n")
+	mustWrite(t, filepath.Join(root, "proc/sys/kernel/hostname"), "worker-1\n")
+	mustWrite(t, filepath.Join(root, "proc/sys/kernel/osrelease"), "6.8.0-netra\n")
 
 	s := Sample(root)
 
@@ -45,6 +47,9 @@ func TestSampleReadsAllHostFiles(t *testing.T) {
 	}
 	if s.CPUCores != 2 {
 		t.Fatalf("cpu cores = %d, want 2", s.CPUCores)
+	}
+	if s.Hostname != "worker-1" || s.KernelRelease != "6.8.0-netra" {
+		t.Fatalf("identity hostname=%q kernel=%q", s.Hostname, s.KernelRelease)
 	}
 }
 

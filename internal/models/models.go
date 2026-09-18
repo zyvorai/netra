@@ -227,6 +227,9 @@ type CaptureHistoryEntry struct {
 	TriggerSource  string `json:"triggerSource,omitempty"`
 	TriggerKind    string `json:"triggerKind,omitempty"`
 	TriggerSubject string `json:"triggerSubject,omitempty"`
+	// ContextAvailable is true when a drop-incident JSON was written
+	// beside the PCAP. Download: GET /api/v1/capture/artifacts/{id}/context.
+	ContextAvailable bool `json:"contextAvailable,omitempty"`
 }
 
 // CaptureHistoryResponse backs GET /api/v1/capture/history.
@@ -1148,6 +1151,11 @@ type AgentReport struct {
 	// cumulative counters, not current settings, and internal/sysres.Build
 	// has no store/window access to diff them itself. See internal/sysres.
 	NodeResources NodeResourceSnapshot `json:"nodeResources,omitempty"`
+	// HostProcesses is a bounded comm-only top (CPU and RSS) sampled on
+	// the agent report tick so a drop can freeze "which process" without
+	// a live ps page. Not copied into GET /api/v1/node-resources. No
+	// argv/cmdline.
+	HostProcesses HostProcessTops `json:"hostProcesses,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

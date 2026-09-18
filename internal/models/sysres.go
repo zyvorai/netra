@@ -27,6 +27,8 @@ type HostResourceSnapshot struct {
 	MemoryAvailableBytes uint64  `json:"memoryAvailableBytes"`
 	MemoryCachedBytes    uint64  `json:"memoryCachedBytes"`
 	UptimeSeconds        uint64  `json:"uptimeSeconds"`
+	Hostname             string  `json:"hostname,omitempty"`
+	KernelRelease        string  `json:"kernelRelease,omitempty"`
 }
 
 // WorkloadResourceStat is one workload's cgroup v2 resource usage,
