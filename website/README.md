@@ -26,8 +26,9 @@ Canonical copies for **GitHub repo browsing** live in [`docs/sales/`](../docs/sa
 (buyers guide markdown + PDF/PPTX/DOCX). The same binaries are also under
 `website/static/sales/` so GitHub Pages can serve them at `/netra/sales/...`.
 The Resources page (`/resources`) links the Pages URLs for download.
-Update both directories when refreshing the perspective, brochure, or
-buyers guide (or copy from `docs/sales/` into `website/static/sales/`).
+Update both directories when refreshing the perspective, brochure,
+enterprise pricing sheets, or buyers guide (or copy from `docs/sales/`
+into `website/static/sales/`).
 
 Feature catalog for engineers: [`docs/p0-p5-surfaces.md`](../docs/p0-p5-surfaces.md).
 Buyer narrative: [`docs/sales/buyers-guide.md`](../docs/sales/buyers-guide.md)

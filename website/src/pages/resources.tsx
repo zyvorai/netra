@@ -33,6 +33,19 @@ const ASSETS: Asset[] = [
     ],
   },
   {
+    title: 'Netra Enterprise Pricing',
+    blurb:
+      'Packaging, edition prices, services, and the ship plan. Five orange, white, and black JPEG sheets. Community stays Apache-2.0.',
+    pages: 'JPEG',
+    files: [
+      {label: 'Packaging', href: '/sales/enterprise-pricing/01-packaging.jpg'},
+      {label: 'Launch scope', href: '/sales/enterprise-pricing/02-launch-scope.jpg'},
+      {label: 'Editions', href: '/sales/enterprise-pricing/03-edition-pricing.jpg'},
+      {label: 'Services', href: '/sales/enterprise-pricing/04-services-support.jpg'},
+      {label: 'Ship plan', href: '/sales/enterprise-pricing/05-ship-plan.jpg'},
+    ],
+  },
+  {
     title: 'Netra Product Brochure',
     blurb:
       'Longer brochure covering every major capability, P0–P5 feature map, lab UI examples, and Zyvor suite placement next to PacketWolf.',
@@ -76,7 +89,7 @@ export default function Resources(): ReactNode {
   return (
     <Layout
       title="Resources"
-      description="Netra buyers guide, product perspective, and brochure for evaluation and sales handoffs.">
+      description="Netra buyers guide, enterprise pricing, product perspective, and brochure for evaluation and sales handoffs.">
       <main className="container margin-vert--lg">
         <header className={styles.header}>
           <Heading as="h1">Resources</Heading>
