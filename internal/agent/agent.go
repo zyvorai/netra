@@ -362,6 +362,30 @@ func (a *Agent) loadAndAttach() error {
 		} else {
 			a.log.Info("L7/DNS observability skipped: programs failed verifier load")
 		}
+		if l7Mode != "off" {
+			for _, h := range []struct {
+				name   string
+				attach ebpf.AttachType
+				prog   string
+			}{
+				{"http-status-ingress", ebpf.AttachCGroupInetIngress, "netra_http_status_ingress"},
+				{"http-status-egress", ebpf.AttachCGroupInetEgress, "netra_http_status_egress"},
+			} {
+				p := coll.Programs[h.prog]
+				if p == nil {
+					a.log.Warn("HTTP/1 status program missing", "program", h.prog)
+					continue
+				}
+				lnk, err := link.AttachCgroup(link.CgroupOptions{Path: a.cgroupPath, Attach: h.attach, Program: p})
+				if err != nil {
+					a.log.Warn("HTTP/1 status program attach failed", "hook", h.name, "error", err)
+					continue
+				}
+				a.links = append(a.links, lnk)
+				a.hooks = append(a.hooks, h.name)
+				a.markAttached(h.prog)
+			}
+		}
 	}
 	// kfree_skb raw tracepoint is optional. Attach only when tracefs confirms
 	// the modern drop-reason argument so older kernels cannot produce garbage.

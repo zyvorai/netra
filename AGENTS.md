@@ -76,12 +76,16 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-tlsfp-smoke.sh` | `tlsfp-smoke` — agent + openssl + iperf3 |
 | `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
 | `scripts/ci-flow-observe-veth.sh` | `flow-observe-veth` — veth + iperf3 flow history, RED, traces, stacks |
+| `scripts/ci-http-status-smoke.sh` | `http-status-smoke` — agent + cleartext HTTP/1 503 |
 
 The auto-capture smoke needs Linux root + iperf3; run locally with
 `sudo ./scripts/ci-auto-capture-veth.sh` when changing alert/auto-capture
 or AF_PACKET paths (see `docs/capture.md`). The flow-observe smoke needs
 Linux root + iperf3; run `sudo ./scripts/ci-flow-observe-veth.sh` when
 changing flow history, RED, traces, or profiles (see `docs/flow-log.md`).
+The HTTP/1 status smoke needs Linux root + clang; run
+`sudo ./scripts/ci-http-status-smoke.sh` when changing
+`netra_http_status_*` or `http_status_stats` (see `docs/l7-metadata.md`).
 The TLSFP smoke needs Linux
 root + clang + openssl + iperf3; run `sudo ./scripts/ci-tlsfp-smoke.sh`
 when changing `bpf/netra_tlsfp.c` or agent JA3 wiring (see

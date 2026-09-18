@@ -76,6 +76,7 @@ static __u64 (*bpf_get_current_uid_gid)(void) = (void *)BPF_FUNC_get_current_uid
 static long (*bpf_get_current_comm)(void *buf, __u32 size) = (void *)BPF_FUNC_get_current_comm;
 static __u64 (*bpf_get_current_cgroup_id)(void) = (void *)BPF_FUNC_get_current_cgroup_id;
 static __u64 (*bpf_get_socket_cookie)(void *ctx) = (void *)BPF_FUNC_get_socket_cookie;
+static long (*bpf_skb_load_bytes)(const void *skb, __u32 offset, void *to, __u32 len) = (void *)BPF_FUNC_skb_load_bytes;
 static int (*bpf_sock_ops_cb_flags_set)(struct bpf_sock_ops *skops, int flags) = (void *)BPF_FUNC_sock_ops_cb_flags_set;
 
 // Additive ABI: node/interface-scoped TC observations, never workload attribution.
@@ -2224,10 +2225,6 @@ static __always_inline int l7_handle_v4(struct __sk_buff *skb, __u8 direction)
     if (direction == DIR_INGRESS) {
         if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
             dns_response_track(cgroup_id, FAMILY_V4, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
-        if (proto == IPPROTO_TCP && payload) {
-            int http_status = netra_l7_http_status(payload, data_end);
-            if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
-        }
         return 1;
     }
 
@@ -2249,8 +2246,6 @@ static __always_inline int l7_handle_v4(struct __sk_buff *skb, __u8 direction)
     }
 
     if (proto == IPPROTO_TCP && payload) {
-        int http_status = netra_l7_http_status(payload, data_end);
-        if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
         int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
         if (sni_len > 0) {
             if (!blocked && enforcing() && scope_allows(cgroup_id)) {
@@ -2310,10 +2305,6 @@ static __always_inline int l7_handle_v6(struct __sk_buff *skb, __u8 direction)
     if (direction == DIR_INGRESS) {
         if (proto == IPPROTO_UDP && sport == __builtin_bswap16(53) && payload)
             dns_response_track(cgroup_id, FAMILY_V6, sc->src, dport, payload, data_end, ifindex, len, sc->src, sc->dst);
-        if (proto == IPPROTO_TCP && payload) {
-            int http_status = netra_l7_http_status(payload, data_end);
-            if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
-        }
         return 1;
     }
 
@@ -2335,8 +2326,6 @@ static __always_inline int l7_handle_v6(struct __sk_buff *skb, __u8 direction)
     }
 
     if (proto == IPPROTO_TCP && payload) {
-        int http_status = netra_l7_http_status(payload, data_end);
-        if (http_status > 0) track_http_status(cgroup_id, (__u16)http_status);
         int sni_len = netra_l7_tls_sni(payload, data_end, sc->sni);
         if (sni_len > 0) {
             if (!blocked && enforcing() && scope_allows(cgroup_id)) {
@@ -2375,6 +2364,44 @@ static __always_inline int l7_handle(struct __sk_buff *skb, __u8 direction)
 
 SEC("cgroup_skb/egress") int netra_l7_cgroup_egress(struct __sk_buff *skb) { return l7_handle(skb, DIR_EGRESS); }
 SEC("cgroup_skb/ingress") int netra_l7_cgroup_ingress(struct __sk_buff *skb) { return l7_handle(skb, DIR_INGRESS); }
+
+/* Status counting is its own program so it still loads on kernels that
+ * reject the SNI/Host scan loops above. The status line is copied with
+ * bpf_skb_load_bytes so a non-linear skb still counts. Returns 1 always:
+ * this program never drops a packet. */
+static __always_inline int http_status_skb(struct __sk_buff *skb)
+{
+    unsigned char hdr[20];
+    unsigned char line[16];
+    if (skb->len < 40) return 1;
+    if (bpf_skb_load_bytes(skb, 0, hdr, 20) < 0) return 1;
+    __u32 off = 0;
+    if ((hdr[0] >> 4) == 4) {
+        __u32 ihl = hdr[0] & 0x0f;
+        if (ihl < 5 || ihl > 15 || hdr[9] != IPPROTO_TCP) return 1;
+        off = ihl * 4;
+    } else if ((hdr[0] >> 4) == 6) {
+        if (hdr[6] != IPPROTO_TCP) return 1;
+        off = 40;
+    } else {
+        return 1;
+    }
+    if (off > 60) return 1;
+    if (bpf_skb_load_bytes(skb, off, hdr, 20) < 0) return 1;
+    __u32 doff = hdr[12] >> 4;
+    if (doff < 5 || doff > 15) return 1;
+    off += doff * 4;
+    off &= 0x7f;
+    if (off < 40) return 1;
+    if (bpf_skb_load_bytes(skb, off, line, 16) < 0) return 1;
+    __u64 cgroup_id = bpf_get_current_cgroup_id();
+    int st = netra_l7_http_status(line, line + 16);
+    if (st > 0) track_http_status(cgroup_id, (__u16)st);
+    return 1;
+}
+
+SEC("cgroup_skb/egress") int netra_http_status_egress(struct __sk_buff *skb) { return http_status_skb(skb); }
+SEC("cgroup_skb/ingress") int netra_http_status_ingress(struct __sk_buff *skb) { return http_status_skb(skb); }
 
 static __always_inline int socket4(struct bpf_sock_addr *ctx,__u8 proto)
 {

@@ -33,7 +33,9 @@ Request paths, query strings, cookies, authorization headers, bodies and respons
 
 A response whose first bytes are `HTTP/1.0 ` or `HTTP/1.1 ` plus a three-digit code is counted in `http_status_stats`, keyed by cgroup and status. That is a fixed offset, not a header scan and not stream reassembly. A status line split across packets is invisible. The reason phrase is not stored.
 
-Map: `http_host_stats` for method and Host. Map: `http_status_stats` for the status code.
+Map: `http_host_stats` for method and Host. Map: `http_status_stats` for the status code. The status counter is `netra_http_status_ingress` / `netra_http_status_egress`, not the SNI/Host scan programs. Kernels that reject those scan loops still load the status programs.
+Linux smoke: `sudo ./scripts/ci-http-status-smoke.sh` (GitHub job
+`http-status-smoke`).
 
 ## Connection attempts
 

@@ -323,6 +323,19 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
     - name: Flow observe veth + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-flow-observe-veth.sh
+  http-status-smoke:
+    # Privileged Linux smoke for cleartext HTTP/1 status. The SNI/Host scan
+    # programs may fail the verifier; the status programs must still attach
+    # and count an HTTP/1.1 503 whose status line starts the packet.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+    - name: HTTP/1 status smoke
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-http-status-smoke.sh
   tlsfp-smoke:
     # Privileged Linux smoke for always-on JA3/JA4: compile netra_tlsfp.o,
     # BPF_PROG_TEST_RUN sampler tests, then live agent + openssl ClientHello
