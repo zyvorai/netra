@@ -129,7 +129,7 @@ sudo ./scripts/ci-auto-capture-veth.sh
 # Optional: CONTROLLER_PORT=31970 CAPTURE_DURATION=12s sudo -E ./scripts/ci-auto-capture-veth.sh
 ```
 
-### Lab, 2026-09-18 (`80.79.5.173`)
+### Lab, 2026-09-18 (`NLDW4-4-16-36`)
 
 Host `NLDW4-4-16-36`. Three back-to-back runs of
 `sudo CONTROLLER_PORT=31970 ./scripts/ci-auto-capture-veth.sh`. Each wrote a
