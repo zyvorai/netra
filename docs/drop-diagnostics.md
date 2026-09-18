@@ -83,7 +83,7 @@ GET /api/v1/ebpf/drops?limit=100
 
 These point-in-time anomalies are also what `internal/alert`'s poller republishes as notify events (deduped per `(source, kind, subject)` with a cooldown), and what `internal/api/metrics.go` folds into the low-cardinality Prometheus gauges below. Separately, `internal/alert/dropbaseline.go` adds a **rate-based** signal — `kernel-drop-spike`/`policy-drop-spike` events when a `(node, reason)` key's delta since the last poll is both above an absolute floor (default 50) and several times (default 3×) its own recent average delta — these are not part of this endpoint's response, only the alerting stream.
 
-When `NETRA_AUTO_CAPTURE=true`, a **critical** `softnet-drop` (≥1000) or critical drop-rate spike also starts a filtered, time-bounded packet capture and persists a PCAP — see `docs/capture.md` (Auto-capture) and `docs/alerting.md`.
+When `NETRA_AUTO_CAPTURE=true`, a **critical** `softnet-drop` (≥1000) or critical drop-rate spike also starts a filtered, time-bounded packet capture and persists a PCAP plus a drop-incident context JSON — see `docs/capture.md` (Auto-capture), `docs/alerting.md`, and the walkthrough in `docs/tutorials/drop-incident-context.md`.
 
 ## Scope and attribution
 

@@ -76,6 +76,7 @@ category deny drafts, tenant risk scores).
 - [p0-p5-surfaces.md](p0-p5-surfaces.md) — full feature catalog + UX wiring
 - [sales/buyers-guide.md](sales/buyers-guide.md) — buyer evaluation narrative
 - [competitive-sse.md](competitive-sse.md) — cloud SSE / Zero Trust fit gaps
+- [competitive-observability.md](competitive-observability.md) — eBPF NPM / APM gaps
 - [packetwolf.md](packetwolf.md) — suite co-existence
 - [firewall.md](firewall.md) — leased deny model
 - [AGENTS.md](../AGENTS.md) — hard boundaries for contributors

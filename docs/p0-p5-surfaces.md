@@ -6,7 +6,8 @@ surface shipped under that program: what it does, how it works, where it
 shows up in the UX, and what it deliberately does **not** do.
 
 Strategy maps: [`competitive-quantum.md`](competitive-quantum.md) (NGFW),
-[`competitive-sse.md`](competitive-sse.md) (SSE/ZT). Buyers: [`sales/buyers-guide.md`](sales/buyers-guide.md).
+[`competitive-sse.md`](competitive-sse.md) (SSE/ZT),
+[`competitive-observability.md`](competitive-observability.md) (eBPF NPM/APM peers) and [`flow-log.md`](flow-log.md) (queryable history, RED, traces). Buyers: [`sales/buyers-guide.md`](sales/buyers-guide.md).
 
 ## Hard boundaries (every surface)
 

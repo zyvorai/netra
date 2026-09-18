@@ -1047,7 +1047,16 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		SysctlNetworkAudit: sysctlAudit,
 		NodeResources:      nodeResources,
 		HostProcesses:      hostProcesses,
+		StackSamples:       stackSamplesFor(a.node, hostProcesses),
 	})
+}
+
+func stackSamplesFor(node string, tops models.HostProcessTops) []models.StackSample {
+	samples := sysres.SampleStacks("/", tops, 5, 16)
+	for i := range samples {
+		samples[i].Node = node
+	}
+	return samples
 }
 
 // pidsFromTCPHealth collects the unique nonzero PIDs observed in the

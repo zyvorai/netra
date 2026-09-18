@@ -223,6 +223,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /api/v1/flows/stream", s.auth(http.HandlerFunc(s.streamFlows)))
 	mux.Handle("GET /api/v1/flows/summary", s.auth(http.HandlerFunc(s.flowSummary)))
+	mux.Handle("GET /api/v1/flows/history", s.auth(http.HandlerFunc(s.flowHistory)))
 	mux.Handle("GET /api/v1/drops/explain", s.auth(http.HandlerFunc(s.ebpfDropExplain)))
 	mux.Handle("GET /api/v1/ebpf/config", s.authOrAgent(http.HandlerFunc(s.ebpfConfig)))
 	mux.Handle("PUT /api/v1/vms/{node}/capture", s.auth(http.HandlerFunc(s.captureStart)))
@@ -318,6 +319,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/insights/microseg", s.auth(http.HandlerFunc(s.insightsMicroseg)))
 	mux.Handle("GET /api/v1/insights/shadow-saas", s.auth(http.HandlerFunc(s.insightsShadowSaaS)))
 	mux.Handle("GET /api/v1/insights/experience", s.auth(http.HandlerFunc(s.insightsExperience)))
+	mux.Handle("GET /api/v1/insights/red", s.auth(http.HandlerFunc(s.insightsRED)))
+	mux.Handle("GET /api/v1/insights/traces", s.auth(http.HandlerFunc(s.insightTraces)))
+	mux.Handle("GET /api/v1/insights/profiles", s.auth(http.HandlerFunc(s.insightProfiles)))
+	mux.Handle("GET /api/v1/insights/workload-events", s.auth(http.HandlerFunc(s.workloadEvents)))
 	mux.Handle("GET /api/v1/insights/destination-risk", s.auth(http.HandlerFunc(s.insightsDestinationRisk)))
 	mux.Handle("GET /api/v1/insights/policy-packs", s.auth(http.HandlerFunc(s.insightsPolicyPacks)))
 	mux.Handle("GET /api/v1/insights/identity-drafts", s.auth(http.HandlerFunc(s.insightsIdentityDrafts)))

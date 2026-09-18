@@ -1156,6 +1156,10 @@ type AgentReport struct {
 	// a live ps page. Not copied into GET /api/v1/node-resources. No
 	// argv/cmdline.
 	HostProcesses HostProcessTops `json:"hostProcesses,omitempty"`
+	// StackSamples is a bounded /proc/<pid>/stack read for the hottest
+	// host comms on this tick. Kernel frames only. Not copied into
+	// GET /api/v1/node-resources.
+	StackSamples []StackSample `json:"stackSamples,omitempty"`
 }
 
 // QdiscStat is one qdisc's netlink drop/overlimit/requeue counters for one

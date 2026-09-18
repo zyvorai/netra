@@ -125,8 +125,10 @@ netrad (API · UI · HA) → operators (dashboard, CLI, MCP, ChatOps, SIEM)
 | Microseg | Workload ZT | Zone policy | Drafts + PacketWolf for durable |
 | Remote users | ZTNA | VPN / SD-WAN | Out of scope |
 
-Internal strategy docs (no competitor brand names):  
-[`../competitive-sse.md`](../competitive-sse.md), [`../competitive-quantum.md`](../competitive-quantum.md).
+Internal strategy docs: SSE and NGFW comparisons avoid brand names
+([`../competitive-sse.md`](../competitive-sse.md), [`../competitive-quantum.md`](../competitive-quantum.md)).
+Peer eBPF observability gaps, which do name those products:
+[`../competitive-observability.md`](../competitive-observability.md).
 
 ---
 

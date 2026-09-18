@@ -685,8 +685,31 @@ func denyImport(path string) error {
 }
 
 func flows() error {
-	if len(os.Args) < 3 || (os.Args[2] != "watch" && os.Args[2] != "summary") {
-		return fmt.Errorf("use flows watch|summary")
+	if len(os.Args) < 3 {
+		return fmt.Errorf("use flows watch|summary|history")
+	}
+	if os.Args[2] == "history" {
+		q := url.Values{}
+		for i := 3; i+1 < len(os.Args); i += 2 {
+			m := map[string]string{
+				"--since": "since", "--namespace": "namespace", "--pod": "pod",
+				"--peer": "peer", "--protocol": "protocol", "--app": "app",
+				"--node": "node", "--limit": "limit",
+			}
+			k, ok := m[os.Args[i]]
+			if !ok {
+				return fmt.Errorf("unknown flag %s", os.Args[i])
+			}
+			q.Set(k, os.Args[i+1])
+		}
+		p := "/api/v1/flows/history"
+		if enc := q.Encode(); enc != "" {
+			p += "?" + enc
+		}
+		return request("GET", p, nil)
+	}
+	if os.Args[2] != "watch" && os.Args[2] != "summary" {
+		return fmt.Errorf("use flows watch|summary|history")
 	}
 	q := url.Values{"number": {map[string]string{"watch": "100", "summary": "500"}[os.Args[2]]}}
 	for i := 3; i+1 < len(os.Args); i += 2 {
@@ -1577,6 +1600,33 @@ func insightCmd() error {
 		return request("GET", "/api/v1/insights/shadow-saas", nil)
 	case "experience":
 		return request("GET", "/api/v1/insights/experience", nil)
+	case "red":
+		p := "/api/v1/insights/red"
+		if len(os.Args) > 3 {
+			p += "?window=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "traces":
+		p := "/api/v1/insights/traces"
+		if len(os.Args) > 3 {
+			p += "?since=" + url.QueryEscape(os.Args[3])
+		}
+		return request("GET", p, nil)
+	case "profiles":
+		return request("GET", "/api/v1/insights/profiles", nil)
+	case "workload-events":
+		q := url.Values{}
+		if len(os.Args) > 3 {
+			q.Set("namespace", os.Args[3])
+		}
+		if len(os.Args) > 4 {
+			q.Set("pod", os.Args[4])
+		}
+		p := "/api/v1/insights/workload-events"
+		if enc := q.Encode(); enc != "" {
+			p += "?" + enc
+		}
+		return request("GET", p, nil)
 	case "destination-risk":
 		return request("GET", "/api/v1/insights/destination-risk", nil)
 	case "policy-packs":

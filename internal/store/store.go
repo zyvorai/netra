@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zyvorai/netra/internal/flowlog"
 	"github.com/zyvorai/netra/internal/models"
 )
 
@@ -89,6 +90,8 @@ type Store struct {
 	// above, this IS persisted (see persistence.go) since it's a small,
 	// bounded audit-style log rather than live session state.
 	captureHistory []models.CaptureHistoryEntry
+	// flowLog is an in-memory ring. It is not written to the state file.
+	flowLog *flowlog.Log
 }
 
 func New() *Store {
@@ -102,6 +105,7 @@ func New() *Store {
 		ruleIndex:            map[string]firewallRuleIndex{},
 		ruleIndexByKey:       map[string]string{},
 		nextRuleSeq:          map[string]uint64{},
+		flowLog:              flowlog.New(),
 	}
 }
 
@@ -1640,6 +1644,29 @@ func (s *Store) Report(r models.AgentReport) {
 	s.appendRateSampleLocked(r)
 	s.appendKernelNetworkSampleLocked(r)
 	s.agents[r.Node] = r
+	if s.flowLog != nil {
+		at := r.ObservedAt
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
+		s.flowLog.Ingest(at, r)
+	}
+}
+
+// FlowQuery reads the in-memory flow history. It does not touch the state file.
+func (s *Store) FlowQuery(q flowlog.Query) flowlog.Result {
+	if s == nil || s.flowLog == nil {
+		return flowlog.Result{Records: []flowlog.Record{}, Limitations: flowlog.Limitations()}
+	}
+	return s.flowLog.Query(q)
+}
+
+// FlowCount is the number of retained flow deltas. Safe for a Prometheus gauge.
+func (s *Store) FlowCount() int {
+	if s == nil || s.flowLog == nil {
+		return 0
+	}
+	return s.flowLog.Len()
 }
 
 func (s *Store) Agents() []models.AgentReport {

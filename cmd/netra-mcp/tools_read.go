@@ -483,6 +483,51 @@ func registerReadTools(srv *mcpserver.Server, c *client) error {
 			queryParams: []string{"limit"},
 		},
 		{
+			name: "netra_flow_history", method: "GET", path: "/api/v1/flows/history",
+			description: "Queryable flow history (pod, peer, port, protocol, bytes, drops, comm). In-memory, hours, no payloads.",
+			schema: objSchema(map[string]any{
+				"since":     strProp("Duration (1h) or RFC3339. Default 1h. Max 6h."),
+				"namespace": strProp("Filter by namespace."),
+				"pod":       strProp("Filter by pod name."),
+				"peer":      strProp("Filter by peer IP."),
+				"protocol":  strProp("Filter by protocol, for example tcp."),
+				"app":       strProp("Well-known-port hint: mysql, postgres, redis, kafka, grpc, http, https."),
+				"node":      strProp("Filter by node."),
+				"limit":     intProp("Max records, 1-2000. Default 200."),
+			}),
+			queryParams: []string{"since", "namespace", "pod", "peer", "protocol", "app", "node", "limit"},
+		},
+		{
+			name: "netra_insights_red", method: "GET", path: "/api/v1/insights/red",
+			description: "Per-workload rate, errors, and TCP SRTT over a window. Errors are drops and retransmits, not HTTP status.",
+			schema:      objSchema(map[string]any{"window": strProp("Duration, for example 5m. Max 6h.")}),
+			queryParams: []string{"window"},
+		},
+		{
+			name: "netra_insights_traces", method: "GET", path: "/api/v1/insights/traces",
+			description: "Inferred service-path spans from flow edges and pod IPs. Not propagated trace context.",
+			schema: objSchema(map[string]any{
+				"since":     strProp("Duration, for example 15m. Max 6h."),
+				"namespace": strProp("Filter by namespace."),
+				"pod":       strProp("Filter by pod name."),
+			}),
+			queryParams: []string{"since", "namespace", "pod"},
+		},
+		{
+			name: "netra_insights_profiles", method: "GET", path: "/api/v1/insights/profiles",
+			description: "Bounded kernel stacks for the hottest host comms. Not a user-space flame graph. No argv.",
+			schema:      objSchema(map[string]any{}),
+		},
+		{
+			name: "netra_insights_workload_events", method: "GET", path: "/api/v1/insights/workload-events",
+			description: "Kubernetes Warning events for pods (OOMKilled, probe failures, BackOff). Not journal or dmesg.",
+			schema: objSchema(map[string]any{
+				"namespace": strProp("Restrict to this namespace."),
+				"pod":       strProp("Restrict to this pod name."),
+			}),
+			queryParams: []string{"namespace", "pod"},
+		},
+		{
 			name: "netra_insights_destination_risk", method: "GET", path: "/api/v1/insights/destination-risk",
 			description: "Combined destination risk from intel hits, categories, AI/MCP, DoH/DoT, and volume. Observe-only.",
 			schema:      objSchema(map[string]any{"limit": intProp("Max destinations.")}),

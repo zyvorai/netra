@@ -146,7 +146,8 @@ signals and persists PCAPs for later diagnosis. See `docs/capture.md`
 Helm: `alerting.autoCapture.*`. Auto-capture can run even when no notify
 channels are configured (the poller still evaluates findings). Full trigger
 list, artifact download API, and the Linux `scripts/ci-auto-capture-veth.sh`
-/ GitHub `auto-capture-veth` smoke live in `docs/capture.md`.
+/ GitHub `auto-capture-veth` smoke live in `docs/capture.md`. Reading the
+sibling context JSON: `docs/tutorials/drop-incident-context.md`.
 
 ## Not included
 

@@ -73,7 +73,7 @@ func helpSections() []helpSection {
 				{"policy list|build|plan|simulate|apply …", "CNP workbench with receipts"},
 				{"policy gitops status|resync …", "Mounted-dir GitOps"},
 				{"policy history|archive|rollback|delete …", "Revision control"},
-				{"flows watch|summary …", "Optional Hubble enrichment"},
+				{"flows watch|summary|history …", "Live sample plus queryable flow history"},
 			},
 		},
 		{
@@ -167,6 +167,7 @@ func usagePlain(w io.Writer) {
   policy rollback <namespace> <name> <revision> [--dry-run] [--confirm-risk high|critical]
   policy delete <namespace> <name>
   flows watch|summary [--verdict X --direction X --protocol X --namespace X --pod X --to IP/CIDR]
+  flows history [--since 1h --namespace NS --pod POD --peer IP --protocol tcp --app mysql --node NODE --limit N]
   drops [explain]
   ebpf … | insights … | incidents … | ai …`))
 }

@@ -60,12 +60,13 @@ npm --prefix web run test
 # Live smokes (Linux root):
 #   sudo ./scripts/ci-tlsfp-smoke.sh
 #   sudo ./scripts/ci-auto-capture-veth.sh
+#   sudo ./scripts/ci-flow-observe-veth.sh
 # Live lab full netractl command board (not smoke):
 #   ./scripts/ci-netractl-remote.sh
 ```
 
 CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
-`auto-capture-veth`, `tlsfp-smoke`). Scripted gates:
+`auto-capture-veth`, `flow-observe-veth`, `tlsfp-smoke`). Scripted gates:
 
 | Script | Job / step |
 |---|---|
@@ -74,10 +75,14 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-ebpf-tests.sh` | `ebpf` — C helpers, clang objects, bpfintegration |
 | `scripts/ci-tlsfp-smoke.sh` | `tlsfp-smoke` — agent + openssl + iperf3 |
 | `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
+| `scripts/ci-flow-observe-veth.sh` | `flow-observe-veth` — veth + iperf3 flow history, RED, traces, stacks |
 
 The auto-capture smoke needs Linux root + iperf3; run locally with
 `sudo ./scripts/ci-auto-capture-veth.sh` when changing alert/auto-capture
-or AF_PACKET paths (see `docs/capture.md`). The TLSFP smoke needs Linux
+or AF_PACKET paths (see `docs/capture.md`). The flow-observe smoke needs
+Linux root + iperf3; run `sudo ./scripts/ci-flow-observe-veth.sh` when
+changing flow history, RED, traces, or profiles (see `docs/flow-log.md`).
+The TLSFP smoke needs Linux
 root + clang + openssl + iperf3; run `sudo ./scripts/ci-tlsfp-smoke.sh`
 when changing `bpf/netra_tlsfp.c` or agent JA3 wiring (see
 `docs/tls-fingerprints.md`).

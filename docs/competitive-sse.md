@@ -104,6 +104,7 @@ flowchart TB
 
 - [p0-p5-surfaces.md](p0-p5-surfaces.md) — full feature catalog + UX wiring  
 - [sales/buyers-guide.md](sales/buyers-guide.md) — buyer evaluation narrative  
-- [competitive-quantum.md](competitive-quantum.md) — perimeter NGFW fit  
+- [competitive-quantum.md](competitive-quantum.md) — perimeter NGFW fit
+- [competitive-observability.md](competitive-observability.md) — eBPF NPM / APM gaps  
 - [packetwolf.md](packetwolf.md) — durable microseg ownership  
 - [ai-destinations.md](ai-destinations.md), [app-categories.md](app-categories.md), [microseg.md](microseg.md)

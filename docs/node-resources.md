@@ -138,7 +138,10 @@ collapsed into one number.
   a Kubernetes node, but possible for host-level daemons) is invisible
   here. A bounded comm-only host process top (pid, CPU%, RSS — no
   argv/cmdline) is frozen only inside a drop-incident context file, not
-  on this endpoint. See [Capture](capture.md).
+  on this endpoint. Kernel stacks for the hottest comms are
+  `GET /api/v1/insights/profiles`, also not this endpoint. See [Capture](capture.md),
+  [flow history](flow-log.md), and the
+  [drop-context tutorial](tutorials/drop-incident-context.md).
 - **In-memory only.** A `netrad` restart or HA failover, and an agent
   restart, both reset all delta-tracking state to zero — the next
   report after either event starts back at `cpuPercent: 0` for

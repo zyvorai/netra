@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from '../api';
+import FlowObserve from '../components/FlowObserve';
 import TerminalFrame from '../components/TerminalFrame';
 import { endpointName, tuple, verdictClass } from '../lib/flow';
 
@@ -222,6 +223,8 @@ export default function Flows() {
           ))}
         </div>
       </section>
+
+      <FlowObserve />
 
       <section className="card span3">
         <p className="eyebrow">DROP EXPLAIN</p>

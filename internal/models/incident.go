@@ -22,6 +22,17 @@ type HostProcessTops struct {
 	ByMemory []HostProcessStat `json:"byMemory,omitempty"`
 }
 
+// StackSample is a bounded kernel stack for one hot host process.
+// Folded is comm plus kernel frames from /proc/<pid>/stack. No argv,
+// no user-space flame graph, and nothing is read if the file is absent.
+type StackSample struct {
+	Node   string `json:"node,omitempty"`
+	PID    uint32 `json:"pid"`
+	Comm   string `json:"comm,omitempty"`
+	Folded string `json:"folded,omitempty"`
+	Frames int    `json:"frames,omitempty"`
+}
+
 // DropIncidentTrigger is the alert that caused the capture.
 type DropIncidentTrigger struct {
 	Source    string    `json:"source"`

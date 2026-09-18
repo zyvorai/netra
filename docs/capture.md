@@ -96,6 +96,7 @@ TCP, and the softnet, qdisc, and kernel-drop counters already on that
 report. Download: `GET /api/v1/capture/artifacts/{id}/context` (UI
 **Context** when `contextAvailable` is set on the history row). This is
 not a Red Hat sosreport: no `dmesg`, journal, or package inventory.
+Walkthrough: [tutorials/drop-incident-context.md](tutorials/drop-incident-context.md).
 
 A notify event (`source=auto-capture`, `kind=started`) is published when a
 session begins (delivered through configured alert channels when present).
