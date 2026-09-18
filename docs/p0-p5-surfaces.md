@@ -218,6 +218,24 @@ Detail: [`p5-surfaces.md`](p5-surfaces.md).
 
 ---
 
+## Flow log
+
+Queryable deltas kept in controller memory (default 6 hours, 20 000 records, lost on restart). Not a days-long warehouse, and not the Connections live sample.
+
+| Surface | How it works | API |
+|---|---|---|
+| **Flow history** | Pod, peer, port, protocol, bytes, drops. First sample is a baseline and is not stored | `GET /api/v1/flows/history` |
+| **RED** | Rate, drop/retransmit errors, average TCP SRTT. No HTTP status | `GET /api/v1/insights/red` |
+| **Port hint** | Well-known port name on the flow (`mysql`, `redis`, `kafka`, `grpc` on 50051). Not a payload parser | field `appProtocol` on history |
+| **Process** | Comm and pid when TCP health matches the peer and port. No argv | fields `comm`, `pid` |
+| **Traces** | Inferred parent/child from flow edges and pod IPs. No `traceparent` | `GET /api/v1/insights/traces` |
+| **Profiles** | Kernel stack for the hottest host comms. Not on node-resources | `GET /api/v1/insights/profiles` |
+| **Pod warnings** | Kubernetes `Warning` events. Not journal or dmesg | `GET /api/v1/insights/workload-events` |
+
+Prometheus keeps one unlabeled gauge, `netra_flowlog_records`. Detail: [`flow-log.md`](flow-log.md). UX: Flows page (history, RED, inferred paths).
+
+---
+
 ## Data-flow sketch (encrypted path)
 
 ```text

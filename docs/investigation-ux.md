@@ -23,7 +23,7 @@ Polling runs every 10 seconds, serially, with cancellation on unmount. Connectio
 
 - Agent inventory is not expected-node inventory; zero reports is unverified coverage.
 - Detached programs may be optional. Program-report presence is not proof of traffic traversing every hook.
-- Event buffers are sampled and bounded; this is not historical search or a complete connection ledger. No fabricated time-range selector is provided.
+- Event buffers are sampled and bounded. The Connections page is not historical search. Queryable flow deltas (default 6 hours, lost on restart) are a separate API: [`flow-log.md`](flow-log.md). No fabricated time-range selector is provided on Connections.
 - `observed` means Netra did not block at that hook, not that the application received traffic.
 - Events contain no stable winning rule ID or historical policy generation. Explanations quote the reported reason without inferring a historical rule from current config.
 - Identity comes from agent attribution, never an IP-only join. A VM launcher pod is not guest-process attribution.
@@ -35,4 +35,4 @@ Run `npm --prefix web ci`, `npm --prefix web test`, and `npm --prefix web run bu
 For browser checks, install Chromium with `cd web && npx playwright install chromium`, start Vite on port 5173, then run `npm --prefix web run test:browser`.
 The Investigation UI workflow builds production assets and runs the same test using intercepted API fixtures. It checks scoped reload, navigation/history, the evidence dialog and focus restoration, workload drill-down, pause, failed refresh retention, empty reports, mobile width, dark theme, and browser errors. Screenshots are uploaded as CI artifacts.
 
-This is the first investigation UX release. Guided policy authoring, effective-policy evaluation, durable incidents, historical storage, SSO/RBAC, and multi-site management remain separate roadmap work.
+This is the first investigation UX release. Guided policy authoring, effective-policy evaluation, durable incidents, a multi-day flow warehouse, SSO/RBAC, and multi-site management remain separate roadmap work. The in-memory flow log is [`flow-log.md`](flow-log.md).

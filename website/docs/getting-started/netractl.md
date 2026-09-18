@@ -64,8 +64,16 @@ netractl ebpf maps              # datapath map inventory (human)
 netractl ebpf maps --json
 netractl ebpf census            # counts only
 netractl ebpf coverage
+netractl flows history --since 1h
+netractl insights red 5m
+netractl insights traces 15m
+netractl insights profiles
+netractl insights workload-events
 netractl ai brief
 ```
+
+Flow history, RED, traces, stacks, and pod warnings:
+[`docs/flow-log.md`](https://github.com/zyvorai/netra/blob/main/docs/flow-log.md).
 
 Map inventory details:
 [`docs/ebpf-maps.md`](https://github.com/zyvorai/netra/blob/main/docs/ebpf-maps.md).

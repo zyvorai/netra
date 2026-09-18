@@ -45,7 +45,7 @@ See [netractl CLI](./netractl) for PATH install, `~/.netra/env`, and
 | L7 Metadata | TLS SNI / HTTP Host observation and leased SNI deny |
 | Insights | Dependency graph, behavior/rate baselines, drift, exposure scoring, review-only policy drafts |
 | Firewall | Every eBPF-enforced rule in one place — deny lists, DDoS shield, NetPol allow/default-deny |
-| Live flows | Hubble stream (when Cilium/Hubble is present) plus flow-summary aggregates |
+| Live flows | Hubble stream when Cilium/Hubble is present, plus an in-memory flow history (pod, peer, port, RED, inferred paths). See the repo doc `docs/flow-log.md` |
 | Policies | Guided `CiliumNetworkPolicy` builder + JSON workbench with preflight receipts |
 | Audit | Bounded control-plane audit feed |
 
@@ -87,6 +87,8 @@ Requires a reachable Kubernetes API; Hubble is optional (`NETRA_HUBBLE_ADDR`, de
 curl -skf https://HOST:30870/api/v1/ebpf/health | head
 curl -skf https://HOST:30870/api/v1/ebpf/l7 | head
 curl -skf https://HOST:30870/api/v1/flows/summary?number=50 | head
+curl -skf "https://HOST:30870/api/v1/flows/history?since=1h&limit=20" | head
+curl -skf "https://HOST:30870/api/v1/insights/red?window=5m" | head
 curl -skf https://HOST:30870/api/v1/insights/summary | head
 ```
 
@@ -95,6 +97,8 @@ netractl ebpf health
 netractl ebpf maps                 # desired deny/allow/rate inventory
 netractl ebpf l7
 netractl flows summary --direction EGRESS
+netractl flows history --since 1h --limit 20
+netractl insights red 5m
 netractl insights summary
 netractl explain --all --format json   # passive, read-only — see docs/explain.md
 netractl ai brief                      # heuristic by default, no config needed — see docs/ai.md

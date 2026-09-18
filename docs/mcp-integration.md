@@ -80,7 +80,7 @@ Then, from a Hermes session:
 hermes mcp test netra
 ```
 
-should report a successful handshake and list the **107** read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
+should report a successful handshake and list the **112** read tools. Run `/reload-mcp` inside a chat session after changing `config.yaml` to pick up changes without restarting Hermes entirely.
 
 Mutations stay off by default even with this config — `NETRA_MCP_ALLOW_MUTATIONS` must be added explicitly on the `netra-mcp` process's own environment, not just in Hermes's config. A conservative read-only-by-convention setup, worth keeping even once mutations are enabled server-side, restricts which tools Hermes is allowed to call at all via `tools.include`:
 
@@ -98,6 +98,7 @@ mcp_servers:
         - netra_pods
         - netra_vms
         - netra_flow_summary
+        - netra_flow_history
         - netra_drops_explain
         - netra_ebpf_health
         - netra_ebpf_path
@@ -218,6 +219,7 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | Tool | Endpoint | Parameters | Notes |
 |---|---|---|---|
 | `netra_flow_summary` | `GET /api/v1/flows/summary` | `number` (1-5000, default 500), `verdict` (`FORWARDED`\|`DROPPED`\|`ERROR`\|`AUDIT`\|`REDIRECTED`\|`TRACED`\|`TRANSLATED`), `namespace`, `pod`, `direction` (`EGRESS`\|`INGRESS`), `protocol`, `destination` | Bounded point-in-time aggregate; the tool-shaped equivalent of the `flows/stream` SSE endpoint, which is not exposed (see [Not included](#not-included)) |
+| `netra_flow_history` | `GET /api/v1/flows/history` | `since` (duration or RFC3339, default 1h, max 6h), `namespace`, `pod`, `peer`, `protocol`, `app`, `node`, `limit` (1-2000, default 200) | In-memory flow deltas. No payloads. Lost on restart. See `docs/flow-log.md` |
 | `netra_drops_explain` | `GET /api/v1/drops/explain` | `limit` (1-100, default 20), `namespace`, `pod` | Plain-English summary + remediation suggestions per dropped flow |
 | `netra_ebpf_summary` | `GET /api/v1/ebpf/summary` | — | High-level rollup of fast-path activity across agents |
 | `netra_ebpf_health` | `GET /api/v1/ebpf/health` | `limit` (1-200, default 20) | TCP health/retransmit/connect-latency anomalies |
@@ -258,6 +260,10 @@ All tool names are prefixed `netra_`. Every tool maps 1:1 to one Netra controlle
 | `netra_incidents` | `GET /api/v1/incidents` | `auditLimit` (1-1000, default 200) | Cross-signal clusters joining health/drift/rate-drift/exposure/detective/audit findings by shared source; only surfaced with ≥2 contributing signal kinds |
 | `netra_incidents_timeline` | `GET /api/v1/incidents/timeline` | `since` (RFC3339, optional) | Chronological, human-readable merge of the audit log and cluster-health-signature transitions |
 | `netra_insights_remediations` | `GET /api/v1/insights/remediations` | `limit` (1-200, default 50), `window` | Proposed remediations; result always carries `reviewRequired: true`, `autoApply: false` |
+| `netra_insights_red` | `GET /api/v1/insights/red` | `window` (duration, default 5m, max 6h) | Per-workload rate, drop/retransmit errors, and TCP SRTT. Not HTTP status. See `docs/flow-log.md` |
+| `netra_insights_traces` | `GET /api/v1/insights/traces` | `since` (duration, default 15m, max 6h), `namespace`, `pod` | Inferred spans from flow edges and pod IPs. No propagated traceparent |
+| `netra_insights_profiles` | `GET /api/v1/insights/profiles` | — | Kernel stacks from `/proc/<pid>/stack` for the hottest host comms. No argv |
+| `netra_insights_workload_events` | `GET /api/v1/insights/workload-events` | `namespace`, `pod` | Kubernetes Warning events for pods. Not journal or dmesg |
 
 ### Policies — read & generate (always available)
 
@@ -368,7 +374,7 @@ Every eBPF mutating tool returns the full updated `EBPFFastPathConfig` on succes
 
 ## Not included
 
-- **No `flows/stream` tool.** `GET /api/v1/flows/stream` is a Server-Sent-Events stream; it doesn't fit a request/response MCP `tools/call`. `netra_flow_summary` covers the same underlying data as a bounded, point-in-time aggregate.
+- **No `flows/stream` tool.** `GET /api/v1/flows/stream` is a Server-Sent-Events stream; it doesn't fit a request/response MCP `tools/call`. `netra_flow_summary` is the live aggregate. `netra_flow_history` is the in-memory hour-scale log (`docs/flow-log.md`), not a stream and not a days-long warehouse.
 - **Tools only — no MCP resources or prompts.** Every capability is exposed as a callable tool; there is no resource-subscription or prompt-template surface.
 - **No additional rate limiting.** `netra-mcp` adds no throttling of its own beyond whatever the controller's own API already enforces.
 - **No per-tool credential scoping.** See [Security considerations](#security-considerations) — one API key covers everything `netra-mcp` is allowed to do; the mutation gate is process-wide, not per-tool.

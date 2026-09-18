@@ -56,6 +56,8 @@ API: `GET /api/v1/ebpf/l7`.
 
 Prometheus metrics are aggregate/low-cardinality. Hostnames and destination addresses are intentionally not emitted as metric labels.
 
+Flow history can label a destination port with a well-known name (`mysql`, `postgres`, `redis`, `kafka`, `grpc` on 50051, `http`, `https`). That label is a port hint, not a decode of those protocols, and not a substitute for the SNI/Host parser above. gRPC on 443 stays `https`. See [`flow-log.md`](flow-log.md).
+
 ## Implementation note: why this runs in its own program
 
 SNI/HTTP/DNS-qname parsing runs in dedicated `netra_l7_cgroup_egress`/`netra_l7_cgroup_ingress` programs (`bpf/netra_tc.c`), separate from `netra_cgroup_egress`/`netra_cgroup_ingress` (the conntrack + IP/CIDR/port/rate/NetworkPolicy-deny program). This is deliberate, not incidental: a `cgroup_skb` BPF program is force-inlined into one function frame, so the verifier must account for the union of every helper's locals against the kernel's hard 512-byte stack limit. Once conntrack and NetworkPolicy-shaped deny were added to the CT/policy program, that frame was already at its limit — folding the L7 scan buffers back into the same function is exactly what silently disconnected this feature for a time (the parser functions were still defined but never called; see `CHANGELOG.md`). Keeping L7 parsing in its own program gives it its own, independent verifier budget. If you're modifying either program, do not merge them back into one — reintroduce that same failure mode.

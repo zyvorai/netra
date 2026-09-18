@@ -26,6 +26,8 @@ netractl insights experience
 
 **UX:** Surfaces → Experience. Complements Path, Drop, and Congestion Map.
 
+Rate, errors, and duration over a window are a separate board, not this score. `GET /api/v1/insights/red` uses flow-counter deltas, blocked packets, TCP retransmission/RTO, and average SRTT. It does not time an HTTP request and it does not see status codes. See [`flow-log.md`](flow-log.md).
+
 ## Boundaries
 
 - Metadata and kernel counters only — not synthetic user journeys  
