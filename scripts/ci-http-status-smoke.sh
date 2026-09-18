@@ -172,12 +172,25 @@ ip -n "$PEER_NS" addr add "${IP1}/24" dev "$IFACE1"
 ip -n "$PEER_NS" link set "$IFACE1" up
 ip -n "$PEER_NS" link set lo up
 ip netns exec "$PEER_NS" sysctl -w net.ipv4.tcp_timestamps=0 net.ipv4.tcp_sack=0 >/dev/null
+# cgroup_skb sees the packet before GSO. A super-packet hides the status
+# line from skb->data, and bpf_skb_load_bytes returns an error on this
+# runner. One segment, no offload, so the line is in the linear header.
+ip link set "$IFACE0" gso_max_segs 1 2>/dev/null || true
+ip netns exec "$PEER_NS" ip link set "$IFACE1" gso_max_segs 1 2>/dev/null || true
+if command -v ethtool >/dev/null 2>&1; then
+  ethtool -K "$IFACE0" tso off gso off gro off tx off 2>/dev/null || true
+  ip netns exec "$PEER_NS" ethtool -K "$IFACE1" tso off gso off gro off tx off 2>/dev/null || true
+fi
 cat > /tmp/netra-httpst.py << 'PY'
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port = int(sys.argv[1])
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    def setup(self):
+        super().setup()
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     def do_GET(self):
         body = b"x"
         self.send_response(503)
