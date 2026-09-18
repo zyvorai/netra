@@ -3,7 +3,7 @@
 Packaging, feature boundary, and recommended pricing. September 2026.
 Orange, white, and black sheets for GitHub — open dataplane, enterprise operations.
 
-Community stays Apache-2.0. Enterprise is an annual subscription by nodes and clusters, not by user, packet, flow, or seat.
+Non-production use is free under the Zyvor Production License. Production use requires a commercial license. Enterprise subscriptions are by nodes and clusters, not by user, packet, flow, or seat.
 
 [Download the PDF](./Zyvor-Netra-Enterprise-Pricing.pdf).
 

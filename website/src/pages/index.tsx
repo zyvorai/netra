@@ -106,7 +106,7 @@ function TrustBand() {
               Open, and honest about its limits
             </Heading>
             <p>
-              Apache-2.0 core. Real CI on every push (Go build/vet/test, web
+              Zyvor Production License. Real CI on every push (Go build/vet/test, web
               typecheck/test/build, Helm lint/render, and a live{' '}
               <code>clang</code> BPF compile check). Observe-first by design —
               enforcement is leased and fails open, never a silent standing
@@ -120,8 +120,8 @@ function TrustBand() {
               alt="CI status"
             />
             <img
-              src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"
-              alt="Apache 2.0 license"
+              src="https://img.shields.io/badge/License-Zyvor%20Production%20v1.0-blue.svg"
+              alt="Zyvor Production License v1.0"
             />
           </div>
         </Reveal>
@@ -139,9 +139,8 @@ function EnterpriseCTA() {
             Need production support or SLAs?
           </Heading>
           <p className={styles.enterpriseCopy}>
-            Netra's core is Apache-2.0 and free to run in production. Zyvor
-            Enterprise adds support contracts, SLAs, and additional products
-            for teams that need them.
+            Non-production evaluation and lab use are free. Production
+            deployments need a commercial license from Zyvor.
           </p>
           <Link
             className="button button--primary button--lg"

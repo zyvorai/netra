@@ -35,7 +35,7 @@ const ASSETS: Asset[] = [
   {
     title: 'Netra Enterprise Pricing',
     blurb:
-      'Packaging, edition prices, services, and the ship plan. Five orange, white, and black JPEG sheets. Community stays Apache-2.0.',
+      'Packaging, edition prices, services, and the ship plan. Five orange, white, and black JPEG sheets. Production use requires a commercial license.',
     pages: 'PDF + JPEG',
     files: [
       {label: 'Download PDF', href: '/sales/Zyvor-Netra-Enterprise-Pricing.pdf'},

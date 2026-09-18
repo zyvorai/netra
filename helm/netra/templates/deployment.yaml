@@ -140,6 +140,23 @@ spec:
           value: {{ .Values.ai.apiKey | quote }}
         {{- end }}
         {{- end }}
+        {{- if .Values.otlp.enabled }}
+        - name: NETRA_OTLP_ENDPOINT
+          value: {{ required "otlp.endpoint is required when otlp.enabled=true" .Values.otlp.endpoint | quote }}
+        - name: NETRA_OTLP_INTERVAL
+          value: {{ .Values.otlp.interval | quote }}
+        {{- if .Values.otlp.signals }}
+        - name: NETRA_OTLP_SIGNALS
+          value: {{ .Values.otlp.signals | quote }}
+        {{- end }}
+        {{- if .Values.otlp.existingSecret }}
+        - name: NETRA_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.otlp.existingSecret | quote }}
+              key: headers
+        {{- end }}
+        {{- end }}
         {{- if .Values.gitops.enabled }}
         - name: NETRA_GITOPS_DIR
           value: {{ .Values.gitops.dir | quote }}

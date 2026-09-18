@@ -41,6 +41,19 @@ ai:
   # Existing secret (keys: api-key) — never commit the key into values.
   existingSecret: ""
   apiKey: ""
+# Optional OTLP/HTTP push to an OpenTelemetry collector. Off by default.
+# Pushes metrics (the same series /metrics serves), audit events as logs, and
+# block/deny events as spans. Leader-only in HA. `endpoint` is the collector's
+# base URL (e.g. http://otel-collector.observability:4318); /v1/{metrics,logs,
+# traces} is appended. `signals` is a comma-separated subset of
+# metrics,logs,traces (empty = all). Auth headers ("k=v,k2=v2") come from an
+# existing Secret (key: headers) — never put a token in values.
+otlp:
+  enabled: false
+  endpoint: ""
+  interval: 30s
+  signals: ""
+  existingSecret: ""
 # Optional policy-as-code / GitOps reconciliation. Off by default. Reads
 # CiliumNetworkPolicy manifests from `dir` inside the netrad container —
 # populate it with your own git-sync-style sidecar (not included in this

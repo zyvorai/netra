@@ -1,5 +1,5 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: LicenseRef-Zyvor-Production-1.0
 package main
 
 import (
@@ -26,6 +26,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/notify"
+	"github.com/zyvorai/netra/internal/otlppush"
 	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/siem"
 	"github.com/zyvorai/netra/internal/snowflakesink"
@@ -127,6 +128,11 @@ func main() {
 	if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
 		defer stop()
 		defer snowflakeWG.Wait()
+	}
+	var otlpWG sync.WaitGroup
+	if stop := startOTLP(ctx, log, st, handler, &otlpWG); stop != nil {
+		defer stop()
+		defer otlpWG.Wait()
 	}
 	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 	if dnsEnabled {
@@ -303,6 +309,68 @@ func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *
 		sink.Close()
 	}()
 
+	return cancel
+}
+
+// startOTLP starts the optional OTLP/HTTP push exporter when
+// NETRA_OTLP_ENDPOINT is set. Off by default. Same optional-feature shape as
+// startSyslog: env-var gated, best-effort per push, fail-fast on a bad config,
+// and leader-only in HA mode so two replicas never double-ship.
+//
+// Metrics are read in-process from the API's own /metrics handler, so the
+// push and the scrape endpoint cannot drift apart. That internal request is
+// counted by netra_http_requests_total like any other.
+func startOTLP(ctx context.Context, log *slog.Logger, st *store.Store, apiHandler http.Handler, wg *sync.WaitGroup) func() {
+	endpoint := strings.TrimSpace(os.Getenv("NETRA_OTLP_ENDPOINT"))
+	if endpoint == "" || st == nil || apiHandler == nil || wg == nil {
+		return nil
+	}
+	headers, err := otlppush.ParseHeaders(env("NETRA_OTLP_HEADERS", ""))
+	if err != nil {
+		log.Error("otlp headers config", "error", err)
+		os.Exit(1)
+	}
+	signals, err := otlppush.ParseSignals(env("NETRA_OTLP_SIGNALS", ""))
+	if err != nil {
+		log.Error("otlp signals config", "error", err)
+		os.Exit(1)
+	}
+	instance := strings.TrimSpace(os.Getenv("NETRA_POD_NAME"))
+	if instance == "" {
+		instance, _ = os.Hostname()
+	}
+	pusher, err := otlppush.New(otlppush.Config{
+		Endpoint:   endpoint,
+		Headers:    headers,
+		Timeout:    envDuration("NETRA_OTLP_TIMEOUT", 5*time.Second),
+		Signals:    signals,
+		InstanceID: instance,
+		Version:    version,
+	}, log)
+	if err != nil {
+		log.Error("otlp exporter config", "error", err)
+		os.Exit(1)
+	}
+	interval := envDuration("NETRA_OTLP_INTERVAL", 30*time.Second)
+	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+	src := otlppush.Sources{
+		Metrics: otlppush.ScrapeHandler(apiHandler, "/metrics"),
+		Audit:   func() []models.AuditEvent { return st.Audit(200) },
+		Blocks: func() map[string][]models.FastPathEvent {
+			out := map[string][]models.FastPathEvent{}
+			for _, a := range st.AgentStatuses(time.Now(), staleAfter) {
+				out[a.Node] = append(out[a.Node], a.Events...)
+			}
+			return out
+		},
+	}
+	octx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Info("otlp exporter started", "endpoint", endpoint, "interval", interval, "signals", signals)
+		pusher.Run(octx, interval, src)
+	}()
 	return cancel
 }
 
@@ -578,6 +646,8 @@ func electionLoop(
 	var syslogWG sync.WaitGroup
 	var snowflakeCancel func()
 	var snowflakeWG sync.WaitGroup
+	var otlpCancel func()
+	var otlpWG sync.WaitGroup
 	var dnsDetectCancel func()
 	var dnsDetectWG sync.WaitGroup
 	var scanDetectCancel func()
@@ -609,6 +679,11 @@ func electionLoop(
 			snowflakeCancel()
 			snowflakeWG.Wait()
 			snowflakeCancel = nil
+		}
+		if otlpCancel != nil {
+			otlpCancel()
+			otlpWG.Wait()
+			otlpCancel = nil
 		}
 		if dnsDetectCancel != nil {
 			dnsDetectCancel()
@@ -678,7 +753,8 @@ func electionLoop(
 		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 		scanDet, scanInterval, scanEnabled := buildScanDetect()
 		autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
-		gate.Promote(api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler())
+		apiHandler := api.New(log, k, h, st).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
+		gate.Promote(apiHandler)
 		if shouldRunAlertPoller(dispatcher) {
 			pctx, cancel := context.WithCancel(ctx)
 			pollerCancel = cancel
@@ -702,6 +778,9 @@ func electionLoop(
 		}
 		if stop := startSnowflake(ctx, log, st, &snowflakeWG); stop != nil {
 			snowflakeCancel = stop
+		}
+		if stop := startOTLP(ctx, log, st, apiHandler, &otlpWG); stop != nil {
+			otlpCancel = stop
 		}
 		staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 		// leaderSt pins this stint's specific *store.Store: st is an outer

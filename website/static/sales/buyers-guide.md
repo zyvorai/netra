@@ -160,4 +160,4 @@ Same cluster is allowed; do not dual-own long-lived deny. Details:
 - Product site: https://zyvor.dev/netra  
 - Docs / downloads: https://zyvorai.github.io/netra/resources  
 
-© 2026 Zyvor · Apache-2.0 core
+© 2026 Zyvor · Zyvor Production License v1.0

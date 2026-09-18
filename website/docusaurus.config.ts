@@ -110,7 +110,7 @@ const config: Config = {
               href: 'https://github.com/zyvorai/netra/blob/main/CHANGELOG.md',
             },
             {
-              label: 'License (Apache-2.0)',
+              label: 'License',
               href: 'https://github.com/zyvorai/netra/blob/main/LICENSE',
             },
           ],
@@ -131,7 +131,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Zyvor. Netra core is Apache-2.0 licensed.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Zyvor. Zyvor Production License v1.0.`,
     },
     prism: {
       theme: prismThemes.github,

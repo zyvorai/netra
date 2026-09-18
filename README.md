@@ -241,13 +241,13 @@ The dashboard sits behind a login screen (`admin` / `Admin@321` by default) —
 see [docs/dashboard-login.md](docs/dashboard-login.md) for the full guide,
 including what the login maps to server-side and how to rotate the
 credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev)
-mark; Netra is Zyvor's open-source eBPF observability product.
+mark; Netra is Zyvor's eBPF observability product.
 
 ## Suite placement (PacketWolf)
 
 Netra and **PacketWolf** cover the same eBPF territory from opposite directions:
 PacketWolf is the Cilium-dependent suite flagship; Netra is the standalone
-Apache-2.0 layer that works on cgroup v2 alone (Cilium/Hubble optional). They are
+standalone layer that works on cgroup v2 alone (Cilium/Hubble optional). They are
 **counterparts, not a wired pipeline** — no shared API, CRD, or install pair.
 
 | Choose **Netra** when… | Choose **PacketWolf** when… |
@@ -545,13 +545,9 @@ See the [Security](https://zyvorai.github.io/netra/docs/security) docs page, `do
 
 ## License
 
-### Open source (Apache-2.0)
+Licensed under the **[Zyvor Production License v1.0](LICENSE)**.
 
-This repository is licensed under the [Apache License, Version 2.0](LICENSE).
-You may use, modify, and run it for personal, lab, and commercial production
-use at no charge, subject to Apache-2.0 (preserve notices / NOTICE where required).
+- **Free** for development, testing, evaluation, research, education, and non-production labs
+- **Paid commercial license required** for production, customer workloads, SaaS, managed services, OEM, redistribution, and other revenue-generating use
 
-### Enterprise
-
-Production support, SLAs, and Zyvor Enterprise products are licensed separately.
-Contact [sales@zyvor.dev](mailto:sales@zyvor.dev) or see [zyvor.dev](https://zyvor.dev).
+Commercial terms are issued separately: [https://zyvor.dev](https://zyvor.dev).

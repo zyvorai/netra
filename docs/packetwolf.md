@@ -2,7 +2,7 @@
 
 ## Verdict
 
-They are **suite counterparts, not a wired pipeline**. PacketWolf is Zyvor’s Cilium-first commercial flagship; Netra is the Apache-2.0 standalone observe + leased emergency-control layer. Neither product is a dependency or API consumer of the other (Netra’s K3s/Hubble bootstrap helpers intentionally mirror PacketWolf scripts — packaging lineage only).
+They are **suite counterparts, not a wired pipeline**. PacketWolf is Zyvor’s Cilium-first commercial flagship; Netra is the standalone observe + leased emergency-control layer. Neither product is a dependency or API consumer of the other (Netra’s K3s/Hubble bootstrap helpers intentionally mirror PacketWolf scripts — packaging lineage only).
 
 Official framing ([zyvor.dev/docs/netra](https://zyvor.dev/docs/netra), [Introducing Netra](https://zyvor.dev/blog/introducing-netra)):
 
@@ -12,7 +12,7 @@ Official framing ([zyvor.dev/docs/netra](https://zyvor.dev/docs/netra), [Introdu
 
 | | **Netra** | **PacketWolf** |
 |---|---|---|
-| License / place | Apache-2.0 community | Suite flagship |
+| License / place | Zyvor Production License v1.0 | Suite flagship |
 | CNI assumption | Any CNI / none | Cilium required |
 | Datapath | Own maps under `/sys/fs/bpf/netra` (never touches Cilium maps); inspect desired contents with `netractl ebpf maps` | Hubble + Cilium maps + custom eBPF |
 | Core job | Observe + Path/Drop/Congestion diagnostics + leased emergency deny | Observe + AutoPolicy + healer + root-cause + containment |
