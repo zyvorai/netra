@@ -75,6 +75,9 @@ spec:
         - name: cgroupfs
           mountPath: {{ .Values.agent.cgroupPath | quote }}
           readOnly: true
+        - name: kmsg
+          mountPath: /dev/kmsg
+          readOnly: true
       volumes:
       - name: bpffs
         hostPath:
@@ -84,4 +87,8 @@ spec:
         hostPath:
           path: /sys/fs/cgroup
           type: Directory
+      - name: kmsg
+        hostPath:
+          path: /dev/kmsg
+          type: CharDevice
 {{- end }}

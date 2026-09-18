@@ -83,8 +83,9 @@ remains.
 `GET /api/v1/insights/kernel-notes` and `netractl insights kernel-notes`.
 
 A bounded tail of kernel log lines about netdev, TCP, UDP, conntrack,
-and OOM. Credential-like lines are dropped. This is not `journalctl`
-and not a full `dmesg` dump. MCP: `netra_insights_kernel_notes`.
+and OOM, read from the node's `/dev/kmsg`. The agent DaemonSet mounts
+that device read-only. Credential-like lines are dropped. This is not
+`journalctl` and not a full `dmesg` dump. MCP: `netra_insights_kernel_notes`.
 
 ## Prometheus
 

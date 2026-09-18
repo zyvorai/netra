@@ -260,6 +260,7 @@ jobs:
       run: |
         grep -q 'resources: \["pods","services"\]' /tmp/netra-agent.yaml
         grep -q '/sys/fs/cgroup' /tmp/netra-agent.yaml
+        grep -q '/dev/kmsg' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_ENABLED' /tmp/netra-agent.yaml
         grep -q 'NETRA_CGROUP_SCAN_INTERVAL' /tmp/netra-agent.yaml
         grep -q 'automountServiceAccountToken: false' /tmp/netra-agent.yaml
