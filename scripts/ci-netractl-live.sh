@@ -79,4 +79,22 @@ export NETRA_SKIP_DOTENV=1
 export NETRA_CLI_ACCEPT_API_ERRORS=1
 ./scripts/ci-netractl-remote.sh
 
+# Two shipped helpers that no other job runs: the curl smoke in hack/ and the SIEM
+# export example. Both are what an operator copies, so they must keep working.
+echo "==> hack/smoke.sh against the live controller"
+NETRA_URL="$CONTROLLER" NETRA_API_KEY="$API_KEY" ./hack/smoke.sh >/dev/null
+
+echo "==> examples/siem-export.sh in every format"
+export PATH="${BIN_DIR}:${PATH}"
+for fmt in json jsonl cef syslog otlp; do
+  out="$(./examples/siem-export.sh "$fmt")"
+  case "$fmt" in
+    json|otlp) python3 -c 'import json,sys; json.loads(sys.stdin.read())' <<<"$out" || { echo "siem-export ${fmt}: not valid JSON" >&2; exit 1; } ;;
+    jsonl) while IFS= read -r line; do [[ -z "$line" ]] || python3 -c 'import json,sys; json.loads(sys.argv[1])' "$line" || { echo "siem-export jsonl: bad line" >&2; exit 1; }; done <<<"$out" ;;
+    cef) [[ -z "$out" ]] || ! grep -qv '^CEF:' <<<"$out" || { echo "siem-export cef: a line does not start with CEF:" >&2; exit 1; } ;;
+    syslog) [[ -z "$out" ]] || ! grep -qvE '^<[0-9]+>1 ' <<<"$out" || { echo "siem-export syslog: a line is not RFC 5424" >&2; exit 1; } ;;
+  esac
+  echo "    ${fmt}: ok"
+done
+
 echo "ci-netractl-live: ok"

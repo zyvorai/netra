@@ -6,6 +6,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  # A newer push to a PR supersedes the older run; main is never cancelled, so
+  # every commit that lands keeps its own complete result.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -20,6 +25,20 @@ jobs:
       # command locally: ./scripts/check-version-sync.sh
       run: ./scripts/check-version-sync.sh
     - run: go mod tidy
+    - name: go.mod and go.sum are tidy
+      run: git diff --exit-code go.mod go.sum
+    - name: gofmt is clean
+      # Same command locally: gofmt -l $(git ls-files '*.go')
+      run: |
+        unformatted="$(gofmt -l $(git ls-files '*.go'))"
+        if [ -n "$unformatted" ]; then
+          echo "not gofmt-formatted (run: make fmt):" >&2
+          echo "$unformatted" >&2
+          exit 1
+        fi
+    - name: shellcheck (warnings and above)
+      # Same command locally: shellcheck -S warning scripts/*.sh scripts/lib/*.sh hack/*.sh examples/*.sh
+      run: shellcheck -S warning scripts/*.sh scripts/lib/*.sh hack/*.sh examples/*.sh
     - run: go test ./...
     - name: Features catalog + CLI status unit (scripted)
       # Dedicated gate for Cilium-style features/status/banner so regressions
@@ -647,6 +666,47 @@ jobs:
     - name: TLS plaintext sampling end to end (scripted)
       # Same command locally: sudo ./scripts/ci-tlssample-smoke.sh
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlssample-smoke.sh
+  lint:
+    # Bug-finding linters only (.golangci.yml), reporting only issues a change
+    # introduces, so the existing backlog does not block unrelated work.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+      with: {fetch-depth: 0}
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - uses: golangci/golangci-lint-action@v8
+      with:
+        version: v2.13.2
+        only-new-issues: true
+  security:
+    # Known-vulnerable dependencies that the code can actually reach. Pinned so a
+    # new scanner release cannot turn CI red by itself; bump deliberately.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: govulncheck
+      # Same command locally: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+  python:
+    # The LangGraph companion (python/netra_langgraph) had tests nothing ran.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with: {python-version: '3.12'}
+    - name: Python unit tests (min count)
+      # Same command locally: make test-python
+      run: |
+        out="$(make test-python 2>&1)" || { echo "$out"; exit 1; }
+        echo "$out"
+        n="$(sed -n 's/^Ran \([0-9]*\) tests.*/\1/p' <<<"$out")"
+        [ "${n:-0}" -ge 7 ] || { echo "only ${n:-0} python tests ran, expected at least 7" >&2; exit 1; }
   mtls-smoke:
     # The real netrad (every unsafe mTLS setting refused at startup; required mode
     # enforcing certificate, issuer and key usage) and the real agent, with and
