@@ -137,7 +137,7 @@ func summarizeL7(ports []string, ks l7sample.KernelStats, ksOK bool, snap l7samp
 		out.Protocols = append(out.Protocols, mp)
 	}
 	for _, h := range snap.Hosts {
-		out.Hosts = append(out.Hosts, models.L7SampleHost{Host: h.Host, Op: h.Op, Count: h.Count})
+		out.Hosts = append(out.Hosts, models.L7SampleHost{Role: h.Role, Host: h.Host, Op: h.Op, Count: h.Count})
 	}
 	return out
 }

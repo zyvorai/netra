@@ -33,10 +33,13 @@ type l7SampleView struct {
 }
 
 type l7SampleNode struct {
-	Node        string   `json:"node"`
-	Reporting   bool     `json:"reporting"`
-	Unavailable string   `json:"unavailable,omitempty"`
-	Ports       []string `json:"ports,omitempty"`
+	Node        string `json:"node"`
+	Reporting   bool   `json:"reporting"`
+	Unavailable string `json:"unavailable,omitempty"`
+	// Ports are the configured service ports (packet-level sampling); Libraries the
+	// instrumented libssl files (TLS plaintext sampling).
+	Ports     []string `json:"ports,omitempty"`
+	Libraries []string `json:"libraries,omitempty"`
 }
 
 type l7SampleProtoAgg struct {
@@ -69,7 +72,7 @@ func aggregateL7Sample(agents []models.AgentStatus, protocol string) l7SampleVie
 	protos := map[key]*l7SampleProtoAgg{}
 	ops := map[key]map[string]*l7SampleOpAgg{}
 	codes := map[key]map[[2]string]uint64{}
-	hosts := map[[2]string]uint64{}
+	hosts := map[[3]string]uint64{}
 	for _, a := range agents {
 		if a.Stale {
 			continue
@@ -121,7 +124,7 @@ func aggregateL7Sample(agents []models.AgentStatus, protocol string) l7SampleVie
 			}
 		}
 		for _, h := range q.Hosts {
-			hosts[[2]string{h.Host, h.Op}] += h.Count
+			hosts[[3]string{h.Role, h.Host, h.Op}] += h.Count
 		}
 		v.Nodes = append(v.Nodes, n)
 	}
@@ -170,13 +173,13 @@ func aggregateL7Sample(agents []models.AgentStatus, protocol string) l7SampleVie
 		return v.Protocols[i].Role < v.Protocols[j].Role
 	})
 	for k, n := range hosts {
-		v.Hosts = append(v.Hosts, models.L7SampleHost{Host: k[0], Op: k[1], Count: n})
+		v.Hosts = append(v.Hosts, models.L7SampleHost{Role: k[0], Host: k[1], Op: k[2], Count: n})
 	}
 	sort.Slice(v.Hosts, func(i, j int) bool {
 		if v.Hosts[i].Count != v.Hosts[j].Count {
 			return v.Hosts[i].Count > v.Hosts[j].Count
 		}
-		return v.Hosts[i].Host+v.Hosts[i].Op < v.Hosts[j].Host+v.Hosts[j].Op
+		return v.Hosts[i].Role+v.Hosts[i].Host+v.Hosts[i].Op < v.Hosts[j].Role+v.Hosts[j].Host+v.Hosts[j].Op
 	})
 	if len(v.Hosts) > 50 {
 		v.Hosts = v.Hosts[:50]
@@ -205,38 +208,90 @@ func (s *Server) l7Sampled(w http.ResponseWriter, r *http.Request) {
 // text. The values are sampled counts (see netra_l7_sample_scale_factor for the
 // factor to estimate real rates), gauges of per-agent running totals.
 func writeL7SampleMetrics(w http.ResponseWriter, agents []models.AgentStatus) {
+	writeSampleMetrics(w, agents, "netra_l7_sample", "sampled application")
+}
+
+// writeSampleMetrics writes one family of sampled-protocol series under prefix.
+// what describes the source in the help text.
+func writeSampleMetrics(w http.ResponseWriter, agents []models.AgentStatus, prefix, what string) {
 	v := aggregateL7Sample(agents, "")
-	metricGauge(w, "netra_l7_sample_nodes_reporting", "Fresh node agents running sampled L7 protocol observation.", float64(v.Reporting))
-	metricGauge(w, "netra_l7_sample_nodes_not_reporting", "Fresh node agents not running it (off, an older agent, or it could not start).", float64(v.NotReporting))
+	metricGauge(w, prefix+"_nodes_reporting", "Fresh node agents running sampled L7 protocol observation.", float64(v.Reporting))
+	metricGauge(w, prefix+"_nodes_not_reporting", "Fresh node agents not running it (off, an older agent, or it could not start).", float64(v.NotReporting))
 	if v.Reporting == 0 {
 		return
 	}
 	if v.ScaleFactor > 0 {
-		metricGauge(w, "netra_l7_sample_scale_factor", "Eligible segments divided by sampled ones, cluster-wide: multiply the sampled counts by it to estimate real rates.", v.ScaleFactor)
+		metricGauge(w, prefix+"_scale_factor", "Eligible segments divided by sampled ones, cluster-wide: multiply the sampled counts by it to estimate real rates.", v.ScaleFactor)
 	}
-	fmt.Fprint(w, "# HELP netra_l7_sample_requests Sampled application requests by protocol, role and operation (Redis command, SQL verb, Kafka API, gRPC method). role=served: requests arriving at services on the node; role=issued: requests its workloads send. Do not add the two roles together: each request is seen once in each.\n# TYPE netra_l7_sample_requests gauge\n")
+	fmt.Fprintf(w, "# HELP %s_requests %s\n# TYPE %s_requests gauge\n", prefix, "Sampled "+what+" requests by protocol, role and operation (Redis command, SQL verb, Kafka API, gRPC method). role=served: requests arriving at services on the node; role=issued: requests its workloads send. Do not add the two roles together: each request is seen once in each.", prefix)
 	for _, p := range v.Protocols {
 		for _, o := range p.Ops {
-			fmt.Fprintf(w, "netra_l7_sample_requests{protocol=\"%s\",role=\"%s\",op=\"%s\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), promLabel(o.Op), o.Count)
+			fmt.Fprintf(w, prefix+"_requests{protocol=\"%s\",role=\"%s\",op=\"%s\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), promLabel(o.Op), o.Count)
 		}
 	}
-	fmt.Fprint(w, "# HELP netra_l7_sample_responses Sampled application responses by protocol and outcome.\n# TYPE netra_l7_sample_responses gauge\n")
+	fmt.Fprintf(w, "# HELP %s_responses %s\n# TYPE %s_responses gauge\n", prefix, "Sampled "+what+" responses by protocol and outcome.", prefix)
 	for _, p := range v.Protocols {
-		fmt.Fprintf(w, "netra_l7_sample_responses{protocol=\"%s\",role=\"%s\",status=\"ok\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), p.Responses-min(p.Errors, p.Responses))
-		fmt.Fprintf(w, "netra_l7_sample_responses{protocol=\"%s\",role=\"%s\",status=\"error\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), p.Errors)
+		fmt.Fprintf(w, prefix+"_responses{protocol=\"%s\",role=\"%s\",status=\"ok\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), p.Responses-min(p.Errors, p.Responses))
+		fmt.Fprintf(w, prefix+"_responses{protocol=\"%s\",role=\"%s\",status=\"error\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), p.Errors)
 	}
-	fmt.Fprint(w, "# HELP netra_l7_sample_error_codes Sampled error responses by protocol and code (Redis error kind, SQLSTATE class, HTTP or gRPC status).\n# TYPE netra_l7_sample_error_codes gauge\n")
+	fmt.Fprintf(w, "# HELP %s_error_codes %s\n# TYPE %s_error_codes gauge\n", prefix, "Sampled error responses by protocol and code (Redis error kind, SQLSTATE class, HTTP or gRPC status).", prefix)
 	for _, p := range v.Protocols {
 		for _, c := range p.Codes {
 			if c.Status == "error" {
-				fmt.Fprintf(w, "netra_l7_sample_error_codes{protocol=\"%s\",role=\"%s\",code=\"%s\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), promLabel(c.Code), c.Count)
+				fmt.Fprintf(w, prefix+"_error_codes{protocol=\"%s\",role=\"%s\",code=\"%s\"} %d\n", promLabel(p.Protocol), promLabel(p.Role), promLabel(c.Code), c.Count)
 			}
 		}
 	}
-	fmt.Fprint(w, "# HELP netra_l7_sample_undecodable Sampled HTTP/2 header blocks that could not be decoded without connection state.\n# TYPE netra_l7_sample_undecodable gauge\n")
+	fmt.Fprintf(w, "# HELP %s_undecodable %s\n# TYPE %s_undecodable gauge\n", prefix, "Sampled HTTP/2 header blocks that could not be decoded without connection state.", prefix)
 	for _, p := range v.Protocols {
 		if p.Undecodable > 0 {
-			fmt.Fprintf(w, "netra_l7_sample_undecodable{protocol=\"%s\",role=\"%s\"} %s\n", promLabel(p.Protocol), promLabel(p.Role), strconv.FormatUint(p.Undecodable, 10))
+			fmt.Fprintf(w, prefix+"_undecodable{protocol=\"%s\",role=\"%s\"} %s\n", promLabel(p.Protocol), promLabel(p.Role), strconv.FormatUint(p.Undecodable, 10))
 		}
 	}
+}
+
+// tlsAsL7 presents each agent's TLS plaintext summary in the shape the sampled-
+// protocol aggregation understands, so the same merging, scaling and label
+// bounds apply. The instrumented libraries ride in Ports.
+func tlsAsL7(agents []models.AgentStatus) []models.AgentStatus {
+	out := make([]models.AgentStatus, len(agents))
+	for i, a := range agents {
+		out[i] = a
+		out[i].L7Sample = nil
+		if q := a.TLSSample; q != nil {
+			out[i].L7Sample = &models.L7SampleSummary{
+				Attached: q.Attached, Unavailable: q.Unavailable, Ports: q.Libraries,
+				Eligible: q.Eligible, Emitted: q.Emitted, RateLimited: q.RateLimited, RingbufFull: q.RingbufFull,
+				ScaleFactor: q.ScaleFactor, Seen: q.Seen, Classified: q.Classified, Overflow: q.Overflow,
+				Protocols: q.Protocols, Hosts: q.Hosts,
+			}
+		}
+	}
+	return out
+}
+
+// tlsSampled serves GET /api/v1/l7/tls?node=NAME&protocol=NAME: the same view as
+// /api/v1/l7/sampled, for application protocols observed as plaintext at OpenSSL.
+func (s *Server) tlsSampled(w http.ResponseWriter, r *http.Request) {
+	agents := s.store.AgentStatuses(time.Now(), s.agentStaleAfter)
+	if node := r.URL.Query().Get("node"); node != "" {
+		kept := agents[:0:0]
+		for _, a := range agents {
+			if a.Node == node {
+				kept = append(kept, a)
+			}
+		}
+		agents = kept
+	}
+	v := aggregateL7Sample(tlsAsL7(agents), r.URL.Query().Get("protocol"))
+	for i := range v.Nodes {
+		v.Nodes[i].Libraries, v.Nodes[i].Ports = v.Nodes[i].Ports, nil
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// writeTLSSampleMetrics adds the TLS plaintext family to /metrics. Same bounded
+// labels as the packet-level family; only operation names and coarse outcomes.
+func writeTLSSampleMetrics(w http.ResponseWriter, agents []models.AgentStatus) {
+	writeSampleMetrics(w, tlsAsL7(agents), "netra_tls_sample", "TLS plaintext (observed at OpenSSL)")
 }

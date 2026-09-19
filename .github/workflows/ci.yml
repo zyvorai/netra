@@ -51,6 +51,12 @@ jobs:
       # drop out. The kernel half is the `ebpf` job. Same command locally:
       # ./scripts/ci-kernel-sensors-unit.sh
       run: ./scripts/ci-kernel-sensors-unit.sh
+    - name: TLS plaintext sampling unit + race (scripted)
+      # amd64/arm64 register layouts, event decode, libssl discovery, plaintext
+      # classification (no request text in a result), agent modes, the separate TLS
+      # API view and metric family. The kernel half runs in the `ebpf` jobs.
+      # Same command locally: ./scripts/ci-sslprobe-unit.sh
+      run: ./scripts/ci-sslprobe-unit.sh
     - name: Sampled L7 protocol parsers unit + race + fuzz (scripted)
       # Redis/Postgres/MySQL/Kafka/HTTP1/HTTP2/gRPC classifiers and the bounded
       # counters: no secret reaches an output field, every label is bounded (200k
@@ -230,6 +236,18 @@ jobs:
         awk '/name: NETRA_L7_SAMPLE$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra-l7s.yaml
         grep -q '6379:redis,8080:http1' /tmp/netra-l7s.yaml
         grep -q '250ms' /tmp/netra-l7s.yaml
+        # TLS plaintext sampling is the most sensitive sensor: it must render OFF by
+        # default and must not request hostPID unless it (or procmeta) is enabled.
+        awk '/name: NETRA_TLS_UPROBES$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra.yaml
+        if grep -q 'hostPID' /tmp/netra.yaml; then
+          echo "hostPID rendered by default" >&2
+          exit 1
+        fi
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.tlsUprobes=auto --set agent.tlsUprobesComms=nginx >/tmp/netra-tls.yaml
+        awk '/name: NETRA_TLS_UPROBES$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra-tls.yaml
+        grep -q 'hostPID: true' /tmp/netra-tls.yaml
+        grep -q 'value: "nginx"' /tmp/netra-tls.yaml
         # Listen-queue sampling is a plain env knob (no BPF).
         awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
@@ -566,6 +584,37 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iperf3 iproute2 openssl
     - name: TLS fingerprint openssl + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlsfp-smoke.sh
+  ebpf-arm64:
+    # The same privileged suite on a real arm64 kernel. The agent image ships for
+    # arm64, and everything BPF here (CO-RE drop attribution, the TCP event layouts,
+    # listen queues, the packet-level L7 sampler, the OpenSSL uprobes' register
+    # layout) was otherwise only ever run on x86_64.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+    - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables python3 openssl
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: eBPF compile + privileged tests on arm64 (scripted)
+      # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-ebpf-tests.sh
+  tlssample-smoke:
+    # The real agent and controller with NETRA_TLS_UPROBES=required, a real HTTPS
+    # server and client, real TLS: exact per-role method/status counts in the API and
+    # /metrics, and secrets planted in the path, query string, a cookie and a bearer
+    # token that must appear nowhere the agent or controller exposes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev python3 openssl
+    - name: TLS plaintext sampling end to end (scripted)
+      # Same command locally: sudo ./scripts/ci-tlssample-smoke.sh
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlssample-smoke.sh
   l7sample-smoke:
     # The real agent and controller with NETRA_L7_SAMPLE=required, fake Redis and
     # PostgreSQL servers on loopback, real traffic: exact per-role operation counts

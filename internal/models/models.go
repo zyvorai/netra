@@ -1136,6 +1136,9 @@ type AgentReport struct {
 	// L7Sample is nil when sampled L7 protocol observation is off (the default);
 	// when it tried and could not start it carries Unavailable with the reason.
 	L7Sample *L7SampleSummary `json:"l7Sample,omitempty"`
+	// TLSSample is nil when TLS plaintext sampling is off (the default); when it
+	// tried and could not start it carries Unavailable with the reason.
+	TLSSample *TLSSampleSummary `json:"tlsSample,omitempty"`
 	// MapScans is the cost of the agent's latest read of each big BPF map.
 	MapScans []MapScanStat `json:"mapScans,omitempty"`
 	// ListenQueues is nil when listen-queue sampling is off; when it tried and
@@ -1501,9 +1504,40 @@ type L7SampleCode struct {
 
 // L7SampleHost is a bounded (host, method) HTTP request count.
 type L7SampleHost struct {
+	// Role: "served" or "issued" (see L7SampleProtocol); the same request is
+	// counted once in each, never twice in one.
+	Role  string `json:"role"`
 	Host  string `json:"host"`
 	Op    string `json:"op"`
 	Count uint64 `json:"count"`
+}
+
+// TLSSampleSummary is one node's application-protocol counts for TLS traffic,
+// observed as plaintext at OpenSSL's SSL_write/SSL_read (internal/sslprobe,
+// docs/tls-plaintext.md). Like L7SampleSummary only bounded metadata is reported:
+// an operation name and a coarse outcome, never a path, header, cookie or body.
+// The plaintext itself stays in the agent's memory for the instant it is parsed.
+type TLSSampleSummary struct {
+	Attached    bool   `json:"attached"`
+	Unavailable string `json:"unavailable,omitempty"`
+	// Libraries are the libssl files instrumented; Comms is the process allowlist
+	// (empty: every process that uses them).
+	Libraries []string `json:"libraries,omitempty"`
+	Comms     []string `json:"comms,omitempty"`
+	// Kernel counters: calls that carried data, how many were sampled, and why the
+	// rest were not.
+	Eligible     uint64             `json:"eligible"`
+	Emitted      uint64             `json:"emitted"`
+	RateLimited  uint64             `json:"rateLimited,omitempty"`
+	RingbufFull  uint64             `json:"ringbufFull,omitempty"`
+	ReadFail     uint64             `json:"readFail,omitempty"`
+	CommFiltered uint64             `json:"commFiltered,omitempty"`
+	ScaleFactor  float64            `json:"scaleFactor,omitempty"`
+	Seen         uint64             `json:"seen"`
+	Classified   uint64             `json:"classified"`
+	Overflow     uint64             `json:"overflow,omitempty"`
+	Protocols    []L7SampleProtocol `json:"protocols,omitempty"`
+	Hosts        []L7SampleHost     `json:"hosts,omitempty"`
 }
 
 // MapScanStat is what the agent's latest read of one BPF map cost, so a node whose

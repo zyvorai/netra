@@ -197,6 +197,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	writeListenQueueMetrics(w, agents)
 	writeMapScanMetrics(w, agents)
 	writeL7SampleMetrics(w, agents)
+	writeTLSSampleMetrics(w, agents)
 	s.writeWorkloadMetrics(w)
 }
 

@@ -39,6 +39,7 @@ import (
 	"github.com/zyvorai/netra/internal/l7sample"
 	"github.com/zyvorai/netra/internal/listenq"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/sslprobe"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
 	"github.com/zyvorai/netra/internal/tcpevents"
@@ -120,6 +121,14 @@ type Agent struct {
 	l7Counters     *l7sample.Counters
 	l7SampleWhy    string
 	l7SamplePorts  []string
+	// ssl* are the TLS plaintext sampler (bpf/netra_ssl.c, docs/tls-plaintext.md):
+	// OpenSSL uprobes. Off unless NETRA_TLS_UPROBES is set; the prober is nil when
+	// it is off or could not start (sslWhy says why).
+	sslObject   string
+	sslProber   *sslprobe.Prober
+	tlsCounters *l7sample.Counters
+	sslWhy      string
+	sslComms    []string
 	// scans is the latest cost of each map read (mapread.go), for the report.
 	scanMu        sync.Mutex
 	scans         map[string]models.MapScanStat
@@ -208,6 +217,7 @@ func New(log *slog.Logger) *Agent {
 		tcpEventsObject: env("NETRA_BPF_TCPEVENTS_OBJECT", "/opt/netra/bpf/netra_tcpevents.o"),
 		dropInfoObject:  env("NETRA_BPF_DROPINFO_OBJECT", "/opt/netra/bpf/netra_dropinfo.o"),
 		l7SampleObject:  env("NETRA_BPF_L7SAMPLE_OBJECT", "/opt/netra/bpf/netra_l7sample.o"),
+		sslObject:       env("NETRA_BPF_SSL_OBJECT", "/opt/netra/bpf/netra_ssl.o"),
 		cgroupPath:      env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096), tlsFP: tlsfp.NewDetector(2048),
@@ -233,6 +243,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.readTLSHelloEvents(ctx)
 	if a.l7Sampler != nil {
 		go a.l7Sampler.Run(ctx, a.l7Counters.Observe)
+	}
+	if a.sslProber != nil {
+		go a.sslProber.Run(ctx, a.observeTLS)
+		go a.rescanTLS(ctx)
 	}
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
@@ -511,6 +525,9 @@ func (a *Agent) loadAndAttach() error {
 	}
 	a.attachListenQueues()
 	if err := a.attachL7Sample(); err != nil {
+		return err
+	}
+	if err := a.attachTLSUprobes(); err != nil {
 		return err
 	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
@@ -958,6 +975,10 @@ func (a *Agent) Close() {
 		_ = a.l7Sampler.Close()
 		a.l7Sampler = nil
 	}
+	if a.sslProber != nil {
+		_ = a.sslProber.Close()
+		a.sslProber = nil
+	}
 }
 
 func (a *Agent) syncAndReport(ctx context.Context) error {
@@ -1135,6 +1156,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	dropInfo := a.readDropInfo()
 	listenQueues := a.readListenQueues()
 	l7 := a.readL7Sample()
+	tlsSample := a.readTLSSample()
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1142,7 +1164,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, L7Sample: l7, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, L7Sample: l7, TLSSample: tlsSample, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,

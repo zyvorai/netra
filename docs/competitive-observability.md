@@ -113,16 +113,19 @@ Filterable history is the flow API, not the metrics scrape.
 - HTTP/2, HTTP/3, TCP reassembly, and any HTTP status line that does not start the packet.
 - Flow history past 7 days, or a column-store warehouse.
 - User-space CPU flame graphs (`wchan` is one kernel wait symbol, not a graph).
-- A 5-tuple on `kfree_skb`.
 - Application journal collection (kernel-net and OOM lines only).
-- Payload parsers for Kafka, Redis, or SQL.
 
 ## Leave alone
 
-Decrypt, DLP, argv/cmdline, payload bodies, ZTNA, and a cloud proxy.
-Pixie and SSE products win those by collecting what Netra refuses.
-Copying them would break the boundary in
-[`p0-p5-surfaces.md`](p0-p5-surfaces.md).
+Decrypting to inspect or store content, DLP, argv/cmdline, payload bodies, ZTNA, and a
+cloud proxy. Pixie and SSE products win those by collecting what Netra refuses. Copying them
+would break the boundary in [`p0-p5-surfaces.md`](p0-p5-surfaces.md).
+
+One deliberate, opt-in exception to "no decrypt": [`tls-plaintext.md`](tls-plaintext.md) reads
+application plaintext at OpenSSL's `SSL_write`/`SSL_read` so HTTPS gets the same bounded operation
+counts as [`l7-sampling.md`](l7-sampling.md). It is off by default, can be limited to named
+processes in the kernel, and exports only method, host and status: never a path, header, cookie,
+token or body. It does not intercept TLS, hold keys, or store content.
 
 PacketWolf remains the Cilium-side durable policy and Hubble consumer.
 Netra should not grow a second Hubble. See [`packetwolf.md`](packetwolf.md).

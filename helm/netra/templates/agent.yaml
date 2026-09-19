@@ -15,12 +15,14 @@ spec:
       serviceAccountName: netra-agent
       automountServiceAccountToken: false
       hostNetwork: true
-      {{- if .Values.agent.procMetaEnabled }}
+      {{- if or .Values.agent.procMetaEnabled (and .Values.agent.tlsUprobes (ne (.Values.agent.tlsUprobes | toString) "off")) }}
       # Required for internal/procmeta to resolve a host PID's /proc entry
       # from inside the agent container. This is a real expansion of what
       # the already-privileged agent can see (every host process's /proc,
       # not just what eBPF hooks already surface) — see
-      # docs/process-metadata.md. Off unless agent.procMetaEnabled is set.
+      # docs/process-metadata.md. Off unless agent.procMetaEnabled is set. TLS
+      # plaintext sampling (agent.tlsUprobes) needs it too, to find the libssl
+      # every other workload maps (docs/tls-plaintext.md).
       hostPID: true
       {{- end }}
       dnsPolicy: ClusterFirstWithHostNet
@@ -65,6 +67,16 @@ spec:
           value: {{ .Values.agent.dropInfo | default "auto" | quote }}
         - name: NETRA_LISTEN_QUEUES
           value: {{ .Values.agent.listenQueues | default "auto" | quote }}
+        - name: NETRA_TLS_UPROBES
+          value: {{ .Values.agent.tlsUprobes | default "off" | quote }}
+        {{- if .Values.agent.tlsUprobesComms }}
+        - name: NETRA_TLS_UPROBES_COMMS
+          value: {{ .Values.agent.tlsUprobesComms | quote }}
+        {{- end }}
+        {{- if .Values.agent.tlsUprobesGap }}
+        - name: NETRA_TLS_UPROBES_GAP
+          value: {{ .Values.agent.tlsUprobesGap | quote }}
+        {{- end }}
         - name: NETRA_L7_SAMPLE
           value: {{ .Values.agent.l7Sample | default "off" | quote }}
         {{- if .Values.agent.l7SamplePorts }}

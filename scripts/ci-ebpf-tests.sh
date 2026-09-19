@@ -80,6 +80,7 @@ NETRA_BPF_TLSFP_TEST_OBJECT="${OUT}/netra_tlsfp.o" \
 NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
 NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
+NETRA_BPF_SSL_TEST_OBJECT="${OUT}/netra_ssl.o" \
   "$BIN" -test.v
 
 # Sampled L7 protocol observer (docs/l7-sampling.md). These load the real object
@@ -100,6 +101,23 @@ if grep -q -- '^--- SKIP: TestL7Sample' "$l7_log" || (( l7_pass < 7 )); then
   exit 1
 fi
 echo "    ${l7_pass} passed"
+
+# TLS plaintext sampler (docs/tls-plaintext.md): uprobes on the system's real libssl
+# and genuine TLS between a Python HTTPS server and client (CPython calls
+# SSL_read_ex/SSL_write_ex). They must pass AND not skip: a skip here (no python3,
+# no openssl, no libssl mapped) means the kernel half silently did not run. The
+# process allowlist is checked to be enforced in the kernel before any byte is copied.
+echo "==> TLS sampler: real verifier + real libssl uprobes + real TLS"
+ssl_log="${OUT}/ssl.log"
+NETRA_BPF_SSL_TEST_OBJECT="${OUT}/netra_ssl.o" \
+  "$BIN" -test.v -test.count=1 -test.run 'TestSSL' >"$ssl_log" 2>&1 || { cat "$ssl_log"; exit 1; }
+ssl_pass="$(grep -c -- '^--- PASS: TestSSL' "$ssl_log" || true)"
+if grep -q -- '^--- SKIP: TestSSL' "$ssl_log" || (( ssl_pass < 7 )); then
+  cat "$ssl_log"
+  echo "TLS sampler tests: ${ssl_pass} passed (want 7) or some skipped" >&2
+  exit 1
+fi
+echo "    ${ssl_pass} passed"
 
 # Agent map reads. The agent reads several 131 072-entry LRU hash maps every few
 # seconds; it used to walk each entry with two syscalls, decode and format all of

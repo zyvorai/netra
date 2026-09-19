@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.109"
+  tag: "0.27.110"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.109"
+  tag: "0.27.110"
 replicaCount: 1
 ha:
   enabled: false
@@ -304,6 +304,19 @@ agent:
   l7SamplePorts: ""
   # Minimum time between samples of one flow and direction. Empty: 100ms.
   l7SampleGap: ""
+  # TLS plaintext sampling via OpenSSL uprobes (bpf/netra_ssl.c,
+  # docs/tls-plaintext.md): the same operation counts as l7Sample for HTTPS, read
+  # where the application hands bytes to SSL_write and gets them from SSL_read.
+  # THIS OBSERVES PLAINTEXT, so it is off by default and needs the host's /proc
+  # (hostPID) to find other workloads' libssl. Only bounded metadata is exported
+  # (method, host, status; never paths, headers, cookies or bodies).
+  # off|auto|required.
+  tlsUprobes: "off"
+  # Only observe processes with these command names ("nginx,envoy"). Enforced in
+  # the kernel before any byte is copied. Empty: every process that uses libssl.
+  tlsUprobesComms: ""
+  # Minimum time between samples of one connection and direction. Empty: 100ms.
+  tlsUprobesGap: ""
   # Mount the host's tracefs (/sys/kernel/tracing) read-only into the agent.
   # A container's own /sys is a bare sysfs with no tracefs, so without this the
   # agent cannot read tracepoint record layouts: the TCP event sensors and the

@@ -88,7 +88,7 @@ GET /api/v1/l7/sampled?protocol=redis&node=worker-1        # viewer role
 
 Per protocol and role: requests, responses, errors, undecodable header blocks, the busiest
 operations (at most 50 after merging nodes, the rest folded into `OTHER`), and response
-codes; plus a bounded `hosts` list for HTTP. `nodes[]` says which agents sample and, for one
+codes; plus a bounded `hosts` list for HTTP (per role). `nodes[]` says which agents sample and, for one
 that could not start, why.
 
 `/metrics` (labels are protocol, role and an allowlisted operation or code; no hosts,
@@ -120,8 +120,8 @@ on an order-of-magnitude regression (over 30 µs per packet).
 ## Limits
 
 - **Plaintext only.** TLS traffic is not readable at this layer; a Redis or Postgres session
-  inside TLS shows only its handshake. (Reading it before encryption is a separate,
-  explicitly opt-in feature.)
+  inside TLS shows only its handshake. HTTPS specifically can be covered by the separate,
+  explicitly opt-in [`tls-plaintext.md`](tls-plaintext.md), which reads it at OpenSSL instead.
 - **A sample is a fragment, not a stream.** Parsers are stateless and best-effort; a message that
   does not start where the sample does, or that spans packets, may not classify.
 - **HTTP/2 header compression is stateful per connection.** The first `HEADERS` on a connection

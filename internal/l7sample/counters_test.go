@@ -172,7 +172,7 @@ func TestCountersTrackHTTPHostsAndUndecodableHTTP2(t *testing.T) {
 	c.Observe(Sample{Proto: ProtoHTTP2, ToServer: true, Data: h2Frame(0x1, 0x4, 1, first)})
 	c.Observe(Sample{Proto: ProtoHTTP2, ToServer: true, Data: h2Frame(0x1, 0x4, 3, second)})
 	s := c.Snapshot()
-	if len(s.Hosts) < 2 || s.Hosts[0] != (HostCount{"a.example", "GET", 3}) {
+	if len(s.Hosts) < 2 || s.Hosts[0] != (HostCount{RoleServed, "a.example", "GET", 3}) {
 		t.Fatalf("hosts = %+v", s.Hosts)
 	}
 	var h2 ProtoStats
@@ -232,5 +232,26 @@ func TestCountersAreSafeForConcurrentUse(t *testing.T) {
 	wg.Wait()
 	if s := c.Snapshot(); s.Seen != 16000 || s.Protocols[0].Requests != 16000 {
 		t.Fatalf("lost updates: %+v", s)
+	}
+}
+
+// The host table has the same double-sighting problem as the protocol table: one
+// request is seen leaving its client and arriving at its server. Counting both into
+// one (host, method) number reported 30 requests for 15 real ones on a live run.
+func TestHostCountsAreKeptPerRoleSoARequestIsNotCountedTwice(t *testing.T) {
+	c := NewCounters()
+	req := []byte("GET /x HTTP/1.1\r\nHost: shop.example\r\n\r\n")
+	for i := 0; i < 15; i++ {
+		c.Observe(Sample{Proto: ProtoHTTP1, ToServer: true, Egress: true, Data: req})  // the client's egress
+		c.Observe(Sample{Proto: ProtoHTTP1, ToServer: true, Egress: false, Data: req}) // the server's ingress
+	}
+	byRole := map[string]uint64{}
+	for _, h := range c.Snapshot().Hosts {
+		if h.Host == "shop.example" && h.Op == "GET" {
+			byRole[h.Role] += h.Count
+		}
+	}
+	if byRole[RoleIssued] != 15 || byRole[RoleServed] != 15 || len(byRole) != 2 {
+		t.Fatalf("host counts by role = %v, want 15 issued and 15 served, never 30 in one row", byRole)
 	}
 }

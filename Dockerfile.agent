@@ -49,6 +49,12 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
 RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -c netra_l7sample.c -o /out-l7sample.o
+# TLS plaintext sampler (OpenSSL uprobes). One object for amd64 and arm64: the
+# argument registers' offsets are written at load time from the running
+# architecture. Off unless NETRA_TLS_UPROBES is set (docs/tls-plaintext.md).
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_ssl.c -o /out-ssl.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent
@@ -59,4 +65,5 @@ COPY --from=bpf /out-tlsfp.o /opt/netra/bpf/netra_tlsfp.o
 COPY --from=bpf /out-tcpevents.o /opt/netra/bpf/netra_tcpevents.o
 COPY --from=bpf /out-dropinfo.o /opt/netra/bpf/netra_dropinfo.o
 COPY --from=bpf /out-l7sample.o /opt/netra/bpf/netra_l7sample.o
+COPY --from=bpf /out-ssl.o /opt/netra/bpf/netra_ssl.o
 ENTRYPOINT ["/netra-agent"]

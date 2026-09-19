@@ -46,7 +46,7 @@ type opKey struct {
 }
 
 type hostKey struct {
-	host, op string
+	role, host, op string
 }
 
 // Counters turns classified samples into cumulative, bounded counts. Safe for
@@ -74,6 +74,13 @@ func NewCounters() *Counters {
 // Observe classifies one sample and counts it. The payload is not retained.
 func (c *Counters) Observe(s Sample) {
 	o, ok := Parse(s.Proto, s.ToServer, s.Data)
+	c.ObserveObs(o, ok, RoleOf(s))
+}
+
+// ObserveObs counts an already-classified observation in the given role, for
+// sources that classify plaintext themselves (the TLS uprobe sampler). ok=false
+// counts the sample as seen but unclassified.
+func (c *Counters) ObserveObs(o Obs, ok bool, role string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seen++
@@ -82,16 +89,16 @@ func (c *Counters) Observe(s Sample) {
 	}
 	c.classified++
 	if o.Op == "undecodable_headers" {
-		c.undecodable[opKey{role: RoleOf(s), proto: o.Proto}]++
+		c.undecodable[opKey{role: role, proto: o.Proto}]++
 	}
-	k := opKey{RoleOf(s), o.Proto, o.Kind, o.Op, o.Status, o.Code, o.GRPC}
+	k := opKey{role, o.Proto, o.Kind, o.Op, o.Status, o.Code, o.GRPC}
 	if _, exists := c.ops[k]; !exists && len(c.ops) >= maxOpKeys {
 		c.overflow++
 	} else {
 		c.ops[k]++
 	}
 	if o.Host != "" && o.Kind == KindRequest {
-		hk := hostKey{o.Host, o.Op}
+		hk := hostKey{role, o.Host, o.Op}
 		if _, exists := c.hosts[hk]; !exists && len(c.hosts) >= maxHostKeys {
 			c.hostOverflow++
 		} else {
@@ -126,8 +133,11 @@ type ProtoStats struct {
 	Codes       []CodeCount `json:"codes,omitempty"`
 }
 
-// HostCount is a bounded (host, method) request count.
+// HostCount is a bounded (role, host, method) request count. The role keeps a
+// request seen leaving its client and arriving at its server from being counted
+// twice in one number.
 type HostCount struct {
+	Role  string `json:"role"`
 	Host  string `json:"host"`
 	Op    string `json:"op"`
 	Count uint64 `json:"count"`
@@ -222,13 +232,13 @@ func (c *Counters) Snapshot() Snapshot {
 		return out.Protocols[i].Role < out.Protocols[j].Role
 	})
 	for hk, n := range c.hosts {
-		out.Hosts = append(out.Hosts, HostCount{hk.host, hk.op, n})
+		out.Hosts = append(out.Hosts, HostCount{hk.role, hk.host, hk.op, n})
 	}
 	sort.Slice(out.Hosts, func(i, j int) bool {
 		if out.Hosts[i].Count != out.Hosts[j].Count {
 			return out.Hosts[i].Count > out.Hosts[j].Count
 		}
-		return out.Hosts[i].Host+out.Hosts[i].Op < out.Hosts[j].Host+out.Hosts[j].Op
+		return out.Hosts[i].Role+out.Hosts[i].Host+out.Hosts[i].Op < out.Hosts[j].Role+out.Hosts[j].Host+out.Hosts[j].Op
 	})
 	if len(out.Hosts) > topHosts {
 		out.Hosts = out.Hosts[:topHosts]

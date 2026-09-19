@@ -65,7 +65,8 @@ summaries; Fleet shows tenant risk.
 
 ## Boundaries
 
-- No decrypt, no DLP, no ZTNA  
+- No decrypt, no DLP, no ZTNA (for these surfaces; the separate, opt-in
+  [`tls-plaintext.md`](tls-plaintext.md) is the one exception, and it exports only bounded metadata)  
 - Drafts never auto-enforce  
 - Pair with [`threat-intel.md`](threat-intel.md) and [`firewall.md`](firewall.md) for leased apply  
 
