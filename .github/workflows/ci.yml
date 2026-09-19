@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Version string sync across duplicated locations
       # The version has no single source of truth; this fails the build when a
@@ -553,7 +553,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Runner kernel facts (BTF, tracepoint record layouts)
       # Tracepoint record layouts change between kernels (tcp_send_reset moved
@@ -586,7 +586,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install iperf3
       run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
@@ -601,7 +601,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install iperf3
       run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
@@ -615,7 +615,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iproute2 ethtool
@@ -629,7 +629,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang, iperf3, openssl
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iperf3 iproute2 openssl
@@ -645,7 +645,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables python3 openssl
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: eBPF compile + privileged tests on arm64 (scripted)
       # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
@@ -659,7 +659,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev python3 openssl
@@ -674,7 +674,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with: {fetch-depth: 0}
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - uses: golangci/golangci-lint-action@v8
       with:
@@ -687,7 +687,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: govulncheck
       # Same command locally: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
@@ -715,7 +715,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev openssl
@@ -731,7 +731,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
@@ -808,7 +808,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: OIDC + RBAC against a live netrad
       run: ./scripts/ci-oidc-live.sh
@@ -822,7 +822,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Per-workload metrics + SLO against a live netrad
       run: ./scripts/ci-workload-obs-live.sh
@@ -857,7 +857,7 @@ jobs:
     timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install Loki (pinned, checksum-verified)
       run: |
