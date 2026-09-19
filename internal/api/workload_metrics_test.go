@@ -193,7 +193,10 @@ func TestCardinalityIsBoundedRegardlessOfWorkloadCount(t *testing.T) {
 func TestSLOEndpointReportsStatusWithReadableDurations(t *testing.T) {
 	defs, _ := workloadobs.ParseDefinitions(`[{"name":"checkout","namespace":"shop","workload":"Deployment/web","sli":"http_5xx","targetPct":99.9,"window":"7d"}]`)
 	o := mustObserver(t, workloadobs.Config{SLOs: defs})
-	now := wt0
+	// The /api/v1/slo handler evaluates the windows against the real clock, so the
+	// timeline must end "now". Anchoring it to the fixed wt0 made this test pass only
+	// for the few minutes after wt0+100min and fail on every run after that.
+	now := time.Now().Add(-100 * time.Minute)
 	var ok, bad uint64
 	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {0, 0}})}, now, nil)
 	for range 20 {
