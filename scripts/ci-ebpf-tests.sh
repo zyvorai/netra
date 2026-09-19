@@ -79,7 +79,27 @@ NETRA_BPF_TEST_OBJECT="${OUT}/netra_tc.o" \
 NETRA_BPF_TLSFP_TEST_OBJECT="${OUT}/netra_tlsfp.o" \
 NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
+NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
   "$BIN" -test.v
+
+# Sampled L7 protocol observer (docs/l7-sampling.md). These load the real object
+# into the real verifier, attach it to a scratch cgroup holding only the test
+# process, and drive genuine loopback TCP. They must pass AND not skip: a skip
+# here (no cgroup v2, no permission) means the kernel half silently did not run.
+# One of them captures every payload length from 1 to 140 bytes and requires the
+# bytes back exactly, which is what guards the chunked copy and the bounds checks
+# the verifier needs.
+echo "==> L7 sampler: real verifier + real TCP, every payload length exact"
+l7_log="${OUT}/l7sample.log"
+NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
+  "$BIN" -test.v -test.count=1 -test.run 'TestL7Sample' >"$l7_log" 2>&1 || { cat "$l7_log"; exit 1; }
+l7_pass="$(grep -c -- '^--- PASS: TestL7Sample' "$l7_log" || true)"
+if grep -q -- '^--- SKIP: TestL7Sample' "$l7_log" || (( l7_pass < 6 )); then
+  cat "$l7_log"
+  echo "L7 sampler tests: ${l7_pass} passed (want 6) or some skipped" >&2
+  exit 1
+fi
+echo "    ${l7_pass} passed"
 
 # Agent map reads. The agent reads several 131 072-entry LRU hash maps every few
 # seconds; it used to walk each entry with two syscalls, decode and format all of

@@ -43,6 +43,12 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
 RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -c netra_dropinfo.c -o /out-dropinfo.o
+# Standalone sampled L7 protocol observer (Redis/Postgres/MySQL/Kafka/HTTP2/gRPC
+# on configured ports). Own verifier budget; off unless NETRA_L7_SAMPLE is set
+# (docs/l7-sampling.md).
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_l7sample.c -o /out-l7sample.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent
@@ -52,4 +58,5 @@ COPY --from=bpf /out-capture.o /opt/netra/bpf/netra_capture.o
 COPY --from=bpf /out-tlsfp.o /opt/netra/bpf/netra_tlsfp.o
 COPY --from=bpf /out-tcpevents.o /opt/netra/bpf/netra_tcpevents.o
 COPY --from=bpf /out-dropinfo.o /opt/netra/bpf/netra_dropinfo.o
+COPY --from=bpf /out-l7sample.o /opt/netra/bpf/netra_l7sample.o
 ENTRYPOINT ["/netra-agent"]

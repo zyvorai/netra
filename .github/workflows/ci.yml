@@ -51,6 +51,12 @@ jobs:
       # drop out. The kernel half is the `ebpf` job. Same command locally:
       # ./scripts/ci-kernel-sensors-unit.sh
       run: ./scripts/ci-kernel-sensors-unit.sh
+    - name: Sampled L7 protocol parsers unit + race + fuzz (scripted)
+      # Redis/Postgres/MySQL/Kafka/HTTP1/HTTP2/gRPC classifiers and the bounded
+      # counters: no secret reaches an output field, every label is bounded (200k
+      # random inputs + a 20s fuzz), nothing panics. The kernel half runs in the
+      # `ebpf` job. Same command locally: ./scripts/ci-l7sample-unit.sh
+      run: ./scripts/ci-l7sample-unit.sh
     - name: Listen-queue sampling unit + race, real inet_diag (scripted)
       # Accept-queue depth per listener: fill arithmetic, histogram, peaks, the
       # real kernel's inet_diag (backlog-1 listener that never accepts, IPv6,
@@ -484,7 +490,7 @@ jobs:
         done
     - name: eBPF C helpers + compile + privileged PROG_TEST_RUN (scripted)
       # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
-      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp/tcpevents/dropinfo,
+      # Covers bpf/tests/*.c, clang of every bpf/netra_*.c,
       # and bpf/integration (including TestTLSFP*, TestTCPEvents* and
       # TestDropInfo*, which attach real tracepoints on the runner's kernel; nft
       # induces the loss. TestDropInfo* skip where the runner kernel has no BTF).

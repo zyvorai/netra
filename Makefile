@@ -63,3 +63,4 @@ bpf:
 	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_tlsfp.c -o bpf/netra_tlsfp.o
 	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_tcpevents.c -o bpf/netra_tcpevents.o
 	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_dropinfo.c -o bpf/netra_dropinfo.o
+	clang -target bpfel -O2 -g -Wall -Wextra -Werror -I/usr/include/$(shell uname -m)-linux-gnu -c bpf/netra_l7sample.c -o bpf/netra_l7sample.o
