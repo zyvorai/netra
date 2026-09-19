@@ -1,8 +1,11 @@
 FROM node:22-bookworm-slim AS web
 WORKDIR /src
-COPY web/package.json web/tsconfig.json web/vite.config.ts web/index.html ./web/
+# The lockfile is copied and `npm ci` used so the build resolves exactly what CI
+# tested: an unlocked `npm install` floats @novnc/novnc to a release whose
+# package "exports" breaks vite's resolver, and the image stops building.
+COPY web/package.json web/package-lock.json web/tsconfig.json web/vite.config.ts web/index.html ./web/
 COPY web/src ./web/src
-RUN cd web && npm install && npm run build
+RUN cd web && npm ci && npm run build
 
 FROM golang:1.27-bookworm AS go
 WORKDIR /src

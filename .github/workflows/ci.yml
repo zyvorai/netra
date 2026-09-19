@@ -109,8 +109,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
-      with: {node-version: '22', cache: npm, cache-dependency-path: web/package.json}
-    - run: npm --prefix web install
+      with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
+    # `ci`, not `install`: build from the lockfile, exactly as the Dockerfile does.
+    - run: npm --prefix web ci
     - run: npm --prefix web run typecheck
     - run: npm --prefix web test
     - run: npm --prefix web run build
@@ -452,6 +453,20 @@ jobs:
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables
     - uses: actions/setup-go@v5
       with: {go-version: '1.27.1', cache: true}
+    - name: Runner kernel facts (BTF, tracepoint record layouts)
+      # Tracepoint record layouts change between kernels (tcp_send_reset moved
+      # from sport/dport/family to sockaddr-style saddr/daddr), so the layout
+      # files this runner's kernel actually has are printed here: they are the
+      # source for the fixtures in internal/tpformat/testdata, and the first
+      # thing to read when a TestTCPEvents*/TestDropInfo* case fails on a new
+      # runner image.
+      run: |
+        uname -a
+        ls -l /sys/kernel/btf/vmlinux || echo "no kernel BTF"
+        for e in tcp/tcp_retransmit_skb tcp/tcp_send_reset tcp/tcp_receive_reset sock/inet_sock_set_state skb/kfree_skb; do
+          echo "=== $e"
+          sudo cat "/sys/kernel/tracing/events/$e/format" || echo "(unreadable)"
+        done
     - name: eBPF C helpers + compile + privileged PROG_TEST_RUN (scripted)
       # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
       # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp/tcpevents/dropinfo,
