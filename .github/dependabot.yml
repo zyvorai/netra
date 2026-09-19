@@ -18,9 +18,16 @@ updates:
 - package-ecosystem: github-actions
   directory: /
   schedule: {interval: weekly}
+  groups:
+    actions: {patterns: ["*"]}
 - package-ecosystem: docker
   directory: /
   schedule: {interval: weekly}
+  ignore:
+    # The agent image's base OS decides glibc, clang and the kernel-facing tooling
+    # CI verifies; a base-image change is a deliberate, tested migration.
+    - dependency-name: "ubuntu"
+      update-types: ["version-update:semver-major", "version-update:semver-minor"]
 - package-ecosystem: pip
   directory: /python
   schedule: {interval: monthly}
