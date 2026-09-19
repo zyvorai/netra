@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -43,13 +44,16 @@ type Field struct {
 type Format struct {
 	Name   string
 	Fields map[string]Field
+	// symbols holds the value→name tables of `__print_symbolic(REC->field, …)`
+	// calls in the print fmt, keyed by field name.
+	symbols map[string]map[int]string
 }
 
 // Parse reads the text of a format file. Unrecognised lines (ID, print fmt)
 // are ignored; a `field:` line that cannot be understood is an error, since a
 // silently skipped field would become a wrong offset.
 func Parse(text string) (*Format, error) {
-	f := &Format{Fields: map[string]Field{}}
+	f := &Format{Fields: map[string]Field{}, symbols: map[string]map[int]string{}}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -57,6 +61,8 @@ func Parse(text string) (*Format, error) {
 		switch {
 		case strings.HasPrefix(line, "name:"):
 			f.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+		case strings.HasPrefix(line, "print fmt:"):
+			parseSymbols(line, f.symbols)
 		case strings.HasPrefix(line, "field:"):
 			fld, err := parseField(line)
 			if err != nil {
@@ -75,6 +81,41 @@ func Parse(text string) (*Format, error) {
 		return nil, errors.New("no fields found: not a tracepoint format")
 	}
 	return f, nil
+}
+
+var (
+	symbolicCall  = regexp.MustCompile(`__print_symbolic\(REC->(\w+),((?:\s*\{\s*(?:0[xX][0-9a-fA-F]+|\d+)\s*,\s*"[^"]*"\s*\},?)+)\s*\)`)
+	symbolicEntry = regexp.MustCompile(`\{\s*(0[xX][0-9a-fA-F]+|\d+)\s*,\s*"([^"]*)"\s*\}`)
+)
+
+// parseSymbols extracts every `__print_symbolic(REC->field, {value,"NAME"}, …)`
+// table from a print fmt line. Kernels describe enums such as skb drop reasons
+// this way, and the numbering differs between versions, so the running
+// kernel's own table is the only reliable source of names.
+func parseSymbols(line string, into map[string]map[int]string) {
+	for _, m := range symbolicCall.FindAllStringSubmatch(line, -1) {
+		tbl := into[m[1]]
+		if tbl == nil {
+			tbl = map[int]string{}
+			into[m[1]] = tbl
+		}
+		for _, e := range symbolicEntry.FindAllStringSubmatch(m[2], -1) {
+			v, err := strconv.ParseInt(e[1], 0, 64)
+			if err != nil || v < 0 || v > 1<<31 {
+				continue
+			}
+			tbl[int(v)] = e[2]
+		}
+	}
+}
+
+// Symbols returns the value→name table the print fmt gives for a field, or nil
+// when it gives none.
+func (f *Format) Symbols(field string) map[int]string {
+	if t := f.symbols[field]; len(t) > 0 {
+		return t
+	}
+	return nil
 }
 
 // parseField reads `field:<decl>;	offset:N;	size:N;	signed:N;`.

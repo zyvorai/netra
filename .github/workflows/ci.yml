@@ -410,9 +410,10 @@ jobs:
       with: {go-version: '1.27.1', cache: true}
     - name: eBPF C helpers + compile + privileged PROG_TEST_RUN (scripted)
       # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
-      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp/tcpevents,
-      # and bpf/integration (including TestTLSFP* and TestTCPEvents*, which
-      # attach real tracepoints on the runner's kernel; nft induces the loss).
+      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp/tcpevents/dropinfo,
+      # and bpf/integration (including TestTLSFP*, TestTCPEvents* and
+      # TestDropInfo*, which attach real tracepoints on the runner's kernel; nft
+      # induces the loss. TestDropInfo* skip where the runner kernel has no BTF).
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-ebpf-tests.sh
   auto-capture-veth:
     # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +

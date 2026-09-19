@@ -1129,8 +1129,11 @@ type AgentReport struct {
 	EdgeIntel *EdgeIntelSummary `json:"edgeIntel,omitempty"`
 	// TCPEvents is nil when the TCP event tracepoints never attached
 	// (NETRA_TCP_EVENTS=off, or none could be attached in auto mode).
-	TCPEvents  *TCPEventsSummary `json:"tcpEvents,omitempty"`
-	CapChanges []CapChangeEvent  `json:"capChanges,omitempty"`
+	TCPEvents *TCPEventsSummary `json:"tcpEvents,omitempty"`
+	// DropInfo is nil when drop attribution is off; when it tried and could not
+	// load, it carries Unavailable with the reason.
+	DropInfo   *DropInfoSummary `json:"dropInfo,omitempty"`
+	CapChanges []CapChangeEvent `json:"capChanges,omitempty"`
 	// NamespaceChanges mirrors CapChanges' blind-spot caveat below — its
 	// diffing state (watchNamespaceChanges' prevNetNS) resets on restart
 	// the same way.
@@ -1425,6 +1428,54 @@ type LockdownRequest struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Selector  map[string]string `json:"selector"`
+}
+
+// DropInfoSummary is one node's cumulative kernel packet-drop attribution from
+// skb:kfree_skb (bpf/netra_dropinfo.c, docs/drop-info.md): which connections
+// are being dropped, why, and by which kernel function. Flows and Sites are
+// top-N, not the whole tables.
+type DropInfoSummary struct {
+	Attached bool `json:"attached"`
+	// Unavailable is why the sensor is not running (e.g. the kernel has no BTF);
+	// empty when attached.
+	Unavailable string            `json:"unavailable,omitempty"`
+	Totals      DropInfoTotals    `json:"totals"`
+	Reasons     map[string]uint64 `json:"reasons,omitempty"`
+	Sites       []DropInfoSite    `json:"sites,omitempty"`
+	Flows       []DropInfoFlow    `json:"flows,omitempty"`
+}
+
+// DropInfoTotals are node-wide counters. ReadErrors and MapFull are the
+// sensor's own health: non-zero means the counts are an undercount.
+type DropInfoTotals struct {
+	Drops      uint64 `json:"drops"`
+	WithTuple  uint64 `json:"withTuple"`
+	NoTuple    uint64 `json:"noTuple,omitempty"`
+	NoHeader   uint64 `json:"noHeader,omitempty"`
+	ReadErrors uint64 `json:"readErrors,omitempty"`
+	MapFull    uint64 `json:"mapFull,omitempty"`
+}
+
+// DropInfoSite is one (reason, dropping kernel function) with its count.
+type DropInfoSite struct {
+	Reason   string `json:"reason"`
+	Location string `json:"location"`
+	Count    uint64 `json:"count"`
+}
+
+// DropInfoFlow is one dropped (tuple, reason). Family is empty for a drop with
+// no readable IP header; its address and port fields are then empty.
+type DropInfoFlow struct {
+	Family     string `json:"family"`
+	Proto      string `json:"proto,omitempty"`
+	Src        string `json:"src,omitempty"`
+	Dst        string `json:"dst,omitempty"`
+	SrcPort    uint16 `json:"srcPort,omitempty"`
+	DstPort    uint16 `json:"dstPort,omitempty"`
+	Reason     string `json:"reason"`
+	Count      uint64 `json:"count"`
+	Location   string `json:"location,omitempty"`
+	LastSeenNS uint64 `json:"lastSeenNs,omitempty"`
 }
 
 // TCPEventsSummary is one node's cumulative TCP retransmit, reset and

@@ -32,6 +32,7 @@ import (
 	"github.com/zyvorai/netra/internal/afcapture"
 	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
+	"github.com/zyvorai/netra/internal/dropinfo"
 	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/kerneldiag"
@@ -98,8 +99,14 @@ type Agent struct {
 	// loader owns its own links; Close() calls tcpEvents.Close().
 	tcpEventsObject string
 	tcpEvents       *tcpevents.Sensor
-	activeCapture   *models.CaptureSpec
-	captureCancel   context.CancelFunc
+	// dropInfoObject/dropInfo are the standalone drop-attribution sensor
+	// (bpf/netra_dropinfo.c). dropInfoWhy is why it is not running when it
+	// tried to and could not (surfaced in the report; empty when off).
+	dropInfoObject string
+	dropInfo       *dropinfo.Sensor
+	dropInfoWhy    string
+	activeCapture  *models.CaptureSpec
+	captureCancel  context.CancelFunc
 	// captureBackendErr records why the most recent applyCapture failed to
 	// start the requested backend (e.g. "afpacket:CAP_NET_RAW", "ebpf:
 	// capture_spec map unavailable"), or "" when the active/most recent
@@ -181,6 +188,7 @@ func New(log *slog.Logger) *Agent {
 		captureObject:   env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
 		tlsfpObject:     env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
 		tcpEventsObject: env("NETRA_BPF_TCPEVENTS_OBJECT", "/opt/netra/bpf/netra_tcpevents.o"),
+		dropInfoObject:  env("NETRA_BPF_DROPINFO_OBJECT", "/opt/netra/bpf/netra_dropinfo.o"),
 		cgroupPath:      env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096), tlsFP: tlsfp.NewDetector(2048),
@@ -474,6 +482,9 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	if err := a.attachTCPEvents(); err != nil {
+		return err
+	}
+	if err := a.attachDropInfo(); err != nil {
 		return err
 	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
@@ -913,6 +924,10 @@ func (a *Agent) Close() {
 		_ = a.tcpEvents.Close()
 		a.tcpEvents = nil
 	}
+	if a.dropInfo != nil {
+		_ = a.dropInfo.Close()
+		a.dropInfo = nil
+	}
 }
 
 func (a *Agent) syncAndReport(ctx context.Context) error {
@@ -1087,6 +1102,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	tcpEvents := a.readTCPEvents()
+	dropInfo := a.readDropInfo()
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1094,7 +1110,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
@@ -3927,6 +3943,82 @@ func (a *Agent) attachTCPEvents() error {
 	}
 	a.log.Info("TCP event tracepoints attached", "sensors", sensor.Attached(), "skipped", sensor.Skipped())
 	return nil
+}
+
+// attachDropInfo loads bpf/netra_dropinfo.c and attaches its skb:kfree_skb
+// program. NETRA_DROP_INFO=auto (default) degrades to "unavailable" with the
+// reason reported; off skips; required fails startup.
+//
+// It is the one sensor that needs kernel BTF (sk_buff offsets are relocated
+// against /sys/kernel/btf/vmlinux); a kernel without it costs only this feature.
+func (a *Agent) attachDropInfo() error {
+	mode := strings.ToLower(env("NETRA_DROP_INFO", "auto")) // auto|off|required
+	if mode == "off" {
+		a.log.Info("drop attribution skipped by NETRA_DROP_INFO=off")
+		return nil
+	}
+	sensor, err := dropinfo.Load(dropinfo.Options{ObjectPath: a.dropInfoObject, Log: a.log})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("drop attribution (NETRA_DROP_INFO=required): %w", err)
+		}
+		a.dropInfoWhy = err.Error()
+		a.log.Warn("drop attribution unavailable; continuing without it", "object", a.dropInfoObject, "error", err)
+		return nil
+	}
+	a.dropInfo = sensor
+	a.hooks = append(a.hooks, "tracepoint:"+dropinfo.TPGroup+"/"+dropinfo.TPEvent)
+	a.markAttached("netra_drop_info")
+	a.log.Info("drop attribution attached", "tracepoint", dropinfo.TPGroup+":"+dropinfo.TPEvent)
+	return nil
+}
+
+// Bounds on the drop lists in each report.
+const (
+	dropInfoTopFlows = 50
+	dropInfoTopSites = 30
+)
+
+// maxWhy bounds the reason text shipped in a report.
+const maxWhy = 300
+
+// readDropInfo returns nil when the sensor is off. When it tried and could not
+// load it returns a summary saying why, so the controller can tell "off" from
+// "unavailable on this kernel". A read failure is logged, not fatal: this is a
+// diagnostic side channel and must not stop the rest of the report.
+func (a *Agent) readDropInfo() *models.DropInfoSummary {
+	if a.dropInfo == nil {
+		if a.dropInfoWhy == "" {
+			return nil
+		}
+		why := a.dropInfoWhy
+		if len(why) > maxWhy {
+			why = why[:maxWhy]
+		}
+		return &models.DropInfoSummary{Unavailable: why}
+	}
+	sn, err := a.dropInfo.Snapshot(dropInfoTopFlows, dropInfoTopSites)
+	if err != nil {
+		a.log.Warn("read drop info", "error", err)
+		return nil
+	}
+	out := &models.DropInfoSummary{
+		Attached: sn.Attached, Reasons: sn.Reasons,
+		Totals: models.DropInfoTotals{
+			Drops: sn.Totals.Drops, WithTuple: sn.Totals.WithTuple, NoTuple: sn.Totals.NoTuple,
+			NoHeader: sn.Totals.NoHeader, ReadErrors: sn.Totals.ReadError, MapFull: sn.Totals.MapFull,
+		},
+	}
+	for _, s := range sn.Sites {
+		out.Sites = append(out.Sites, models.DropInfoSite{Reason: s.Reason, Location: s.Location, Count: s.Count})
+	}
+	for _, f := range sn.Flows {
+		out.Flows = append(out.Flows, models.DropInfoFlow{
+			Family: f.Family, Proto: f.Proto, Src: f.Src, Dst: f.Dst, SrcPort: f.SrcPort, DstPort: f.DstPort,
+			Reason: f.Reason, Count: f.Count, Location: f.Location, LastSeenNS: f.LastSeenNS,
+		})
+	}
+	return out
 }
 
 // tcpEventsTopFlows bounds the flow list in each report.

@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.104"
+  tag: "0.27.105"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.104"
+  tag: "0.27.105"
 replicaCount: 1
 ha:
   enabled: false
@@ -284,6 +284,11 @@ agent:
   # TCP event tracepoints — retransmit/RST attribution and the state-transition
   # matrix (bpf/netra_tcpevents.c, docs/tcp-events.md). auto|off|required.
   tcpEvents: auto
+  # Kernel drop attribution — which connections the kernel drops, why, and by
+  # which function (bpf/netra_dropinfo.c, docs/drop-info.md). auto|off|required.
+  # Needs kernel BTF (/sys/kernel/btf/vmlinux); "auto" reports it unavailable
+  # with the reason when the node lacks it.
+  dropInfo: auto
   # Mount the host's tracefs (/sys/kernel/tracing) read-only into the agent.
   # A container's own /sys is a bare sysfs with no tracefs, so without this the
   # agent cannot read tracepoint record layouts: the TCP event sensors and the

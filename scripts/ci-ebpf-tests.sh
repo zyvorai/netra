@@ -3,7 +3,7 @@
 #
 # Mirrors the GitHub `ebpf` job so local and CI share one script:
 #   1. Compile bpf/tests/*.c helpers and run them.
-#   2. Compile netra_tc / edge / capture / tlsfp / tcpevents BPF objects.
+#   2. Compile netra_tc / edge / capture / tlsfp / tcpevents / dropinfo BPF objects.
 #   3. Build bpf/integration tests and run under sudo (CAP_BPF).
 #
 # Requires: Linux, clang, llvm, linux-libc-dev, go; root (or CAP_BPF) for
@@ -60,6 +60,8 @@ clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
   -c bpf/netra_tlsfp.c -o "${OUT}/netra_tlsfp.o"
 clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
   -c bpf/netra_tcpevents.c -o "${OUT}/netra_tcpevents.o"
+clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
+  -c bpf/netra_dropinfo.c -o "${OUT}/netra_dropinfo.o"
 
 if [[ "$SKIP_INTEGRATION" == "1" ]]; then
   echo "==> SKIP_INTEGRATION=1 — compiled objects only"
@@ -79,6 +81,7 @@ go test -tags=bpfintegration -c -o "$BIN" ./bpf/integration/
 NETRA_BPF_TEST_OBJECT="${OUT}/netra_tc.o" \
 NETRA_BPF_TLSFP_TEST_OBJECT="${OUT}/netra_tlsfp.o" \
 NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
+NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
   "$BIN" -test.v
 
 echo "==> PASS ci-ebpf-tests"

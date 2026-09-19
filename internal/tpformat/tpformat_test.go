@@ -144,3 +144,55 @@ func TestReadFailsCleanlyWhenTracefsIsAbsent(t *testing.T) {
 		t.Fatal("Read of a missing tracepoint must fail")
 	}
 }
+
+func TestKfreeSkbReasonNamesComeFromTheKernelsOwnTable(t *testing.T) {
+	f := load(t, "linux-6.8-kfree_skb.format")
+	if got := off(t, f, "skbaddr", 8); got != 8 {
+		t.Errorf("skbaddr offset = %d, want 8", got)
+	}
+	if got := off(t, f, "location", 8); got != 16 {
+		t.Errorf("location offset = %d, want 16", got)
+	}
+	if got := off(t, f, "protocol", 2); got != 24 {
+		t.Errorf("protocol offset = %d, want 24", got)
+	}
+	if got := off(t, f, "reason", 4); got != 28 {
+		t.Errorf("reason offset = %d, want 28", got)
+	}
+	sym := f.Symbols("reason")
+	for v, want := range map[int]string{2: "NOT_SPECIFIED", 3: "NO_SOCKET", 8: "NETFILTER_DROP", 35: "TCP_RESET", 95: "MAX"} {
+		if sym[v] != want {
+			t.Errorf("reason %d = %q, want %q", v, sym[v], want)
+		}
+	}
+	if len(sym) < 90 {
+		t.Errorf("only %d reasons parsed from a 6.8 format file", len(sym))
+	}
+	if f.Symbols("protocol") != nil {
+		t.Error("a field with no __print_symbolic should have no table")
+	}
+}
+
+func TestSymbolTablesHandleHexAndSeveralFields(t *testing.T) {
+	f, err := Parse("name: x\nformat:\n\tfield:int a;\toffset:8;\tsize:4;\tsigned:1;\n\tfield:int b;\toffset:12;\tsize:4;\tsigned:1;\n" +
+		"print fmt: \"%s %s\", __print_symbolic(REC->a, { 0x1, \"ONE\" }, { 2, \"TWO\" }), __print_symbolic(REC->b, { 7, \"SEVEN\" })\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := f.Symbols("a"); a[1] != "ONE" || a[2] != "TWO" || len(a) != 2 {
+		t.Errorf("a = %v", a)
+	}
+	if b := f.Symbols("b"); b[7] != "SEVEN" || len(b) != 1 {
+		t.Errorf("b = %v", b)
+	}
+}
+
+func TestMalformedSymbolTableIsIgnoredNotFatal(t *testing.T) {
+	f, err := Parse("name: x\nformat:\n\tfield:int a;\toffset:8;\tsize:4;\tsigned:1;\nprint fmt: \"%s\", __print_symbolic(REC->a, { oops })\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Symbols("a") != nil {
+		t.Error("a malformed table should yield no names")
+	}
+}
