@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdlayher/packet v1.1.2
 	github.com/snowflakedb/gosnowflake v1.19.1
-	github.com/vishvananda/netlink v1.3.1-0.20250328051554-cb48698f2590
+	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/net v0.56.0
 	golang.org/x/sys v0.46.0
 	google.golang.org/grpc v1.83.1
