@@ -234,27 +234,24 @@ func TestIdleWorkloadIsEvictedAndItsSlotReused(t *testing.T) {
 
 func TestHTTPStatusClassificationAndOtherSignals(t *testing.T) {
 	tr := NewTracker(TrackerConfig{})
-	rep := func(ok200, e503, e404 uint64, retr, segs, att, blk, dq, dfail uint64) models.AgentStatus {
-		wl := func() (string, string, string) { return "shop", "Deployment", "web" }
-		ns, kind, name := wl()
+	rep := func(ok200, e503, e404 uint64, att, blk, dq, dfail uint64) models.AgentStatus {
+		ns, kind, name := "shop", "Deployment", "web"
 		return agent("n1", func(r *models.AgentReport) {
 			r.HTTPStatus = []models.HTTPStatusStat{
 				{CgroupID: 1, Status: 200, Count: ok200, Namespace: ns, WorkloadKind: kind, WorkloadName: name},
 				{CgroupID: 1, Status: 503, Count: e503, Namespace: ns, WorkloadKind: kind, WorkloadName: name},
 				{CgroupID: 1, Status: 404, Count: e404, Namespace: ns, WorkloadKind: kind, WorkloadName: name},
 			}
-			r.TCPHealth = []models.TCPHealthStat{{CgroupID: 1, Family: "ipv4", LocalIP: "1", RemoteIP: "2", LocalPort: 1, RemotePort: 2,
-				Retransmissions: retr, SegmentsOut: segs, Namespace: ns, WorkloadKind: kind, WorkloadName: name}}
 			r.ConnectionAttempts = []models.ConnectionAttemptStat{{CgroupID: 1, Family: "ipv4", Protocol: "tcp", RemoteIP: "2", RemotePort: 2,
 				Attempts: att, Blocked: blk, Namespace: ns, WorkloadKind: kind, WorkloadName: name}}
 			r.DNSHealth = []models.DNSHealthStat{{CgroupID: 1, Name: "svc.local", Queries: dq, Failures: dfail, Namespace: ns, WorkloadKind: kind, WorkloadName: name}}
 		})
 	}
-	tr.Update([]models.AgentStatus{rep(0, 0, 0, 0, 0, 0, 0, 0, 0)}, t0)
-	tr.Update([]models.AgentStatus{rep(90, 7, 3, 4, 400, 20, 2, 50, 6)}, t0.Add(time.Minute))
+	tr.Update([]models.AgentStatus{rep(0, 0, 0, 0, 0, 0, 0)}, t0)
+	tr.Update([]models.AgentStatus{rep(90, 7, 3, 20, 2, 50, 6)}, t0.Add(time.Minute))
 	n, _ := find(tr.Snapshot(), "shop", "Deployment/web")
 	want := map[Counter]uint64{
-		HTTPResponses: 100, HTTP5xx: 7, TCPRetransmissions: 4, TCPSegments: 400,
+		HTTPResponses: 100, HTTP5xx: 7,
 		ConnectionAttempts: 20, ConnectionsBlocked: 2, DNSQueries: 50, DNSFailures: 6,
 	}
 	for c, w := range want {
@@ -326,4 +323,117 @@ func TestConcurrentUpdateAndSnapshotAreRaceFree(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// Real names captured from a live node (80.79.5.173): agents resolve a pod's
+// direct controller, so Deployments show up as ReplicaSets with a hash suffix.
+func TestCanonicalOwnerMapsRealAgentNamesToTheWorkloadOperatorsMean(t *testing.T) {
+	for _, tc := range []struct{ kind, name, wantKind, wantName string }{
+		{"ReplicaSet", "cdi-apiserver-6c4b4dfd7c", "Deployment", "cdi-apiserver"},
+		{"ReplicaSet", "cdi-uploadproxy-7f59bd6994", "Deployment", "cdi-uploadproxy"},
+		{"ReplicaSet", "cert-manager-689c4c5575", "Deployment", "cert-manager"},
+		{"ReplicaSet", "cert-manager-cainjector-6fbb9c8cd6", "Deployment", "cert-manager-cainjector"},
+		{"ReplicaSet", "netra-69b5dd578d", "Deployment", "netra"},
+		{"Job", "nightly-backup-29234567", "CronJob", "nightly-backup"},
+		{"Job", "db-migrate-20260919", "CronJob", "db-migrate"},
+		// Not generated names: left exactly as reported.
+		{"ReplicaSet", "handmade", "ReplicaSet", "handmade"},
+		{"ReplicaSet", "web-abc", "ReplicaSet", "web-abc"},
+		{"Job", "one-off-import", "Job", "one-off-import"},
+		{"StatefulSet", "postgres-0", "StatefulSet", "postgres-0"},
+		{"DaemonSet", "cilium", "DaemonSet", "cilium"},
+		{"Deployment", "already-canonical", "Deployment", "already-canonical"},
+		{"", "no-kind", "", "no-kind"},
+	} {
+		if k, n := canonicalOwner(tc.kind, tc.name); k != tc.wantKind || n != tc.wantName {
+			t.Errorf("%s/%s -> %s/%s, want %s/%s", tc.kind, tc.name, k, n, tc.wantKind, tc.wantName)
+		}
+	}
+}
+
+// A rollout replaces the ReplicaSet (new hash). The workload's series must
+// carry on instead of a new one starting.
+func TestARolloutDoesNotFragmentTheWorkloadSeries(t *testing.T) {
+	tr := NewTracker(TrackerConfig{})
+	rs := func(name string, packets uint64) models.AgentStatus {
+		return statsAgent("n1", models.DestinationStat{
+			CgroupID: cgroupOf(name), Namespace: "shop", WorkloadKind: "ReplicaSet", WorkloadName: name,
+			Hook: "egress", Direction: "egress", Protocol: "tcp", DestinationIP: "10.0.0.2", Port: 80, Packets: packets, Bytes: packets,
+		})
+	}
+	tr.Update([]models.AgentStatus{rs("checkout-6c4b4dfd7c", 100)}, t0)
+	tr.Update([]models.AgentStatus{rs("checkout-6c4b4dfd7c", 150)}, t0.Add(time.Minute))
+	// Rollout: the old ReplicaSet's pods go away, the new one's appear.
+	tr.Update([]models.AgentStatus{rs("checkout-7f59bd6994", 30)}, t0.Add(2*time.Minute))
+	s := tr.Snapshot()
+	if len(s.Named) != 1 || s.Named[0].Key != (Key{"shop", "Deployment/checkout"}) {
+		t.Fatalf("named = %+v, want exactly Deployment/checkout across the rollout", s.Named)
+	}
+	if got := s.Named[0].V[Packets]; got != 50+30 {
+		t.Fatalf("total = %d, want 80 (50 before the rollout + the new ReplicaSet's 30)", got)
+	}
+}
+
+// Agents send top-N snapshots. A flow that merely climbs into the top N must
+// not have its lifetime counted as one tick's growth.
+func TestFirstSightingIsOnlyABaselineWhenTheReportIsCapped(t *testing.T) {
+	capped := func(extra ...models.DestinationStat) models.AgentStatus {
+		fl := make([]models.DestinationStat, 0, models.ReportCapFlows)
+		for i := range models.ReportCapFlows - len(extra) {
+			f := flow("filler", fmt.Sprintf("f%04d", i), 1, 1_000_000, 1, 0) // big flows that stay in the top N
+			fl = append(fl, f)
+		}
+		return statsAgent("n1", append(fl, extra...)...)
+	}
+	tr := NewTracker(TrackerConfig{MaxNamed: 2000})
+	tr.Update([]models.AgentStatus{capped()}, t0)
+
+	// A long-lived flow (5,000,000 packets of history) enters the top N.
+	climber := flow("shop", "web", 80, 5_000_000, 1, 0)
+	tr.Update([]models.AgentStatus{capped(climber)}, t0.Add(time.Minute))
+	if n, ok := find(tr.Snapshot(), "shop", "Deployment/web"); ok && n.V[Packets] != 0 {
+		t.Fatalf("a flow that climbed into a capped report was booked with %d packets of history", n.V[Packets])
+	}
+	if !tr.Snapshot().Truncated[SourceFlows] {
+		t.Fatal("the capped source must be flagged truncated")
+	}
+	// Once baselined, its real growth counts.
+	climber.Packets += 250
+	tr.Update([]models.AgentStatus{capped(climber)}, t0.Add(2*time.Minute))
+	if n, _ := find(tr.Snapshot(), "shop", "Deployment/web"); n.V[Packets] != 250 {
+		t.Fatalf("growth after the baseline = %d, want 250", n.V[Packets])
+	}
+}
+
+func TestFirstSightingStillCountsInFullWhenTheReportIsNotCapped(t *testing.T) {
+	tr := NewTracker(TrackerConfig{})
+	tr.Update([]models.AgentStatus{statsAgent("n1", flow("a", "x", 80, 10, 10, 0))}, t0)
+	tr.Update([]models.AgentStatus{statsAgent("n1", flow("a", "x", 80, 10, 10, 0), flow("a", "x", 443, 40, 40, 0))}, t0.Add(time.Minute))
+	if n, _ := find(tr.Snapshot(), "a", "Deployment/x"); n.V[Packets] != 40 {
+		t.Fatalf("total = %d, want 40: a new flow in an uncapped report is genuinely new", n.V[Packets])
+	}
+	s := tr.Snapshot()
+	for _, src := range Sources {
+		if s.Truncated[src] {
+			t.Errorf("source %s reported truncated for a tiny report", src)
+		}
+	}
+}
+
+func TestTruncationFlagsAreTrackedPerSource(t *testing.T) {
+	tr := NewTracker(TrackerConfig{})
+	dns := make([]models.DNSHealthStat, models.ReportCapDNS)
+	for i := range dns {
+		dns[i] = models.DNSHealthStat{CgroupID: uint64(i), Name: fmt.Sprintf("n%d", i), Queries: 1}
+	}
+	tr.Update([]models.AgentStatus{agent("n1", func(r *models.AgentReport) { r.DNSHealth = dns })}, t0)
+	s := tr.Snapshot()
+	if !s.Truncated[SourceDNS] || s.Truncated[SourceFlows] || s.Truncated[SourceHTTP] || s.Truncated[SourceConnections] {
+		t.Fatalf("flags = %v, want only dns", s.Truncated)
+	}
+	// A later, smaller report clears the flag.
+	tr.Update([]models.AgentStatus{agent("n1", func(r *models.AgentReport) { r.DNSHealth = dns[:3] })}, t0.Add(time.Minute))
+	if tr.Snapshot().Truncated[SourceDNS] {
+		t.Fatal("the flag must clear once the report is under its cap")
+	}
 }

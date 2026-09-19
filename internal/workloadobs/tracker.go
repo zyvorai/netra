@@ -15,6 +15,7 @@
 package workloadobs
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,8 +32,6 @@ const (
 	Packets Counter = iota
 	Bytes
 	BlockedPackets
-	TCPRetransmissions
-	TCPSegments
 	ConnectionAttempts
 	ConnectionsBlocked
 	DNSQueries
@@ -51,8 +50,6 @@ var Counters = [NumCounters]CounterInfo{
 	Packets:            {"packets", "Packets observed for the workload."},
 	Bytes:              {"bytes", "Bytes observed for the workload."},
 	BlockedPackets:     {"blocked_packets", "Packets Netra blocked for the workload."},
-	TCPRetransmissions: {"tcp_retransmissions", "TCP retransmission callbacks for the workload's sockets."},
-	TCPSegments:        {"tcp_segments", "TCP segments sent by the workload's sockets."},
 	ConnectionAttempts: {"connection_attempts", "Socket connect/sendmsg attempts by the workload."},
 	ConnectionsBlocked: {"connections_blocked", "Connection attempts Netra blocked for the workload."},
 	DNSQueries:         {"dns_queries", "Cleartext UDP/53 DNS queries by the workload."},
@@ -96,7 +93,22 @@ type Snapshot struct {
 	MaxNamed int
 	Entries  int    // raw agent entries currently tracked
 	Dropped  uint64 // entries not tracked because the entry cap was reached
+	// Truncated says, per source, whether any agent's latest report hit its
+	// entry cap. Agents report top-N snapshots, so a capped source means
+	// per-workload counts for it are lower bounds (the tail is invisible).
+	Truncated map[string]bool
 }
+
+// Report sources, as named in Snapshot.Truncated and the exported gauge.
+const (
+	SourceFlows       = "flows"
+	SourceConnections = "connections"
+	SourceDNS         = "dns"
+	SourceHTTP        = "http"
+)
+
+// Sources lists every source in a stable order.
+var Sources = []string{SourceFlows, SourceConnections, SourceDNS, SourceHTTP}
 
 // TrackerConfig bounds the Tracker's memory and cardinality.
 type TrackerConfig struct {
@@ -129,6 +141,7 @@ type Tracker struct {
 	prev      map[string]entry
 	baselined map[string]bool // nodes for which prev holds a baseline
 	dropped   uint64
+	truncated map[string]bool
 	named     map[Key]*total
 	other     [NumCounters]uint64
 }
@@ -151,6 +164,7 @@ func NewTracker(cfg TrackerConfig) *Tracker {
 		cfg:       cfg,
 		prev:      map[string]entry{},
 		baselined: map[string]bool{},
+		truncated: map[string]bool{},
 		named:     map[Key]*total{},
 	}
 }
@@ -170,6 +184,7 @@ func (t *Tracker) Update(agents []models.AgentStatus, now time.Time) []Delta {
 
 	acc := map[Key]*Delta{}
 	seenNodes := map[string]bool{}
+	truncatedNow := map[string]bool{}
 
 	for _, a := range agents {
 		if a.Stale {
@@ -179,7 +194,13 @@ func (t *Tracker) Update(agents []models.AgentStatus, now time.Time) []Delta {
 		seenNodes[node] = true
 		seeding := !t.baselined[node]
 
-		observe := func(kind byte, ek string, key Key, ok bool, status uint16, vals [3]uint64) {
+		// observe folds one raw entry in. truncated says the source's list hit
+		// its agent-side cap: the agent reports a top-N snapshot, so an entry
+		// that first appears may just have climbed into the top N with a long
+		// history. Counting all of it would book that history as growth, so
+		// for a capped source a first sighting only sets a baseline. (The cost
+		// is that a genuinely new flow's first, small, report is not counted.)
+		observe := func(kind byte, ek string, key Key, ok bool, status uint16, vals [3]uint64, truncated bool) {
 			e, had := t.prev[ek]
 			var d [3]uint64
 			switch {
@@ -196,7 +217,9 @@ func (t *Tracker) Update(agents []models.AgentStatus, now time.Time) []Delta {
 					t.dropped++
 					return
 				}
-				d = vals // created since the last look: all of it is new growth
+				if !truncated {
+					d = vals // created since the last look: all of it is new growth
+				}
 			default:
 				for i := range vals {
 					if vals[i] >= e.vals[i] {
@@ -218,32 +241,45 @@ func (t *Tracker) Update(agents []models.AgentStatus, now time.Time) []Delta {
 			applyDelta(&dl.V, kind, status, d)
 		}
 
+		flowsCapped := len(a.Stats) >= models.ReportCapFlows
 		for _, s := range a.Stats {
 			key, ok := workloadKey(s.Namespace, s.WorkloadKind, s.WorkloadName, s.Pod)
 			observe('D', entryKey(node, 'D', u64(s.CgroupID), s.Hook, s.Direction, s.Protocol, s.SourceIP, u64(uint64(s.SourcePort)), s.DestinationIP, u64(uint64(s.Port))),
-				key, ok, 0, [3]uint64{s.Packets, s.Bytes, s.Blocked})
+				key, ok, 0, [3]uint64{s.Packets, s.Bytes, s.Blocked}, flowsCapped)
 		}
-		for _, s := range a.TCPHealth {
-			key, ok := workloadKey(s.Namespace, s.WorkloadKind, s.WorkloadName, s.Pod)
-			observe('T', entryKey(node, 'T', u64(s.CgroupID), s.Family, s.LocalIP, u64(uint64(s.LocalPort)), s.RemoteIP, u64(uint64(s.RemotePort))),
-				key, ok, 0, [3]uint64{s.Retransmissions, s.SegmentsOut, 0})
-		}
+		connCapped := len(a.ConnectionAttempts) >= models.ReportCapConnAttempts
 		for _, s := range a.ConnectionAttempts {
 			key, ok := workloadKey(s.Namespace, s.WorkloadKind, s.WorkloadName, s.Pod)
 			observe('C', entryKey(node, 'C', u64(s.CgroupID), s.Family, s.Protocol, s.RemoteIP, u64(uint64(s.RemotePort))),
-				key, ok, 0, [3]uint64{s.Attempts, s.Blocked, 0})
+				key, ok, 0, [3]uint64{s.Attempts, s.Blocked, 0}, connCapped)
 		}
+		dnsCapped := len(a.DNSHealth) >= models.ReportCapDNS
 		for _, s := range a.DNSHealth {
 			key, ok := workloadKey(s.Namespace, s.WorkloadKind, s.WorkloadName, s.Pod)
 			observe('N', entryKey(node, 'N', u64(s.CgroupID), s.Name),
-				key, ok, 0, [3]uint64{s.Queries, s.Failures, 0})
+				key, ok, 0, [3]uint64{s.Queries, s.Failures, 0}, dnsCapped)
 		}
+		httpCapped := len(a.HTTPStatus) >= models.ReportCapHTTPStatus
 		for _, s := range a.HTTPStatus {
 			key, ok := workloadKey(s.Namespace, s.WorkloadKind, s.WorkloadName, s.Pod)
 			observe('H', entryKey(node, 'H', u64(s.CgroupID), u64(uint64(s.Status))),
-				key, ok, s.Status, [3]uint64{s.Count, 0, 0})
+				key, ok, s.Status, [3]uint64{s.Count, 0, 0}, httpCapped)
+		}
+		if flowsCapped {
+			truncatedNow[SourceFlows] = true
+		}
+		if connCapped {
+			truncatedNow[SourceConnections] = true
+		}
+		if dnsCapped {
+			truncatedNow[SourceDNS] = true
+		}
+		if httpCapped {
+			truncatedNow[SourceHTTP] = true
 		}
 	}
+
+	t.truncated = truncatedNow
 
 	// A node absent this round loses its baseline, so it re-seeds on return.
 	for n := range t.baselined {
@@ -321,7 +357,10 @@ func (t *Tracker) account(deltas []Delta, now time.Time) {
 func (t *Tracker) Snapshot() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s := Snapshot{Other: t.other, MaxNamed: t.cfg.MaxNamed, Entries: len(t.prev), Dropped: t.dropped}
+	s := Snapshot{Other: t.other, MaxNamed: t.cfg.MaxNamed, Entries: len(t.prev), Dropped: t.dropped, Truncated: map[string]bool{}}
+	for _, src := range Sources {
+		s.Truncated[src] = t.truncated[src]
+	}
 	s.Named = make([]NamedTotals, 0, len(t.named))
 	for k, tot := range t.named {
 		s.Named = append(s.Named, NamedTotals{Key: k, V: tot.v})
@@ -341,9 +380,6 @@ func applyDelta(dst *[NumCounters]uint64, kind byte, status uint16, d [3]uint64)
 		dst[Packets] += d[0]
 		dst[Bytes] += d[1]
 		dst[BlockedPackets] += d[2]
-	case 'T':
-		dst[TCPRetransmissions] += d[0]
-		dst[TCPSegments] += d[1]
 	case 'C':
 		dst[ConnectionAttempts] += d[0]
 		dst[ConnectionsBlocked] += d[1]
@@ -370,6 +406,7 @@ func addInto(dst *[NumCounters]uint64, src [NumCounters]uint64) {
 func workloadKey(ns, kind, name, pod string) (Key, bool) {
 	switch {
 	case name != "":
+		kind, name = canonicalOwner(kind, name)
 		if kind != "" {
 			return Key{ns, kind + "/" + name}, true
 		}
@@ -379,6 +416,35 @@ func workloadKey(ns, kind, name, pod string) (Key, bool) {
 	default:
 		return Key{}, false
 	}
+}
+
+var (
+	// A Deployment's ReplicaSet is named <deployment>-<pod-template-hash>; the
+	// hash is 5-10 characters of Kubernetes' vowel-free "safe" alphabet.
+	replicaSetHashRE = regexp.MustCompile(`^(.+)-[bcdfghjklmnpqrstvwxz2456789]{5,10}$`)
+	// A CronJob's Job is named <cronjob>-<scheduled time in minutes> (8-10 digits).
+	cronJobRunRE = regexp.MustCompile(`^(.+)-[0-9]{8,10}$`)
+)
+
+// canonicalOwner maps the immediate owner the agent resolves to the workload
+// an operator thinks in. Agents report the pod's direct controller, so a
+// Deployment's pods appear as ReplicaSet "checkout-6c4b4dfd7c": a different
+// name after every rollout, which would fragment series and make a per-workload
+// SLO impossible to write. Mapping ReplicaSet -> Deployment and Job -> CronJob
+// by their generated-name suffixes keeps one stable identity. A bare
+// ReplicaSet or Job whose name happens not to fit the pattern is left alone.
+func canonicalOwner(kind, name string) (string, string) {
+	switch kind {
+	case "ReplicaSet":
+		if m := replicaSetHashRE.FindStringSubmatch(name); m != nil {
+			return "Deployment", m[1]
+		}
+	case "Job":
+		if m := cronJobRunRE.FindStringSubmatch(name); m != nil {
+			return "CronJob", m[1]
+		}
+	}
+	return kind, name
 }
 
 func entryKey(node string, kind byte, parts ...string) string {

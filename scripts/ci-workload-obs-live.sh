@@ -65,8 +65,7 @@ check() { # check <name> <want> <got>
 }
 
 # report <spec>: post one agent report. spec is "name:packets:bytes:ok:e5xx" per
-# workload, space separated; a leading "!" on a name marks a bare Pod entry is
-# not needed here. Every workload lives in namespace "shop" as a Deployment.
+# workload, space separated. Every workload lives in namespace "shop".
 report() {
   python3 - "$API" "$AGENT_KEY" "$@" <<'PY'
 import datetime, json, sys, urllib.request, zlib
@@ -77,7 +76,10 @@ stats, http = [], []
 for spec in specs:
     name, packets, nbytes, ok, e5 = spec.split(":")
     cg = zlib.crc32(name.encode()) + 1000  # one cgroup per workload, as on a real node
-    ident = {"cgroupId": cg, "namespace": "shop", "workloadKind": "Deployment", "workloadName": name}
+    # Real agents report a pod's direct controller: a Deployment's pods show up
+    # as ReplicaSet "<deployment>-<pod-template-hash>". Mirror that; netrad must
+    # still export (and SLO-match) the workload as Deployment/<name>.
+    ident = {"cgroupId": cg, "namespace": "shop", "workloadKind": "ReplicaSet", "workloadName": name + "-6c4b4dfd7c"}
     stats.append({**ident, "sourceIp": "10.0.0.1", "destinationIp": "10.0.0.2", "port": 80, "protocol": "tcp",
                   "hook": "egress", "direction": "egress", "packets": int(packets), "bytes": int(nbytes), "blocked": 0})
     http.append({**ident, "status": 200, "count": int(ok)})
@@ -115,6 +117,7 @@ check "second busiest checkout is named (packets +500)" "500" "$(series 'netra_w
 check "exactly two workloads named" "2" "$(series 'netra_workload_series_named')"
 check "the rest roll into __other__ (cart 50 + batch 10)" "60" "$(series 'netra_workload_packets_total{namespace="__other__",workload="__other__"}')"
 check "cart has no series of its own" "" "$(series 'netra_workload_packets_total{namespace="shop",workload="Deployment/cart"}')"
+check "no source is capped in this small report" "0" "$(series 'netra_workload_report_truncated{source="flows"}')"
 check "cardinality stays at cap + 1 series per family" "3" "$(metrics | grep -c '^netra_workload_packets_total{')"
 check "http responses counted for checkout" "400" "$(series 'netra_workload_http_responses_total{namespace="shop",workload="Deployment/checkout"}')"
 snapshot

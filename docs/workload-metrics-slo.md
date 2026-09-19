@@ -42,14 +42,42 @@ NETRA_WORKLOAD_OBS_INTERVAL=60s       # 5s..5m; how often agent counters are fol
 | Series | Source |
 |--------|--------|
 | `netra_workload_packets_total`, `_bytes_total`, `_blocked_packets_total` | flow stats |
-| `netra_workload_tcp_retransmissions_total`, `_tcp_segments_total` | sockops TCP health |
 | `netra_workload_connection_attempts_total`, `_connections_blocked_total` | connect/sendmsg hooks |
 | `netra_workload_dns_queries_total`, `_dns_failures_total` | cleartext UDP/53 |
 | `netra_workload_http_responses_total`, `_http_5xx_total` | cleartext HTTP/1 status |
 
 Labels are `namespace` and `workload` (`Kind/Name`, or `Pod/<name>` for a bare
-pod). Traffic with no resolved workload (host processes) has no series here; the
-aggregate `netra_*` metrics still cover it.
+pod). Traffic with no resolved workload (host processes, unresolved cgroups) has
+no series here; on a real node roughly a third of flow entries are attributed, and
+the aggregate `netra_*` metrics still cover the rest.
+
+**Workload names are canonicalised.** Agents report a pod's *direct* controller, so
+a Deployment's pods arrive as `ReplicaSet/checkout-6c4b4dfd7c` — a new name after
+every rollout. Netra maps `ReplicaSet/<name>-<pod-template-hash>` to
+`Deployment/<name>` and `Job/<name>-<scheduled-minutes>` to `CronJob/<name>`, so
+one workload keeps one series across rollouts and an SLO can name it. A bare
+ReplicaSet or Job whose name does not fit those generated patterns is left as
+reported. Write SLO `workload` filters in the canonical form (`Deployment/checkout`).
+
+**These are lower bounds, not exact totals.** A node agent reports a *top-N
+snapshot*, not the whole map: flows are the top 1000 by cumulative packets,
+connection sources the top 2000 by attempts, DNS the top 500, HTTP status the
+top 1000. Consequences, all deliberate:
+
+- Traffic in flows below the cutoff is invisible, so busy nodes under-report their
+  tail.
+- A flow that merely climbs into the top N has a long history; counting it would
+  book that history as growth. So when a source's report is at its cap, a *first
+  sighting only sets a baseline* (its first, usually small, report is not
+  counted). Below the cap a new entry is genuinely new and counts in full.
+- `netra_workload_report_truncated{source}` is 1 while a source is at its cap, so
+  you can tell when to read counts as lower bounds. Sources: `flows`,
+  `connections`, `dns`, `http`.
+
+**There are no per-workload TCP series.** The agent's TCP-health list is capped by
+a retransmission/RTT score — it holds the *worst* sockets, not a sample — so any
+`retransmissions / segments` built from it would be inflated by construction. It is
+left out rather than exported misleadingly.
 
 ### Cardinality is capped, and stable
 
@@ -63,7 +91,7 @@ or double-counted: named totals plus `__other__` equal total growth.
 
 Health of the feature itself: `netra_workload_series_named`,
 `netra_workload_series_max`, `netra_workload_tracker_entries`,
-`netra_workload_tracker_dropped_total`.
+`netra_workload_tracker_dropped_total`, `netra_workload_report_truncated{source}`.
 
 Only rate/increase on these counters is meaningful. Because they start counting
 at the controller's first sight, totals restart at controller failover.
@@ -81,7 +109,7 @@ Helm: `slo.definitions` (a list of the same objects) and `slo.interval`.
 |-------|---------|
 | `name` | `[A-Za-z0-9._-]{1,64}`, unique |
 | `namespace`, `workload` | optional filters; `workload` is `Kind/Name`. Empty matches all |
-| `sli` | `http_5xx`, `dns_failure` or `tcp_retransmit` (below) |
+| `sli` | `http_5xx` or `dns_failure` (below) |
 | `targetPct` | at least 50, below 100 (a number, or a string as `helm --set` produces) |
 | `window` | 1h to 90d; Go durations or days (`30d`, `720h`). Default 30d |
 
@@ -94,9 +122,10 @@ defaulted.
 |-------|------------------|
 | `http_5xx` | non-5xx responses / responses seen — **cleartext HTTP/1 only** |
 | `dns_failure` | queries answered without an error rcode / queries — cleartext UDP/53 |
-| `tcp_retransmit` | segments not retransmitted / segments sent — a packet-loss proxy |
 
-**There is no latency SLI.** Netra sees counters and per-flow averages, not
+**There is no TCP or latency SLI.** `tcp_retransmit` was removed: it would be computed
+from the agent's worst-sockets-only TCP report and read systematically high.
+There is no latency SLI either: Netra sees counters and per-flow averages, not
 per-request durations, so it cannot say "99% of requests under 200ms". `http_5xx`
 sees no HTTPS, HTTP/2 or gRPC (see `docs/l7-metadata.md`); a workload speaking
 only those shows no data. `netra_slo_has_data` and `hasData` exist so an empty SLO

@@ -20,13 +20,16 @@ import (
 // SLI names an SLO may select. Each is a good/total ratio built from counters
 // Netra genuinely has; none is a latency SLI, because Netra sees counters and
 // averages, not per-request durations.
+//
+// There is deliberately no TCP-retransmit SLI: the agent reports the sockets
+// with the WORST retransmission/RTT scores (capped at 1000), so retransmissions
+// over segments computed from that report would be inflated by construction.
 const (
-	SLIHTTP5xx       = "http_5xx"       // errors: 5xx responses; total: HTTP/1 responses seen
-	SLIDNSFailure    = "dns_failure"    // errors: non-zero rcode; total: DNS queries
-	SLITCPRetransmit = "tcp_retransmit" // errors: retransmissions; total: segments sent
+	SLIHTTP5xx    = "http_5xx"    // errors: 5xx responses; total: HTTP/1 responses seen
+	SLIDNSFailure = "dns_failure" // errors: non-zero rcode; total: DNS queries
 )
 
-var validSLIs = map[string]bool{SLIHTTP5xx: true, SLIDNSFailure: true, SLITCPRetransmit: true}
+var validSLIs = map[string]bool{SLIHTTP5xx: true, SLIDNSFailure: true}
 
 const (
 	// observationBucket coalesces SLO observations. It is also the finest
@@ -158,7 +161,7 @@ func ParseDefinitions(raw string) ([]slo.Definition, error) {
 		}
 		seen[d.Name] = true
 		if !validSLIs[d.SLI] {
-			return nil, fmt.Errorf("%s: sli must be one of %s, %s, %s", where, SLIHTTP5xx, SLIDNSFailure, SLITCPRetransmit)
+			return nil, fmt.Errorf("%s: sli must be %s or %s", where, SLIHTTP5xx, SLIDNSFailure)
 		}
 		if d.TargetPct < 50 || d.TargetPct >= 100 {
 			return nil, fmt.Errorf("%s: targetPct must be at least 50 and below 100, got %v", where, float64(d.TargetPct))
@@ -294,7 +297,6 @@ func (o *Observer) Tick(agents []models.AgentStatus, now time.Time, audit func(m
 		}
 		feed(SLIHTTP5xx, d.V[HTTPResponses], d.V[HTTP5xx])
 		feed(SLIDNSFailure, d.V[DNSQueries], d.V[DNSFailures])
-		feed(SLITCPRetransmit, d.V[TCPSegments], d.V[TCPRetransmissions])
 	}
 
 	if audit == nil {

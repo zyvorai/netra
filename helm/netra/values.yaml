@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.100"
+  tag: "0.27.101"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.100"
+  tag: "0.27.101"
 replicaCount: 1
 ha:
   enabled: false
@@ -229,9 +229,11 @@ metrics:
 # Network SLOs from Netra's own counters, burn-rate alerted (multi-window,
 # Google SRE style) and audited on every state change. Each entry:
 #   {name, namespace, workload ("Kind/Name"), sli, targetPct, window}
-# sli is http_5xx (cleartext HTTP/1 5xx / responses), dns_failure (non-zero
-# rcode / queries) or tcp_retransmit (retransmissions / segments). window takes
-# 1h..90d ("30d", "720h"). Empty namespace/workload matches all.
+# sli is http_5xx (cleartext HTTP/1 5xx / responses) or dns_failure (non-zero
+# rcode / queries). workload uses the canonical form Deployment/<name> (a
+# Deployment's ReplicaSet hash suffix is stripped). window takes 1h..90d ("30d",
+# "720h"). Empty namespace/workload matches all. Agents send top-N snapshots, so
+# counts are lower bounds (see metrics.workloadLabels and docs/workload-metrics-slo.md).
 slo:
   interval: 60s
   definitions: []

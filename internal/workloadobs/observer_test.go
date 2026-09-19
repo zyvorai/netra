@@ -55,7 +55,7 @@ func TestParseDefinitions(t *testing.T) {
 	defs, err := ParseDefinitions(`[
 	  {"name":"checkout","namespace":"shop","workload":"Deployment/checkout","sli":"http_5xx","targetPct":99.9,"window":"30d"},
 	  {"name":"dns.core","sli":"dns_failure","targetPct":99.5,"window":"720h"},
-	  {"name":"net","sli":"tcp_retransmit","targetPct":99}
+	  {"name":"net","sli":"http_5xx","targetPct":99}
 	]`)
 	if err != nil || len(defs) != 3 {
 		t.Fatalf("defs = %+v, err = %v", defs, err)
@@ -79,13 +79,14 @@ func TestParseDefinitions(t *testing.T) {
 		"duplicate":         `[{"name":"a",` + ok + `},{"name":"a",` + ok + `}]`,
 		"no sli":            `[{"name":"a","targetPct":99.9}]`,
 		"unknown sli":       `[{"name":"a","sli":"latency","targetPct":99.9}]`,
-		"target zero":       `[{"name":"a","sli":"http_5xx","targetPct":0}]`,
-		"target 100":        `[{"name":"a","sli":"http_5xx","targetPct":100}]`,
-		"target below 50":   `[{"name":"a","sli":"http_5xx","targetPct":10}]`,
-		"window too short":  `[{"name":"a",` + ok + `,"window":"30m"}]`,
-		"window too long":   `[{"name":"a",` + ok + `,"window":"91d"}]`,
-		"window garbage":    `[{"name":"a",` + ok + `,"window":"forever"}]`,
-		"window zero days":  `[{"name":"a",` + ok + `,"window":"0d"}]`,
+		"tcp_retransmit is biased by construction and is not offered": `[{"name":"a","sli":"tcp_retransmit","targetPct":99.9}]`,
+		"target zero":      `[{"name":"a","sli":"http_5xx","targetPct":0}]`,
+		"target 100":       `[{"name":"a","sli":"http_5xx","targetPct":100}]`,
+		"target below 50":  `[{"name":"a","sli":"http_5xx","targetPct":10}]`,
+		"window too short": `[{"name":"a",` + ok + `,"window":"30m"}]`,
+		"window too long":  `[{"name":"a",` + ok + `,"window":"91d"}]`,
+		"window garbage":   `[{"name":"a",` + ok + `,"window":"forever"}]`,
+		"window zero days": `[{"name":"a",` + ok + `,"window":"0d"}]`,
 	}
 	for name, raw := range bad {
 		if _, err := ParseDefinitions(raw); err == nil {

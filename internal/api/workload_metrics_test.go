@@ -297,3 +297,42 @@ func grepLines(s string, subs ...string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// Agents send top-N snapshots; the gauge is how an operator learns that a
+// source is capped and per-workload counts for it are lower bounds.
+func TestTruncationGaugeIsExportedPerSource(t *testing.T) {
+	o := mustObserver(t, workloadobs.Config{PromSeries: true})
+	small := models.AgentStatus{AgentReport: models.AgentReport{Node: "n1"}}
+	o.Tick([]models.AgentStatus{small}, wt0, nil)
+	out := scrape(t, devServer(t, o))
+	for _, src := range workloadobs.Sources {
+		if want := `netra_workload_report_truncated{source="` + src + `"} 0`; !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+
+	// A flows report at the cap flips exactly that source.
+	full := models.AgentReport{Node: "n1"}
+	for i := range models.ReportCapFlows {
+		full.Stats = append(full.Stats, models.DestinationStat{
+			CgroupID: uint64(i + 1), Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "w",
+			Hook: "egress", Direction: "egress", Protocol: "tcp", DestinationIP: "10.0.0.2", Port: uint16(i%60000 + 1), Packets: 1, Bytes: 1,
+		})
+	}
+	o.Tick([]models.AgentStatus{{AgentReport: full}}, wt0.Add(time.Minute), nil)
+	out = scrape(t, devServer(t, o))
+	if !strings.Contains(out, `netra_workload_report_truncated{source="flows"} 1`) ||
+		!strings.Contains(out, `netra_workload_report_truncated{source="http"} 0`) {
+		t.Fatalf("truncation gauge wrong:\n%s", grepLines(out, "report_truncated"))
+	}
+}
+
+func TestNoTCPWorkloadSeriesAreExported(t *testing.T) {
+	// The agent reports the WORST-retransmitting sockets, so ratios built from it
+	// would be biased; those series must not exist.
+	o := mustObserver(t, workloadobs.Config{PromSeries: true})
+	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {0, 0}})}, wt0, nil)
+	if out := scrape(t, devServer(t, o)); strings.Contains(out, "netra_workload_tcp_") {
+		t.Fatalf("a biased TCP series is exported:\n%s", grepLines(out, "netra_workload_tcp_"))
+	}
+}

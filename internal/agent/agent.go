@@ -2007,8 +2007,8 @@ func (a *Agent) readStats() ([]models.DestinationStat, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Packets > out[j].Packets })
-	if len(out) > 1000 {
-		out = out[:1000]
+	if len(out) > models.ReportCapFlows {
+		out = out[:models.ReportCapFlows]
 	}
 	return out, nil
 }
@@ -2279,8 +2279,8 @@ func (a *Agent) readDNSHealth() ([]models.DNSHealthStat, error) {
 		}
 		return out[i].MaxLatencyUS > out[j].MaxLatencyUS
 	})
-	if len(out) > 500 {
-		out = out[:500]
+	if len(out) > models.ReportCapDNS {
+		out = out[:models.ReportCapDNS]
 	}
 	return out, nil
 }
@@ -2364,8 +2364,8 @@ func (a *Agent) readHTTPStatus() ([]models.HTTPStatusStat, error) {
 		}
 		return out[i].Count > out[j].Count
 	})
-	if len(out) > 1000 {
-		out = out[:1000]
+	if len(out) > models.ReportCapHTTPStatus {
+		out = out[:models.ReportCapHTTPStatus]
 	}
 	return out, nil
 }
@@ -2395,8 +2395,8 @@ func (a *Agent) readConnectionAttempts() ([]models.ConnectionAttemptStat, error)
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Attempts > out[j].Attempts })
-	if len(out) > 2000 {
-		out = out[:2000]
+	if len(out) > models.ReportCapConnAttempts {
+		out = out[:models.ReportCapConnAttempts]
 	}
 	return out, nil
 }

@@ -44,6 +44,14 @@ func (s *Server) writeWorkloadMetrics(w http.ResponseWriter) {
 			}
 			fmt.Fprintf(w, "%s{namespace=\"%s\",workload=\"%s\"} %d\n", name, workloadobs.OtherLabel, workloadobs.OtherLabel, snap.Other[c])
 		}
+		fmt.Fprint(w, "# HELP netra_workload_report_truncated 1 when a node agent's latest report for this source hit its entry cap. Agents send top-N snapshots, so per-workload counts for a capped source are lower bounds.\n# TYPE netra_workload_report_truncated gauge\n")
+		for _, src := range workloadobs.Sources {
+			v := 0
+			if snap.Truncated[src] {
+				v = 1
+			}
+			fmt.Fprintf(w, "netra_workload_report_truncated{source=\"%s\"} %d\n", src, v)
+		}
 		metricGauge(w, "netra_workload_series_named", "Workloads currently exported with their own series (excludes __other__).", float64(len(snap.Named)))
 		metricGauge(w, "netra_workload_series_max", "Cap on named workloads (NETRA_METRICS_WORKLOAD_MAX).", float64(snap.MaxNamed))
 		metricGauge(w, "netra_workload_tracker_entries", "Raw agent counter entries the workload tracker holds state for.", float64(snap.Entries))
