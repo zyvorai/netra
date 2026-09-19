@@ -101,7 +101,12 @@ export default function EBPF() {
   // should not erase an error the user hasn't had a chance to see yet, and a
   // transient poll failure shouldn't flash a scary banner every 5s. Explicit
   // loads (initial mount, after a mutating action) still surface load errors.
-  const load = (silent?: boolean) => Promise.all([
+  // allSettled, not all: this page is the emergency control, so the rules (config) must render
+  // even when an optional feed is down. /api/v1/ebpf/workloads needs the Kubernetes API; with
+  // Promise.all its failure left the whole page unpopulated (no rules, no lease state) on a
+  // controller that had lost the API server. Each feed applies on its own; the first failure is
+  // still shown, and a failed config load is reported as such.
+  const load = (silent?: boolean) => Promise.allSettled([
     api<any>('/api/v1/ebpf/config'),
     api<any>('/api/v1/agents'),
     api<any>('/api/v1/ebpf/capabilities'),
@@ -111,10 +116,20 @@ export default function EBPF() {
     api<any>('/api/v1/ebpf/rules'),
     api<any>('/api/v1/ebpf/ipv6?limit=50'),
     api<any>('/api/v1/ebpf/interfaces?limit=10'),
-  ]).then(([c, a, k, w, t, sd, rl, i6, ifl]) => {
-    setCfg(c); setAgents(a.items || []); setCaps(k); setWorkloads(w.items || []); setTopology(t.items || []); setShieldDiag(sd); setRuleList(rl.items || []); setIpv6Diag(i6); setIfaceFlows(ifl.nodes || []);
-    if (!silent) setErr('');
-  }).catch(e => { if (!silent) setErr(String(e)); });
+  ]).then((rs) => {
+    const val = (i: number): any => (rs[i].status === 'fulfilled' ? (rs[i] as PromiseFulfilledResult<any>).value : undefined);
+    if (val(0) !== undefined) setCfg(val(0));
+    if (val(1) !== undefined) setAgents(val(1).items || []);
+    if (val(2) !== undefined) setCaps(val(2));
+    if (val(3) !== undefined) setWorkloads(val(3).items || []);
+    if (val(4) !== undefined) setTopology(val(4).items || []);
+    if (val(5) !== undefined) setShieldDiag(val(5));
+    if (val(6) !== undefined) setRuleList(val(6).items || []);
+    if (val(7) !== undefined) setIpv6Diag(val(7));
+    if (val(8) !== undefined) setIfaceFlows(val(8).nodes || []);
+    const failed = rs.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (!silent) setErr(failed.length ? String(failed[0].reason) : '');
+  });
 
   useEffect(() => { load(); const t = setInterval(() => load(true), 5000); return () => clearInterval(t); }, []);
 

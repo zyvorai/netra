@@ -26,7 +26,11 @@ export default function Overview() {
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    Promise.all([
+    // allSettled, not all: /api/v1/insights/summary answers 502 when the controller cannot reach the
+    // Kubernetes API, and with Promise.all that one failure zeroed every board on the landing page
+    // (0 agents, no health score) although the agent feeds were healthy. Each feed applies on its
+    // own; the first failure is still shown.
+    Promise.allSettled([
       api('/api/v1/status'),
       api('/api/v1/ebpf/summary'),
       api('/api/v1/ebpf/health?limit=1'),
@@ -35,19 +39,19 @@ export default function Overview() {
       api('/api/v1/ebpf/path?limit=1'),
       api('/api/v1/ebpf/drops?limit=1'),
       api<{ summary?: { on?: number; off?: number } }>('/api/v1/features'),
-    ])
-      .then(([s, o, h, l, i, pathDiag, dropDiag, feats]) => {
-        setData(s);
-        setObs(o);
-        setHealth(h);
-        setL7(l);
-        setInsights(i);
-        setPath(pathDiag);
-        setDrops(dropDiag);
-        setFeatSummary(feats?.summary || null);
-        setErr('');
-      })
-      .catch((e) => setErr(String(e)));
+    ]).then((rs) => {
+      const val = (n: number): any => (rs[n].status === 'fulfilled' ? (rs[n] as PromiseFulfilledResult<any>).value : undefined);
+      if (val(0) !== undefined) setData(val(0));
+      if (val(1) !== undefined) setObs(val(1));
+      if (val(2) !== undefined) setHealth(val(2));
+      if (val(3) !== undefined) setL7(val(3));
+      if (val(4) !== undefined) setInsights(val(4));
+      if (val(5) !== undefined) setPath(val(5));
+      if (val(6) !== undefined) setDrops(val(6));
+      if (val(7) !== undefined) setFeatSummary(val(7)?.summary || null);
+      const failed = rs.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      setErr(failed.length ? String(failed[0].reason) : '');
+    });
   }, []);
 
   const fp = data?.fastPath;
