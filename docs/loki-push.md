@@ -30,7 +30,9 @@ So the labels are a fixed, bounded set — `job`, `class`, `severity` (from a fi
 vocabulary), `node` (one per cluster node) and your static labels — and every
 high-cardinality field stays inside the line. The label API of a real Loki shows
 exactly `class cluster job node service_name severity` after pushes of many
-distinct IPs and targets (`service_name` is added by Loki itself).
+distinct IPs and targets (`service_name` is added by Loki itself). Loki 3 also
+shows a `detected_level` field on query results (derived from `severity`); it is
+Loki's own metadata, not an index label Netra sets.
 
 ## Configuration
 
@@ -110,6 +112,11 @@ Shared with the OTLP exporter (`internal/pushfeed`):
   `| json` works, the label set is bounded, another tenant sees nothing, and events
   made while Loki was down arrive after it returns. It needs a Loki binary
   (`LOKI_BIN`); CI installs a pinned, checksum-verified release.
+
+It was also run on a real K3s cluster: the live controller pushed its 59 existing
+audit events to an in-cluster Loki in one request (no resends across many cycles),
+all valid JSON in two streams (info/warning), with the tenant and static label
+applied and another tenant seeing nothing.
 
 Behaviour of the classification above was measured against Loki 3.7.8 (204 on
 success and gzip; 400 for an entry too old, and for an over-long line; 422 for an
