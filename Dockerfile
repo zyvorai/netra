@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS web
+FROM node:25-bookworm-slim AS web
 WORKDIR /src
 # The lockfile is copied and `npm ci` used so the build resolves exactly what CI
 # tested: an unlocked `npm install` floats @novnc/novnc to a release whose
