@@ -49,19 +49,16 @@ cc -std=c11 -O2 -Wall -Wextra -Werror bpf/tests/abi_layout_test.c -o "${OUT}/net
 "${OUT}/netra-abi-layout-test"
 
 echo "==> compile BPF objects → ${OUT}"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -mllvm -bpf-stack-size=1024 \
-  -c bpf/netra_tc.c -o "${OUT}/netra_tc.o"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -c bpf/netra_edge_intel.c -o "${OUT}/netra_edge_intel.o"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -c bpf/netra_capture.c -o "${OUT}/netra_capture.o"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -c bpf/netra_tlsfp.c -o "${OUT}/netra_tlsfp.o"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -c bpf/netra_tcpevents.c -o "${OUT}/netra_tcpevents.o"
-clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
-  -c bpf/netra_dropinfo.c -o "${OUT}/netra_dropinfo.o"
+# Every bpf/netra_*.c is compiled, so a new sensor cannot be added and forgotten
+# here. netra_tc.c alone needs the larger stack estimate (see Dockerfile.agent).
+for src in bpf/netra_*.c; do
+  name="$(basename "$src" .c)"
+  extra=()
+  [[ "$name" == "netra_tc" ]] && extra=(-mllvm -bpf-stack-size=1024)
+  echo "    ${src}"
+  clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" \
+    ${extra[@]+"${extra[@]}"} -c "$src" -o "${OUT}/${name}.o"
+done
 
 if [[ "$SKIP_INTEGRATION" == "1" ]]; then
   echo "==> SKIP_INTEGRATION=1 — compiled objects only"
@@ -83,5 +80,38 @@ NETRA_BPF_TLSFP_TEST_OBJECT="${OUT}/netra_tlsfp.o" \
 NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
   "$BIN" -test.v
+
+# Mutation guard. netra_dropinfo.c must never invent a tuple for a packet that
+# is not IP; TestDropInfoNonIPFrame* proves that. This proves the test still
+# *bites*: the same program with the safety check removed (family guessed from
+# the header bytes) must make it fail. A test that passes on the mutant has
+# stopped testing anything.
+if [[ -e /sys/kernel/btf/vmlinux ]]; then
+  echo "==> mutation guard: dropinfo family-guessing mutant must fail the non-IP test"
+  base_log="${OUT}/dropinfo-nonip-base.log"
+  NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
+    "$BIN" -test.v -test.run 'TestDropInfoNonIPFrame' >"$base_log" 2>&1 || { cat "$base_log"; exit 1; }
+  if ! grep -q -- '--- PASS: TestDropInfoNonIPFrame' "$base_log"; then
+    echo "    skipped: the non-IP test did not run on this host (cannot inject a frame on lo)"
+  else
+    mut_src="${OUT}/netra_dropinfo_mut.c"
+    sed 's/    if (ethertype == ETH_P_IP_HOST) {/    if (ethertype == ETH_P_IP_HOST || ethertype != ETH_P_IPV6_HOST) {/' \
+      bpf/netra_dropinfo.c >"$mut_src"
+    if cmp -s bpf/netra_dropinfo.c "$mut_src"; then
+      echo "mutation guard is stale: the mutated line no longer exists in bpf/netra_dropinfo.c" >&2
+      exit 1
+    fi
+    clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" -c "$mut_src" -o "${OUT}/netra_dropinfo_mut.o"
+    if NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo_mut.o" \
+      "$BIN" -test.v -test.run 'TestDropInfoNonIPFrame' >"${OUT}/dropinfo-nonip-mut.log" 2>&1; then
+      cat "${OUT}/dropinfo-nonip-mut.log"
+      echo "MUTANT SURVIVED: TestDropInfoNonIPFrame passes with the ethertype check removed" >&2
+      exit 1
+    fi
+    echo "    mutant killed (test failed as it must)"
+  fi
+else
+  echo "==> mutation guard skipped: kernel has no BTF"
+fi
 
 echo "==> PASS ci-ebpf-tests"

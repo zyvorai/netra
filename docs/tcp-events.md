@@ -112,6 +112,9 @@ API's flow list.
 - Parser and layout logic (`internal/tpformat`, `internal/tcpevents`) are unit-tested against
   format files captured from a real Linux 6.8 kernel, including the sibling-layout difference.
 - Aggregation, staleness and metrics: `internal/api/tcp_events_test.go`.
+- `./scripts/ci-kernel-sensors-unit.sh` (CI job `go`) is the unit + `-race` gate for all of the
+  above, with a minimum test count per step. `./scripts/ci-agent-image.sh` (CI job
+  `agent-image`) builds the agent image and checks `netra_tcpevents.o` shipped in it.
 
 Kernel-level behaviour was run on Ubuntu 24.04 (Linux 6.8, aarch64) with clang 18. Other
 kernels are covered by the layout parser rather than by a run; the CI runner adds one more.

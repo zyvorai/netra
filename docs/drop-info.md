@@ -106,6 +106,9 @@ updates per packet, not a ring buffer's worth of events.
   the family from the bytes fabricates a tuple and that test fails); a kernel without BTF
   and a record layout it cannot read safely are refused with the reason. The BTF tests skip
   on a runner kernel that has none.
+- `./scripts/ci-kernel-sensors-unit.sh` (CI job `go`) runs those unit tests with `-race` and a
+  minimum test count; `./scripts/ci-agent-image.sh` (CI job `agent-image`) checks
+  `netra_dropinfo.o` shipped in the agent image; the `ebpf` job also runs a mutation guard.
 - Layout, reason-name and kallsyms parsing are unit-tested against a real Linux 6.8 format
   file and kallsyms shapes; aggregation, staleness and metric bounds in `internal/api`.
 

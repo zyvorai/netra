@@ -43,6 +43,13 @@ jobs:
       run: ./scripts/ci-p1-p5-unit.sh
     - name: TLS fingerprint unit + race (scripted)
       run: ./scripts/ci-tlsfp-unit.sh
+    - name: Kernel sensors (TCP events, drop attribution) unit + race (scripted)
+      # tracepoint format parsing against real 6.8 files, layouts, reason
+      # names, kallsyms, agent modes, controller aggregation and metric bounds;
+      # asserts a minimum test count per step so a renamed test cannot silently
+      # drop out. The kernel half is the `ebpf` job. Same command locally:
+      # ./scripts/ci-kernel-sensors-unit.sh
+      run: ./scripts/ci-kernel-sensors-unit.sh
     - name: OIDC login + RBAC + metrics-token unit + race (scripted)
       # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
       # the role table over the real route set, spoof-proof audit actor and
@@ -88,6 +95,14 @@ jobs:
       # the broader package race batch above.
       run: go test ./internal/alert/... ./internal/capture/... -run 'ShouldTrigger|AutoCapture|ArtifactStore|ParseAutoRequestor' -count=1
     - run: go vet ./...
+    - name: Whole module builds off Linux and for arm64
+      # The sensors have Linux-only loaders and stubs elsewhere (and the release
+      # ships arm64 images); CI runs only on linux/amd64, so a break on the
+      # other side would otherwise surface on a developer's Mac or at release.
+      run: |
+        GOOS=darwin GOARCH=arm64 go build ./...
+        GOOS=linux GOARCH=arm64 go build ./...
+        GOOS=linux GOARCH=arm64 go vet -tags 'linux bpfintegration' ./bpf/...
     - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor ./cmd/netra-mcp
   web:
     runs-on: ubuntu-latest
@@ -163,6 +178,35 @@ jobs:
         fi
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set agent.tlsfp=off >/tmp/netra-tlsfp-off.yaml
         awk '/name: NETRA_TLSFP$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-tlsfp-off.yaml
+    - name: Agent kernel sensors are wired into the chart (tracefs mount, modes)
+      # Without the host tracefs mount a container's /sys has no tracefs, and
+      # both the TCP event sensors and the kfree_skb drop-reason sensor report
+      # "unavailable" on a real cluster; nothing else would notice.
+      run: |
+        grep -q 'name: NETRA_TCP_EVENTS' /tmp/netra.yaml
+        awk '/name: NETRA_TCP_EVENTS$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        grep -q 'name: NETRA_DROP_INFO' /tmp/netra.yaml
+        awk '/name: NETRA_DROP_INFO$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        grep -q 'mountPath: /sys/kernel/tracing' /tmp/netra.yaml
+        grep -q 'path: /sys/kernel/tracing' /tmp/netra.yaml
+        # The mount is read-only.
+        awk '/mountPath: \/sys\/kernel\/tracing/{getline; if ($0 !~ /readOnly: true/) exit 1}' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.hostTracefs=false --set agent.tcpEvents=off --set agent.dropInfo=off >/tmp/netra-sensors-off.yaml
+        if grep -q '/sys/kernel/tracing' /tmp/netra-sensors-off.yaml; then
+          echo "agent.hostTracefs=false unexpectedly rendered the tracefs mount" >&2
+          exit 1
+        fi
+        awk '/name: NETRA_TCP_EVENTS$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-sensors-off.yaml
+        awk '/name: NETRA_DROP_INFO$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-sensors-off.yaml
+        # The plain manifest mounts it too.
+        grep -q 'mountPath: /sys/kernel/tracing' deploy/agent.yaml
+    - name: Controller memory limit leaves room for the flow history (OOM regression)
+      # 0.27.102 shipped 256Mi and the controller was OOM-killed every ~12
+      # minutes on a real cluster. netrad now derives Go's soft limit from the
+      # cgroup limit, so the limit must stay a real, sizeable number.
+      run: |
+        grep -q 'memory: 512Mi' /tmp/netra.yaml
     - name: OTLP push is off by default and validated when on
       run: |
         if grep -q 'NETRA_OTLP' /tmp/netra.yaml; then
@@ -470,6 +514,17 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iperf3 iproute2 openssl
     - name: TLS fingerprint openssl + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlsfp-smoke.sh
+  agent-image:
+    # Builds Dockerfile.agent with the image's own clang and checks what
+    # shipped: the agent binary and a BPF object for every bpf/netra_*.c. A
+    # sensor added under bpf/ but not to the Dockerfile builds, passes every
+    # unit test, and ships an agent that quietly never loads it.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the agent image and verify its BPF objects (scripted)
+      # Same command locally: ./scripts/ci-agent-image.sh
+      run: ./scripts/ci-agent-image.sh
   kind-e2e:
     # Real-cluster install of the chart (kind): RBAC, the TLS init container,
     # probes and auth enforcement — things `helm template` cannot catch. The
