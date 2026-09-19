@@ -91,20 +91,22 @@ updates per packet, not a ring buffer's worth of events.
   that cannot get a slot at all is counted in `mapFull`.
 - **Top-N in reports:** 50 flows and 30 sites per node. Building them reads every entry of the
   flow table once per report (two syscalls per entry). Measured with 12 000 flows in the table:
-  about 16 ms per snapshot on a 4-vCPU VM. On a real node with the table nearly full (15 600
+  about 16 ms per snapshot on a 4-vCPU VM and 36 ms on a shared CI runner (55 ms for the TCP-event
+  table). On a real node with the table nearly full (15 600
   entries) and the sensors running, tracing 40 s of the agent's `bpf()` calls showed this sensor
   and the TCP-event sensor together made about 7% of them; the rest are the agent's older flow
   maps. `TestDropInfoSnapshotCostWithAFullFlowTable` bounds the cost in CI.
-- **Cost.** The program runs on every dropped packet. Measured on Linux 6.8 (aarch64, 4 vCPU
-  VM) with the kernel's own BPF run-time accounting, generating 100 000 and 500 000 real drops
-  (UDP to a closed port on loopback): **about 100 ns per drop** (94 and 104 ns). On a loop that
-  does nothing but generate drops, the worst case, it added about 150 ns to a ~1.1 µs
-  send-and-drop, roughly 14%. At 100 000 drops per second that is on the order of 1% of one
-  core. Normal traffic is not affected: the program runs only for dropped packets. Caveats: one
-  VM and loopback, not a NIC under load; the accounting itself adds a little; and a host that
-  drops millions of packets per second (a DDoS) will pay proportionally, so use
-  `NETRA_DROP_INFO=off` there. `TestDropInfoCostPerDrop` re-measures this on every CI run and
-  fails on an order-of-magnitude regression (over 50 µs per drop).
+- **Cost.** The program runs on every dropped packet. Measured with the kernel's own BPF
+  run-time accounting, generating real drops (UDP to a closed port on loopback):
+  **about 100 ns per drop** on a 4-vCPU aarch64 VM (Linux 6.8), and **about 540 ns** on a
+  shared GitHub Actions runner (Linux 6.17, x86_64), which is the more conservative figure. On a
+  loop that does nothing but generate drops, the worst case, it added 150 to 700 ns to a
+  send-and-drop, 9 to 14%. At 100 000 drops per second that is roughly 1 to 5% of one core.
+  Normal traffic is not affected: the program runs only for dropped packets. Caveats: loopback,
+  not a NIC under load; the accounting itself adds a little; and a host that drops millions of
+  packets per second (a DDoS) will pay proportionally, so use `NETRA_DROP_INFO=off` there.
+  `TestDropInfoCostPerDrop` re-measures this on every CI run and fails on an order-of-magnitude
+  regression (over 50 µs per drop).
 
 ## Verification
 
