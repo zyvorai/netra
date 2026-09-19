@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.110"
+  tag: "0.27.111"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.110"
+  tag: "0.27.111"
 replicaCount: 1
 ha:
   enabled: false
@@ -210,6 +210,30 @@ tls:
   # Bypass verify for the chart-generated self-signed cert (agent → controller).
   # Prefer a trusted cert/CA in hardened environments and set this false.
   agentInsecureSkipVerify: true
+# Mutual TLS between the agents and the controller (docs/agent-mtls.md).
+# Off by default: nothing about an existing install changes until you set a mode.
+#   optional  the controller verifies a client certificate when an agent presents
+#             one and reports which agents did (/api/v1/agents "mtls": true and
+#             netra_agent_mtls_reports_total), but still accepts agents without.
+#             Use it to move agents over and watch it happen.
+#   required  agent-only requests (report, capture stream, agent config) also need
+#             a certificate signed by the CA below, in addition to the agent key.
+#             People (browser, netractl, API keys) are never asked for one.
+# Needs tls.enabled. The certificate is shared by all agents: it proves "an agent",
+# not which node, exactly as the agent key does.
+mtls:
+  mode: "off"
+  # A Secret holding ca.crt (the CA that signs agent certificates), tls.crt and
+  # tls.key (the agents' client certificate). The controller mounts only ca.crt.
+  secretName: ""
+  # Or have cert-manager issue and renew the agents' certificate. The issuer must
+  # be a CA issuer (its ca.crt is copied into the Secret); a self-signed or ACME
+  # issuer does not provide one.
+  certManager:
+    enabled: false
+    issuerRef: {name: "", kind: Issuer, group: cert-manager.io}
+    duration: 2160h     # 90 days
+    renewBefore: 360h   # agents pick up the renewed files without a restart
 metrics:
   enabled: true
   prometheusAnnotations: false

@@ -44,6 +44,11 @@ jobs:
       run: ./scripts/ci-p1-p5-unit.sh
     - name: TLS fingerprint unit + race (scripted)
       run: ./scripts/ci-tlsfp-unit.sh
+    - name: Agent mutual TLS unit + race (scripted)
+      # Real TLS listeners and certificates: handshake by issuer/usage/expiry,
+      # optional vs required, rotation, the API policy and the agent's client.
+      # Same command locally: ./scripts/ci-mtls-unit.sh
+      run: ./scripts/ci-mtls-unit.sh
     - name: Kernel sensors (TCP events, drop attribution) unit + race (scripted)
       # tracepoint format parsing against real 6.8 files, layouts, reason
       # names, kallsyms, agent modes, controller aggregation and metric bounds;
@@ -258,6 +263,33 @@ jobs:
       # cgroup limit, so the limit must stay a real, sizeable number.
       run: |
         grep -q 'memory: 512Mi' /tmp/netra.yaml
+    - name: Agent mTLS is off by default and cannot be half-configured
+      # A default render must carry nothing of it, and every unsafe combination must
+      # fail at template time, not leave an install whose agents the controller rejects.
+      run: |
+        A="--set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key"
+        if grep -qE 'NETRA_AGENT_MTLS|NETRA_CLIENT_CERT|NETRA_AGENT_CLIENT_CA|agent-mtls' /tmp/netra.yaml; then
+          echo "mTLS rendered by default" >&2; exit 1
+        fi
+        for bad in "--set mtls.mode=on" \
+                   "--set mtls.mode=required" \
+                   "--set mtls.mode=required --set mtls.secretName=x --set tls.enabled=false" \
+                   "--set mtls.mode=required --set mtls.certManager.enabled=true"; do
+          if helm template test helm/netra $A $bad >/dev/null 2>&1; then
+            echo "unsafe mTLS values rendered: $bad" >&2; exit 1
+          fi
+        done
+        helm template test helm/netra $A --set mtls.mode=required --set mtls.secretName=agent-mtls >/tmp/netra-mtls.yaml
+        awk '/name: NETRA_AGENT_MTLS,/{ok=1} END{exit !ok}' /tmp/netra-mtls.yaml
+        grep -q 'NETRA_AGENT_CLIENT_CA, value: /mtls/ca.crt' /tmp/netra-mtls.yaml
+        grep -q 'NETRA_CLIENT_CERT, value: /mtls/tls.crt' /tmp/netra-mtls.yaml
+        # The controller must never mount the agents' private key: only ca.crt.
+        awk '/name: agent-mtls-ca$/{f=1} f&&/items:/{print; exit}' /tmp/netra-mtls.yaml | grep -q 'ca.crt'
+        if awk '/name: agent-mtls-ca$/{f=1} f&&/tls.key/{found=1} /^---/{f=0} END{exit !found}' /tmp/netra-mtls.yaml; then
+          echo "the controller mounts the agents' private key" >&2; exit 1
+        fi
+        helm template test helm/netra $A --set mtls.mode=optional --set mtls.certManager.enabled=true \
+          --set mtls.certManager.issuerRef.name=ca-issuer | grep -q 'kind: Certificate'
     - name: OTLP push is off by default and validated when on
       run: |
         if grep -q 'NETRA_OTLP' /tmp/netra.yaml; then
@@ -615,6 +647,21 @@ jobs:
     - name: TLS plaintext sampling end to end (scripted)
       # Same command locally: sudo ./scripts/ci-tlssample-smoke.sh
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlssample-smoke.sh
+  mtls-smoke:
+    # The real netrad (every unsafe mTLS setting refused at startup; required mode
+    # enforcing certificate, issuer and key usage) and the real agent, with and
+    # without a client certificate, and with the certificate renewed under it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev openssl
+    - name: Agent to controller mutual TLS end to end (scripted)
+      # Same command locally: sudo ./scripts/ci-mtls-smoke.sh (controller half runs on any OS)
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-mtls-smoke.sh
   l7sample-smoke:
     # The real agent and controller with NETRA_L7_SAMPLE=required, fake Redis and
     # PostgreSQL servers on loopback, real traffic: exact per-role operation counts

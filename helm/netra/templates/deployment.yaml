@@ -80,6 +80,10 @@ spec:
         - {name: NETRA_TLS_CERT, value: /certs/tls.crt}
         - {name: NETRA_TLS_KEY, value: /certs/tls.key}
         {{- end }}
+        {{- if ne (include "netra.mtlsMode" .) "off" }}
+        - {name: NETRA_AGENT_MTLS, value: {{ include "netra.mtlsMode" . | quote }}}
+        - {name: NETRA_AGENT_CLIENT_CA, value: /mtls/ca.crt}
+        {{- end }}
         - name: NETRA_CILIUM_ENABLED
           value: {{ .Values.cilium.enabled | quote }}
         - name: NETRA_WORKLOAD_CONSOLE
@@ -391,6 +395,9 @@ spec:
         {{- if .Values.tls.enabled }}
         - {name: tls-certs, mountPath: /certs, readOnly: true}
         {{- end }}
+        {{- if ne (include "netra.mtlsMode" .) "off" }}
+        - {name: agent-mtls-ca, mountPath: /mtls, readOnly: true}
+        {{- end }}
         {{- if .Values.persistence.enabled }}
         - name: state
           mountPath: /var/lib/netra
@@ -443,6 +450,12 @@ spec:
       volumes:
       {{- if .Values.tls.enabled }}
       - {name: tls-certs, emptyDir: {}}
+      {{- end }}
+      {{- if ne (include "netra.mtlsMode" .) "off" }}
+      - name: agent-mtls-ca
+        secret:
+          secretName: {{ include "netra.mtlsSecret" . }}
+          items: [{key: ca.crt, path: ca.crt}]   # never the agents' private key
       {{- end }}
       {{- if .Values.persistence.enabled }}
       - name: state

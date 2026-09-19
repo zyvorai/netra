@@ -40,6 +40,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/l7"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/mtls"
 	"github.com/zyvorai/netra/internal/nsdrift"
 	"github.com/zyvorai/netra/internal/observability"
 	"github.com/zyvorai/netra/internal/oidcauth"
@@ -64,6 +65,7 @@ type Server struct {
 	chatopsTeamsHandler http.Handler
 	apiKey              string
 	agentKey            string
+	agentMTLS           mtls.Mode // agent client-certificate policy (NETRA_AGENT_MTLS)
 	chatopsAPIKey       string
 	metricsToken        string
 	oidc                *oidcauth.Verifier
@@ -95,6 +97,15 @@ func New(log *slog.Logger, k *kube.Client, h *hubble.Client, st *store.Store) *S
 	ciliumEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_CILIUM_ENABLED")), "true")
 	consoleEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_WORKLOAD_CONSOLE")), "true")
 	s := &Server{log: log, kube: k, hubble: h, store: st, apiKey: os.Getenv("NETRA_API_KEY"), agentKey: os.Getenv("NETRA_AGENT_KEY"), webDir: os.Getenv("NETRA_WEB_DIR"), agentStaleAfter: staleAfter, requirePreflight: requirePreflight, ciliumEnabled: ciliumEnabled, consoleEnabled: consoleEnabled, metricsData: &telemetry{}, captureHub: newCaptureHub(), intelFeed: &intel.Feed{}, tlsFP: tlsfp.NewDetector(2048), workloadInventory: newWorkloadInventoryCache()}
+
+	// netrad refuses to start on a bad NETRA_AGENT_MTLS; if this runs anyway, fail
+	// closed rather than quietly turning a security setting off.
+	mode, modeErr := mtls.ParseMode(os.Getenv("NETRA_AGENT_MTLS"))
+	if modeErr != nil {
+		log.Error("invalid NETRA_AGENT_MTLS; requiring client certificates", "error", modeErr)
+		mode = mtls.Required
+	}
+	s.agentMTLS = mode
 
 	// ChatOps outbound trust is shared across every provider: every command
 	// is a thin HTTP client of this same process's own /api/v1/* endpoints
@@ -180,13 +191,13 @@ func (s *Server) WithArtifacts(a *capture.ArtifactStore) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.110"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.111"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.110"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.27.111"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.110"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.111"})
 	})
 	mux.Handle("GET /metrics", s.metricsAuth(http.HandlerFunc(s.metrics)))
 	if s.chatopsHandler != nil {
@@ -467,6 +478,11 @@ func (s *Server) agentAuth(next http.Handler) http.Handler {
 			errorJSON(w, 401, "invalid agent key")
 			return
 		}
+		if !mtls.Allows(s.agentMTLS, r) {
+			s.metricsData.mtlsRejected.Add(1)
+			errorJSON(w, 401, "a verified agent client certificate is required")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -479,6 +495,11 @@ func (s *Server) authOrAgent(next http.Handler) http.Handler {
 		p, res := s.authenticate(r)
 		apiOK := res == authOK && p.role.AtLeast(oidcauth.RoleViewer)
 		agentOK := s.agentKey != "" && secureEq(r.Header.Get("X-Netra-Agent-Key"), s.agentKey)
+		if agentOK && !apiOK && !mtls.Allows(s.agentMTLS, r) {
+			// A correct agent key without the required certificate is not an agent.
+			s.metricsData.mtlsRejected.Add(1)
+			agentOK = false
+		}
 		if !apiOK && !agentOK {
 			s.metricsData.authFailures.Add(1)
 			errorJSON(w, 401, "authentication required")
@@ -516,7 +537,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.27.110", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.27.111", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}
@@ -2747,8 +2768,13 @@ func (s *Server) agentReport(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "node is required")
 		return
 	}
+	// Set here, never read from the agent: it records how this report arrived.
+	x.MTLS = mtls.Verified(r)
 	s.store.Report(x)
 	s.metricsData.agentReports.Add(1)
+	if x.MTLS {
+		s.metricsData.mtlsReports.Add(1)
+	}
 	if s.tlsFP != nil {
 		for _, fp := range x.TLSFingerprints {
 			if fp.JA3 == "" {

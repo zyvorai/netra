@@ -1158,7 +1158,10 @@ type AgentReport struct {
 	// diffing state like watchCapChanges' prevCaps — a real blind-spot
 	// window for capability-drift detection that must be surfaced, not
 	// silently under-reported. See internal/capdrift.
-	AgentStartedAt  time.Time          `json:"agentStartedAt,omitempty"`
+	AgentStartedAt time.Time `json:"agentStartedAt,omitempty"`
+	// MTLS is set by the controller, never by the agent: this report arrived over a
+	// connection whose client certificate verified (NETRA_AGENT_MTLS).
+	MTLS            bool               `json:"mtls,omitempty"`
 	Stack           NodeStackStat      `json:"stack,omitempty"`
 	Events          []FastPathEvent    `json:"events"`
 	ObservedAt      time.Time          `json:"observedAt"`

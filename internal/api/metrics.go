@@ -23,6 +23,8 @@ import (
 type telemetry struct {
 	requests           atomic.Uint64
 	authFailures       atomic.Uint64
+	mtlsRejected       atomic.Uint64
+	mtlsReports        atomic.Uint64
 	rbacDenied         atomic.Uint64
 	policyPlans        atomic.Uint64
 	policyApplies      atomic.Uint64
@@ -57,6 +59,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	}
 	metricCounter(w, "netra_http_requests_total", "HTTP requests observed by netrad.", s.metricsData.requests.Load())
 	metricCounter(w, "netra_auth_failures_total", "Rejected API or agent authentication attempts.", s.metricsData.authFailures.Load())
+	metricCounter(w, "netra_agent_mtls_rejected_total", "Agent requests refused for lacking a verified client certificate (NETRA_AGENT_MTLS=required).", s.metricsData.mtlsRejected.Load())
+	metricCounter(w, "netra_agent_mtls_reports_total", "Agent reports received over a connection with a verified client certificate.", s.metricsData.mtlsReports.Load())
 	metricCounter(w, "netra_rbac_denied_total", "Authenticated requests refused because the caller's role was too low.", s.metricsData.rbacDenied.Load())
 	metricCounter(w, "netra_policy_plans_total", "Policy preflight plans requested.", s.metricsData.policyPlans.Load())
 	metricCounter(w, "netra_policy_applies_total", "Non-dry-run CiliumNetworkPolicy applies.", s.metricsData.policyApplies.Load())

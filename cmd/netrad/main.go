@@ -26,6 +26,7 @@ import (
 	"github.com/zyvorai/netra/internal/kube"
 	"github.com/zyvorai/netra/internal/lokipush"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/mtls"
 	"github.com/zyvorai/netra/internal/notify"
 	"github.com/zyvorai/netra/internal/oidcauth"
 	"github.com/zyvorai/netra/internal/otlppush"
@@ -38,7 +39,7 @@ import (
 	"github.com/zyvorai/netra/internal/workloadobs"
 )
 
-const version = "0.27.110"
+const version = "0.27.111"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -51,6 +52,12 @@ func main() {
 		}
 	} else {
 		log.Warn("unauthenticated development mode enabled")
+	}
+
+	// Refuse a bad mTLS setting now, before anything starts, not on the first agent.
+	if _, _, err := mtls.FromEnv(tlsConfigured()); err != nil {
+		log.Error("secure startup refused", "reason", err.Error())
+		os.Exit(1)
 	}
 
 	k, err := kube.NewFromEnvironment()
@@ -1029,6 +1036,11 @@ func electionLoop(
 	}
 }
 
+// tlsConfigured is whether the listener will serve HTTPS.
+func tlsConfigured() bool {
+	return strings.TrimSpace(os.Getenv("NETRA_TLS_CERT")) != "" && strings.TrimSpace(os.Getenv("NETRA_TLS_KEY")) != ""
+}
+
 func runHTTP(ctx context.Context, log *slog.Logger, handler http.Handler, persistent, haMode bool) {
 	s := &http.Server{
 		Addr:              env("NETRA_LISTEN", ":30870"),
@@ -1045,8 +1057,13 @@ func runHTTP(ctx context.Context, log *slog.Logger, handler http.Handler, persis
 	certFile := strings.TrimSpace(os.Getenv("NETRA_TLS_CERT"))
 	keyFile := strings.TrimSpace(os.Getenv("NETRA_TLS_KEY"))
 	tlsOn := certFile != "" && keyFile != ""
-	log.Info("netrad starting", "addr", s.Addr, "version", version, "persistentState", persistent, "ha", haMode, "tls", tlsOn)
-	var err error
+	mode, tlsCfg, err := mtls.FromEnv(tlsOn)
+	if err != nil { // main already refused this; a second check costs nothing
+		log.Error("server", "error", err)
+		return
+	}
+	s.TLSConfig = tlsCfg
+	log.Info("netrad starting", "addr", s.Addr, "version", version, "persistentState", persistent, "ha", haMode, "tls", tlsOn, "agentMTLS", string(mode))
 	if tlsOn {
 		err = s.ListenAndServeTLS(certFile, keyFile)
 	} else {

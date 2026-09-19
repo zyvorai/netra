@@ -39,6 +39,10 @@ spec:
         {{- if and .Values.tls.enabled .Values.tls.agentInsecureSkipVerify }}
         - {name: NETRA_TLS_INSECURE, value: "true"}
         {{- end }}
+        {{- if ne (include "netra.mtlsMode" .) "off" }}
+        - {name: NETRA_CLIENT_CERT, value: /mtls/tls.crt}
+        - {name: NETRA_CLIENT_KEY, value: /mtls/tls.key}
+        {{- end }}
         - name: NETRA_CGROUP_ENABLED
           value: {{ .Values.agent.cgroupEnabled | quote }}
         - name: NETRA_CGROUP_PATH
@@ -106,6 +110,11 @@ spec:
         - name: kmsg
           mountPath: /dev/kmsg
           readOnly: true
+        {{- if ne (include "netra.mtlsMode" .) "off" }}
+        - name: agent-mtls
+          mountPath: /mtls
+          readOnly: true
+        {{- end }}
         {{- if .Values.agent.hostTracefs }}
         - name: tracefs
           mountPath: /sys/kernel/tracing
@@ -124,6 +133,12 @@ spec:
         hostPath:
           path: /dev/kmsg
           type: CharDevice
+      {{- if ne (include "netra.mtlsMode" .) "off" }}
+      - name: agent-mtls
+        secret:
+          secretName: {{ include "netra.mtlsSecret" . }}
+          defaultMode: 256   # 0400
+      {{- end }}
       {{- if .Values.agent.hostTracefs }}
       - name: tracefs
         hostPath:

@@ -39,6 +39,7 @@ import (
 	"github.com/zyvorai/netra/internal/l7sample"
 	"github.com/zyvorai/netra/internal/listenq"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/mtls"
 	"github.com/zyvorai/netra/internal/sslprobe"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
@@ -197,19 +198,31 @@ type Agent struct {
 	// a recent restart, which resets prevCaps and opens a real blind-spot
 	// window for capability-drift detection.
 	startedAt time.Time
+	// tlsErr is a NETRA_CA_FILE / NETRA_CLIENT_CERT problem found in New; Run
+	// returns it rather than starting an agent the controller would reject.
+	tlsErr error
 }
 
 func New(log *slog.Logger) *Agent {
 	server := strings.TrimRight(env("NETRA_SERVER", "http://netra.netra-system.svc:30870"), "/")
 	client := &http.Client{Timeout: 10 * time.Second}
 	wsDialer := *websocket.DefaultDialer
-	if envBool("NETRA_TLS_INSECURE", false) {
-		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // explicit opt-in for chart-generated self-signed cert
-		wsDialer.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+	// NETRA_CA_FILE trusts a private CA for the controller's certificate and
+	// NETRA_CLIENT_CERT/NETRA_CLIENT_KEY present the agent's own (mutual TLS, see
+	// docs/agent-mtls.md). With none of them set this is exactly the old behaviour.
+	// A configured-but-unusable certificate is fatal, not a silent downgrade to an
+	// agent the controller will then reject on every report.
+	tlsCfg, tlsErr := mtls.ClientConfig(env("NETRA_CA_FILE", ""), env("NETRA_CLIENT_CERT", ""), env("NETRA_CLIENT_KEY", ""), envBool("NETRA_TLS_INSECURE", false))
+	if tlsErr != nil {
+		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12} // Run refuses to start; never used
+	}
+	if tlsCfg.InsecureSkipVerify || tlsCfg.RootCAs != nil || tlsCfg.GetClientCertificate != nil {
+		client.Transport = &http.Transport{TLSClientConfig: tlsCfg}
+		wsDialer.TLSClientConfig = tlsCfg.Clone()
 	}
 	return &Agent{
-		wsDialer: &wsDialer,
-		log:      log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
+		wsDialer: &wsDialer, tlsErr: tlsErr,
+		log: log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
 		edgeObject:      env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
 		captureObject:   env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
@@ -231,6 +244,9 @@ func New(log *slog.Logger) *Agent {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	if a.tlsErr != nil {
+		return fmt.Errorf("agent TLS configuration: %w", a.tlsErr)
+	}
 	if err := a.loadAndAttach(); err != nil {
 		return err
 	}
