@@ -121,4 +121,3 @@ func TestTCPEventsSnapshotCostWithAFullFlowTable(t *testing.T) {
 		t.Fatalf("one snapshot takes %v; the agent takes one every few seconds", avg)
 	}
 }
-
