@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Version string sync across duplicated locations
@@ -152,7 +152,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-node@v4
       with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
     # `ci`, not `install`: build from the lockfile, exactly as the Dockerfile does.
@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-node@v4
       with: {node-version: '22', cache: npm, cache-dependency-path: website/package-lock.json}
     - run: npm --prefix website ci
@@ -173,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: azure/setup-helm@v4
     - name: Secure default must reject missing credentials
       run: |
@@ -552,7 +552,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
@@ -586,7 +586,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install iperf3
@@ -601,7 +601,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install iperf3
@@ -615,7 +615,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
@@ -629,7 +629,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang, iperf3, openssl
@@ -644,7 +644,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables python3 openssl
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
@@ -659,7 +659,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
@@ -673,7 +673,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with: {fetch-depth: 0}
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
@@ -687,7 +687,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: govulncheck
@@ -698,7 +698,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-python@v5
       with: {python-version: '3.12'}
     - name: Python unit tests (min count)
@@ -716,7 +716,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: MCP server against a live controller (scripted)
@@ -729,7 +729,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Controller state persistence (scripted)
@@ -742,7 +742,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Alert and export sinks (scripted)
@@ -754,7 +754,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: netra-doctor (scripted)
@@ -767,7 +767,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
@@ -783,7 +783,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
@@ -799,7 +799,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Build the agent image and verify its BPF objects (scripted)
       # Same command locally: ./scripts/ci-agent-image.sh
       run: ./scripts/ci-agent-image.sh
@@ -811,7 +811,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: azure/setup-helm@v4
     - uses: helm/kind-action@v1
       with: {cluster_name: netra-ci}
@@ -860,7 +860,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: OIDC + RBAC against a live netrad
@@ -874,7 +874,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Per-workload metrics + SLO against a live netrad
@@ -887,7 +887,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: azure/setup-helm@v4
     - run: pip install pyyaml
     - name: Install promtool (pinned, checksum-verified)
@@ -909,7 +909,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install Loki (pinned, checksum-verified)
