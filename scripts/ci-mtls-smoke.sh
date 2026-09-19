@@ -13,8 +13,9 @@
 #   people    /healthz and an API-key request need no client certificate.
 #   agent     (Linux, root) the real agent with NETRA_CLIENT_CERT/KEY reports and is
 #             marked "mtls": true; the same agent without them is refused and never
-#             appears; and with the certificate files renewed in place it keeps
-#             reporting without a restart.
+#             appears; and with its certificate files replaced in place (and the
+#             controller restarted trusting only the new CA) the same process
+#             reports again, proving it re-reads them.
 #
 # Usage:
 #   ./scripts/ci-mtls-smoke.sh              # controller half only (any OS)
@@ -92,7 +93,8 @@ refuses "a typo'd mode"                  "${TLS[@]}" NETRA_AGENT_MTLS=requried N
 
 echo "==> start netrad with NETRA_AGENT_MTLS=required"
 netrad "$LOG" "${TLS[@]}" NETRA_AGENT_MTLS=required NETRA_AGENT_CLIENT_CA="$D/agentca.crt" &
-PIDS+=($!)
+NETRAD_PID=$!
+PIDS+=("$NETRAD_PID")
 CURL=(curl -s --max-time 10 --cacert "$D/agentca.crt" --resolve "localhost:${PORT}:127.0.0.1")
 U="https://localhost:${PORT}"
 for _ in $(seq 1 60); do "${CURL[@]}" -o /dev/null "$U/healthz" && break; sleep 0.25; done
@@ -155,7 +157,7 @@ start_agent() { # start_agent <node> <log> <env...>
     NETRA_INTERFACES='' NETRA_XDP_INTERFACES='' "$@" "$BIN/netra-agent" >"$out" 2>&1 &
   AGENT_PID=$!; PIDS+=("$AGENT_PID")
 }
-stop_agent() { kill "$AGENT_PID" 2>/dev/null; for _ in $(seq 1 40); do kill -0 "$AGENT_PID" 2>/dev/null || break; sleep 0.25; done; kill -9 "$AGENT_PID" 2>/dev/null; wait "$AGENT_PID" 2>/dev/null || true; }
+stop_agent() { kill "$AGENT_PID" 2>/dev/null || true; for _ in $(seq 1 40); do kill -0 "$AGENT_PID" 2>/dev/null || break; sleep 0.25; done; kill -9 "$AGENT_PID" 2>/dev/null || true; wait "$AGENT_PID" 2>/dev/null || true; }
 agents() { "${CURL[@]}" -H "Authorization: Bearer ${API_KEY}" "$U/api/v1/agents"; }
 reported() { agents | python3 -c "import json,sys; d=json.load(sys.stdin); a=d['items']; n={x['node']:x for x in a}; x=n.get('$1'); sys.exit(0 if x and x.get('mtls') is $2 else 1)" 2>/dev/null; }
 seen() { agents | python3 -c "import json,sys; d=json.load(sys.stdin); a=d['items']; sys.exit(0 if any(x['node']=='$1' for x in a) else 1)"; }
@@ -175,14 +177,26 @@ ok=0; for _ in $(seq 1 60); do reported ci-cert True && { ok=1; break; }; kill -
 [[ "$ok" == 1 ]] || { tail -n 30 "$D/agent-cert.log" >&2; agents >&2; fail "the agent with a certificate never reported as mtls"; }
 echo "    ci-cert reported, mtls=true"
 
-echo "==> certificate files renewed in place: the same agent keeps reporting, no restart"
-cd "$D"; issue agentca agent2 clientAuth; cd "$ROOT"
+echo "==> certificate replaced in place under a running agent, old certificate no longer trusted"
+# Replacing the files is not enough to prove a reload: the agent's existing TLS
+# connection would keep working with the old certificate. So also restart the
+# controller trusting ONLY a new CA. The agent must reconnect, and it can only be
+# verified if it presents the certificate it re-read from disk.
+cd "$D"; mkca agentca2; issue agentca2 agent2 clientAuth; cd "$ROOT"
 cp "$D/agent2.crt" "$D/live.crt"; cp "$D/agent2.key" "$D/live.key"
-before=$("${CURL[@]}" -H "Authorization: Bearer ${API_KEY}" "$U/metrics" | awk '/^netra_agent_mtls_reports_total /{print $2}')
-sleep 12
-after=$("${CURL[@]}" -H "Authorization: Bearer ${API_KEY}" "$U/metrics" | awk '/^netra_agent_mtls_reports_total /{print $2}')
-kill -0 "$AGENT_PID" 2>/dev/null || fail "the agent died after its certificate was renewed"
-(( after > before )) || fail "the agent stopped reporting after renewal (mtls reports $before -> $after)"
-echo "    mtls reports $before -> $after with the certificate replaced under it"
+kill "$NETRAD_PID" 2>/dev/null || true
+for _ in $(seq 1 40); do kill -0 "$NETRAD_PID" 2>/dev/null || break; sleep 0.25; done
+kill -9 "$NETRAD_PID" 2>/dev/null || true
+LOG="$D/netrad2.log"
+netrad "$LOG" "${TLS[@]}" NETRA_AGENT_MTLS=required NETRA_AGENT_CLIENT_CA="$D/agentca2.crt" &
+NETRAD_PID=$!
+PIDS+=("$NETRAD_PID")
+for _ in $(seq 1 60); do "${CURL[@]}" -o /dev/null "$U/healthz" && break; sleep 0.25; done
+"${CURL[@]}" -o /dev/null "$U/healthz" || fail "the restarted controller never became ready"
+# The old certificate is refused by the new controller (proves the trust really changed).
+if post --cert "$D/agent1.crt" --key "$D/agent1.key" >/dev/null 2>&1; then fail "the old certificate is still trusted after the CA changed"; fi
+ok=0; for _ in $(seq 1 60); do reported ci-cert True && { ok=1; break; }; kill -0 "$AGENT_PID" 2>/dev/null || { tail -n 30 "$D/agent-cert.log" >&2; fail "agent died after its certificate was replaced"; }; sleep 0.5; done
+[[ "$ok" == 1 ]] || { tail -n 30 "$D/agent-cert.log" >&2; agents >&2; fail "the agent never reported to the controller that trusts only the new CA: it did not reload its certificate"; }
+echo "    the same agent process reported with the certificate it re-read from disk"
 
 echo "==> PASS mtls smoke"
