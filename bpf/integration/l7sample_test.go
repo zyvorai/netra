@@ -365,14 +365,30 @@ func TestL7SampleIPv6(t *testing.T) {
 	c := dialNoDelay(t, "tcp6", fmt.Sprintf("[::1]:%d", port))
 	roundTripOnce(t, c, []byte("Q\x00\x00\x00\x0dSELECT 1\x00"))
 
-	got := h.waitFor(t, "an IPv6 query", func(s []captured) bool {
+	// One request is seen twice: leaving the client (issued) and arriving at the
+	// server (served). Wait until the *served* observation is in, not just the first
+	// sample: on a slower kernel the egress sample can be delivered well before the
+	// ingress one, and counting at that moment sees no served request at all.
+	servedQuery := func(s []captured) bool {
+		c := l7sample.NewCounters()
+		v6 := false
 		for _, x := range s {
 			if x.ToServer && x.Src.To4() == nil && len(x.Data) > 0 && x.Data[0] == 'Q' {
+				v6 = true
+			}
+			c.Observe(x.Sample)
+		}
+		if !v6 {
+			return false
+		}
+		for _, p := range c.Snapshot().Protocols {
+			if p.Protocol == "postgres" && p.Role == l7sample.RoleServed && p.Requests >= 1 {
 				return true
 			}
 		}
 		return false
-	})
+	}
+	got := h.waitFor(t, "an IPv6 query seen by the serving side", servedQuery)
 	counters := l7sample.NewCounters()
 	for _, x := range got {
 		if x.Src.To4() != nil {
