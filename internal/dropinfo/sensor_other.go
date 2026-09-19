@@ -8,6 +8,7 @@ package dropinfo
 import (
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/zyvorai/netra/internal/ksym"
 	"github.com/zyvorai/netra/internal/tpformat"
@@ -33,6 +34,9 @@ func Load(Options) (*Sensor, error) { return nil, ErrUnsupported }
 
 // Snapshot always fails off Linux.
 func (*Sensor) Snapshot(int, int) (*Snapshot, error) { return nil, ErrUnsupported }
+
+// Stats always fails off Linux.
+func (*Sensor) Stats() (uint64, time.Duration, error) { return 0, 0, ErrUnsupported }
 
 // Close is a no-op.
 func (*Sensor) Close() error { return nil }

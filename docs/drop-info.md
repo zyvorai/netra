@@ -90,9 +90,16 @@ updates per packet, not a ring buffer's worth of events.
   would lose a site only after 2 048 distinct pairs, far more than a kernel has. An event
   that cannot get a slot at all is counted in `mapFull`.
 - **Top-N in reports:** 50 flows and 30 sites per node.
-- **Cost is not measured.** The program runs on every dropped packet. Nothing here has
-  been measured on a host dropping at a high packet rate; use `NETRA_DROP_INFO=off` if that
-  matters and you cannot test first.
+- **Cost.** The program runs on every dropped packet. Measured on Linux 6.8 (aarch64, 4 vCPU
+  VM) with the kernel's own BPF run-time accounting, generating 100 000 and 500 000 real drops
+  (UDP to a closed port on loopback): **about 100 ns per drop** (94 and 104 ns). On a loop that
+  does nothing but generate drops, the worst case, it added about 150 ns to a ~1.1 µs
+  send-and-drop, roughly 14%. At 100 000 drops per second that is on the order of 1% of one
+  core. Normal traffic is not affected: the program runs only for dropped packets. Caveats: one
+  VM and loopback, not a NIC under load; the accounting itself adds a little; and a host that
+  drops millions of packets per second (a DDoS) will pay proportionally, so use
+  `NETRA_DROP_INFO=off` there. `TestDropInfoCostPerDrop` re-measures this on every CI run and
+  fails on an order-of-magnitude regression (over 50 µs per drop).
 
 ## Verification
 

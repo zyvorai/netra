@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -106,6 +107,26 @@ func Load(opt Options) (*Sensor, error) {
 		syms = &ksym.Resolver{}
 	}
 	return &Sensor{coll: coll, link: lnk, reasonNames: ReasonNames(f), syms: syms}, nil
+}
+
+// Stats reports how many times the program has run and the total time it spent,
+// from the kernel's own BPF accounting. Both are zero unless run-time statistics
+// are enabled (ebpf.EnableStats(unix.BPF_STATS_RUN_TIME), or
+// kernel.bpf_stats_enabled=1), which the kernel leaves off because it costs a
+// little on every run.
+func (s *Sensor) Stats() (runs uint64, spent time.Duration, err error) {
+	if s == nil || s.coll == nil {
+		return 0, 0, errClosed
+	}
+	prog := s.coll.Programs["netra_drop_info"]
+	if prog == nil {
+		return 0, 0, errors.New("program netra_drop_info missing")
+	}
+	st, err := prog.Stats()
+	if err != nil {
+		return 0, 0, err
+	}
+	return st.RunCount, st.Runtime, nil
 }
 
 // Close detaches the tracepoint and frees the maps.
