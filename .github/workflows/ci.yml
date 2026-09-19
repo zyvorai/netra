@@ -762,6 +762,85 @@ jobs:
       # Root matters: tracefs and the BPF filesystem are not readable without it, and the
       # agent runs privileged.
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-doctor-live.sh
+  enforce-veth:
+    # A real agent on a veth: deny/allow/CIDR/port rules drop exactly what they name in
+    # enforce mode and never in observe, ingress vs egress, IPv6, the drop is recorded, a
+    # lease expires on its own, and the agent fails open when the controller dies.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+    - name: Enforcement on a veth (scripted)
+      # Same command locally: sudo ./scripts/ci-enforce-veth.sh
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-enforce-veth.sh
+  capture-live:
+    # Manual packet capture on both backends (eBPF, AF_PACKET) through the API and the
+    # WebSocket, saved as a pcap that tcpdump reads: filter, both directions, stop, history.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang and tcpdump
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev tcpdump
+    - name: Manual capture on both backends (scripted)
+      # Same command locally: sudo ./scripts/ci-capture-live.sh
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-capture-live.sh
+  kind-lifecycle:
+    # The previous release installs and takes state; helm upgrade --reset-then-reuse-values to
+    # this checkout with the agent DaemonSet; a pod restart; helm rollback. State and the API
+    # key survive every step.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@v4
+      with: {fetch-depth: 0}
+    - uses: azure/setup-helm@v4
+    - uses: helm/kind-action@v1
+      with: {cluster_name: netra-ci}
+    - name: Install, upgrade, restart and roll back on a real cluster (scripted)
+      # Same command locally: ./scripts/ci-kind-lifecycle.sh (a running kind cluster)
+      run: ./scripts/ci-kind-lifecycle.sh
+  manifests-kind:
+    # The plain manifests an operator applies with kubectl (no Helm): controller, state volume,
+    # agent DaemonSet, API auth.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+    - uses: helm/kind-action@v1
+      with: {cluster_name: netra-ci}
+    - name: The plain manifests on a real cluster (scripted)
+      # Same command locally: ./scripts/ci-manifests-kind.sh (a running kind cluster)
+      run: ./scripts/ci-manifests-kind.sh
+  web-e2e:
+    # A real browser against a real controller serving the built UI, no interception:
+    # login (refused, accepted, sign-out), every page, seeded data on screen, and a deny
+    # rule and the enforcement lease through the Firewall page.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - uses: actions/setup-node@v4
+      with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
+    - run: npm --prefix web ci
+    - run: npm --prefix web run build
+    - run: cd web && npx playwright install --with-deps chromium
+    - name: The UI against a real controller (scripted)
+      # Same command locally: ./scripts/ci-web-e2e.sh (needs Playwright's chromium)
+      run: OUT_DIR=/tmp/netra-web-e2e ./scripts/ci-web-e2e.sh
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: web-e2e-evidence
+        path: /tmp/netra-web-e2e
   mtls-smoke:
     # The real netrad (every unsafe mTLS setting refused at startup; required mode
     # enforcing certificate, issuer and key usage) and the real agent, with and
