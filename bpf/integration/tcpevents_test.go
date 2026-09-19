@@ -362,10 +362,22 @@ func TestTCPEventsMissingFieldsAreCountedNotMisread(t *testing.T) {
 	if sn.Totals.ReadErrors == 0 {
 		t.Fatalf("IPv6 events with no address layout were not counted as read errors: %+v", sn.Totals)
 	}
+	// Where tcp_send_reset carries sockaddr-style blobs (Linux 6.17), its IPv6
+	// address is inside the blob rather than in a saddr_v6 field, so stripping
+	// the classic fields removes nothing from it and its IPv6 flows are
+	// legitimately readable. Every other sensor must not produce an IPv6 flow.
+	sockaddrSend := false
+	if f, err := tpformat.Read("tcp", "tcp_send_reset"); err == nil {
+		sockaddrSend = !f.Has("sport")
+	}
 	for _, f := range sn.Flows {
-		if f.Family == "ipv6" {
-			t.Fatalf("an IPv6 flow appeared although its addresses could not be read: %+v", f)
+		if f.Family != "ipv6" {
+			continue
 		}
+		if sockaddrSend && f.RSTSent > 0 && f.RSTReceived == 0 && f.Retransmits == 0 {
+			continue
+		}
+		t.Fatalf("an IPv6 flow appeared although its addresses could not be read: %+v", f)
 	}
 }
 
