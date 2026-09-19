@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.103"
+  tag: "0.27.104"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.103"
+  tag: "0.27.104"
 replicaCount: 1
 ha:
   enabled: false
@@ -281,6 +281,15 @@ agent:
   procMetaEnabled: false
   # TLS ClientHello JA3/JA4 sampler (bpf/netra_tlsfp.c). auto|off|required.
   tlsfp: auto
+  # TCP event tracepoints — retransmit/RST attribution and the state-transition
+  # matrix (bpf/netra_tcpevents.c, docs/tcp-events.md). auto|off|required.
+  tcpEvents: auto
+  # Mount the host's tracefs (/sys/kernel/tracing) read-only into the agent.
+  # A container's own /sys is a bare sysfs with no tracefs, so without this the
+  # agent cannot read tracepoint record layouts: the TCP event sensors and the
+  # kfree_skb drop-reason sensor both report "unavailable". Set false only on a
+  # node image with no /sys/kernel/tracing directory (the pod would not start).
+  hostTracefs: true
 persistence:
   enabled: true
   existingClaim: ""

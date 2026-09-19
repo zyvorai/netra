@@ -405,13 +405,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+    - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables
     - uses: actions/setup-go@v5
       with: {go-version: '1.27.1', cache: true}
     - name: eBPF C helpers + compile + privileged PROG_TEST_RUN (scripted)
       # Same entrypoint locally: sudo ./scripts/ci-ebpf-tests.sh
-      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp, and
-      # bpf/integration (including TestTLSFP*).
+      # Covers bpf/tests/*.c, clang of netra_tc/edge/capture/tlsfp/tcpevents,
+      # and bpf/integration (including TestTLSFP* and TestTCPEvents*, which
+      # attach real tracepoints on the runner's kernel; nft induces the loss).
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-ebpf-tests.sh
   auto-capture-veth:
     # Privileged Linux smoke for opt-in auto-capture: veth + iperf3 TCP +

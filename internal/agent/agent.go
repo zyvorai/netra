@@ -38,6 +38,7 @@ import (
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
+	"github.com/zyvorai/netra/internal/tcpevents"
 	"github.com/zyvorai/netra/internal/tlsfp"
 	"github.com/zyvorai/netra/internal/workload"
 )
@@ -92,6 +93,11 @@ type Agent struct {
 	// netra_l7_* fails to load (docs/l7-metadata.md).
 	tlsfpObject     string
 	tlsfpCollection *ebpf.Collection
+	// tcpEventsObject/tcpEvents are the standalone TCP event tracepoints
+	// (bpf/netra_tcpevents.c): retransmit/RST/state-transition counters. The
+	// loader owns its own links; Close() calls tcpEvents.Close().
+	tcpEventsObject string
+	tcpEvents       *tcpevents.Sensor
 	activeCapture   *models.CaptureSpec
 	captureCancel   context.CancelFunc
 	// captureBackendErr records why the most recent applyCapture failed to
@@ -171,10 +177,11 @@ func New(log *slog.Logger) *Agent {
 		wsDialer: &wsDialer,
 		log:      log, server: server, key: os.Getenv("NETRA_AGENT_KEY"), node: env("NODE_NAME", hostname()), startedAt: time.Now().UTC(),
 		object: env("NETRA_BPF_OBJECT", "/opt/netra/bpf/netra_tc.o"), pinPath: env("NETRA_BPF_PIN", "/sys/fs/bpf/netra"),
-		edgeObject:    env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
-		captureObject: env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
-		tlsfpObject:   env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
-		cgroupPath:    env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
+		edgeObject:      env("NETRA_BPF_EDGE_OBJECT", "/opt/netra/bpf/netra_edge_intel.o"),
+		captureObject:   env("NETRA_BPF_CAPTURE_OBJECT", "/opt/netra/bpf/netra_capture.o"),
+		tlsfpObject:     env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
+		tcpEventsObject: env("NETRA_BPF_TCPEVENTS_OBJECT", "/opt/netra/bpf/netra_tcpevents.o"),
+		cgroupPath:      env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096), tlsFP: tlsfp.NewDetector(2048),
 		failsafeAfter: envDuration("NETRA_FAILSAFE_AFTER", 60*time.Second), workloadByCgroup: map[uint64]models.WorkloadIdentity{}, cgroupScanEvery: envDuration("NETRA_CGROUP_SCAN_INTERVAL", 10*time.Second),
@@ -464,6 +471,9 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	if err := a.attachTLSFP(); err != nil {
+		return err
+	}
+	if err := a.attachTCPEvents(); err != nil {
 		return err
 	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
@@ -899,6 +909,10 @@ func (a *Agent) Close() {
 	if a.tlsfpCollection != nil {
 		a.tlsfpCollection.Close()
 	}
+	if a.tcpEvents != nil {
+		_ = a.tcpEvents.Close()
+		a.tcpEvents = nil
+	}
 }
 
 func (a *Agent) syncAndReport(ctx context.Context) error {
@@ -1072,6 +1086,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	tcpEvents := a.readTCPEvents()
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1079,7 +1094,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
@@ -3877,4 +3892,74 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// attachTCPEvents loads bpf/netra_tcpevents.c and attaches its four tracepoint
+// programs. It follows attachTLSFP's convention: NETRA_TCP_EVENTS=auto (default)
+// degrades to "no TCP events" with a warning; off skips; required fails startup.
+//
+// Unlike the other sensors it does not assume a kernel layout: each
+// tracepoint's record offsets come from the running kernel's own format file
+// (internal/tpformat), and a sensor whose layout cannot be established is left
+// out with the reason reported rather than attached blind.
+func (a *Agent) attachTCPEvents() error {
+	mode := strings.ToLower(env("NETRA_TCP_EVENTS", "auto")) // auto|off|required
+	if mode == "off" {
+		a.log.Info("TCP event tracepoints skipped by NETRA_TCP_EVENTS=off")
+		return nil
+	}
+	sensor, err := tcpevents.Load(tcpevents.Options{ObjectPath: a.tcpEventsObject, Log: a.log})
+	if err != nil {
+		if mode == "required" {
+			return fmt.Errorf("TCP event tracepoints (NETRA_TCP_EVENTS=required): %w", err)
+		}
+		a.log.Warn("TCP event tracepoints unavailable; continuing without them", "object", a.tcpEventsObject, "error", err)
+		return nil
+	}
+	a.tcpEvents = sensor
+	for _, tp := range tcpevents.Tracepoints {
+		for _, name := range sensor.Attached() {
+			if name == tp.Name {
+				a.hooks = append(a.hooks, "tracepoint:"+tp.Group+"/"+tp.Event)
+				a.markAttached(tp.Program)
+			}
+		}
+	}
+	a.log.Info("TCP event tracepoints attached", "sensors", sensor.Attached(), "skipped", sensor.Skipped())
+	return nil
+}
+
+// tcpEventsTopFlows bounds the flow list in each report.
+const tcpEventsTopFlows = 50
+
+// readTCPEvents returns nil when the sensors never attached or a read fails
+// (a read failure is logged, not fatal: this is a diagnostic side channel and
+// must not stop the rest of the report).
+func (a *Agent) readTCPEvents() *models.TCPEventsSummary {
+	if a.tcpEvents == nil {
+		return nil
+	}
+	sn, err := a.tcpEvents.Snapshot(tcpEventsTopFlows)
+	if err != nil {
+		a.log.Warn("read TCP events", "error", err)
+		return nil
+	}
+	out := &models.TCPEventsSummary{
+		Attached: sn.Attached, Skipped: sn.Skipped,
+		Totals: models.TCPEventTotals{
+			Retransmits: sn.Totals.Retransmits, RSTSent: sn.Totals.RSTSent, RSTReceived: sn.Totals.RSTReceived,
+			StateTransitions: sn.Totals.StateTransitions, ReadErrors: sn.Totals.ReadErrors,
+			BadFamily: sn.Totals.BadFamily, MapFull: sn.Totals.MapFull,
+		},
+	}
+	for _, t := range sn.Transitions {
+		out.Transitions = append(out.Transitions, models.TCPStateTransition{From: t.From, To: t.To, Count: t.Count})
+	}
+	for _, f := range sn.Flows {
+		out.Flows = append(out.Flows, models.TCPEventFlow{
+			Family: f.Family, Src: f.Src, Dst: f.Dst, SrcPort: f.SrcPort, DstPort: f.DstPort,
+			Retransmits: f.Retransmits, RSTSent: f.RSTSent, RSTReceived: f.RSTReceived, LastSeenNS: f.LastSeenNS,
+		})
+	}
+	return out
 }

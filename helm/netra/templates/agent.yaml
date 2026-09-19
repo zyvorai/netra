@@ -59,6 +59,8 @@ spec:
           value: {{ .Values.agent.procMetaEnabled | default false | quote }}
         - name: NETRA_TLSFP
           value: {{ .Values.agent.tlsfp | default "auto" | quote }}
+        - name: NETRA_TCP_EVENTS
+          value: {{ .Values.agent.tcpEvents | default "auto" | quote }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:
@@ -78,6 +80,11 @@ spec:
         - name: kmsg
           mountPath: /dev/kmsg
           readOnly: true
+        {{- if .Values.agent.hostTracefs }}
+        - name: tracefs
+          mountPath: /sys/kernel/tracing
+          readOnly: true
+        {{- end }}
       volumes:
       - name: bpffs
         hostPath:
@@ -91,4 +98,10 @@ spec:
         hostPath:
           path: /dev/kmsg
           type: CharDevice
+      {{- if .Values.agent.hostTracefs }}
+      - name: tracefs
+        hostPath:
+          path: /sys/kernel/tracing
+          type: Directory
+      {{- end }}
 {{- end }}

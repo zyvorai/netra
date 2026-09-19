@@ -30,6 +30,12 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
 RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -c netra_tlsfp.c -o /out-tlsfp.o
+# Standalone TCP event tracepoints (retransmit/RST/state-transition counters) —
+# own verifier budget; record layouts are patched in at load time from the
+# running kernel's tracefs format files (docs/tcp-events.md).
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_tcpevents.c -o /out-tcpevents.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent
@@ -37,4 +43,5 @@ COPY --from=bpf /out.o /opt/netra/bpf/netra_tc.o
 COPY --from=bpf /out-edge.o /opt/netra/bpf/netra_edge_intel.o
 COPY --from=bpf /out-capture.o /opt/netra/bpf/netra_capture.o
 COPY --from=bpf /out-tlsfp.o /opt/netra/bpf/netra_tlsfp.o
+COPY --from=bpf /out-tcpevents.o /opt/netra/bpf/netra_tcpevents.o
 ENTRYPOINT ["/netra-agent"]

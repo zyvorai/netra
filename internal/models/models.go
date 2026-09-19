@@ -1126,7 +1126,10 @@ type AgentReport struct {
 	// (NETRA_EDGE_INTEL=off, or attach failed in auto mode) — distinct
 	// from an attached-but-quiet node, which reports a non-nil summary
 	// with empty/zero fields.
-	EdgeIntel  *EdgeIntelSummary `json:"edgeIntel,omitempty"`
+	EdgeIntel *EdgeIntelSummary `json:"edgeIntel,omitempty"`
+	// TCPEvents is nil when the TCP event tracepoints never attached
+	// (NETRA_TCP_EVENTS=off, or none could be attached in auto mode).
+	TCPEvents  *TCPEventsSummary `json:"tcpEvents,omitempty"`
 	CapChanges []CapChangeEvent  `json:"capChanges,omitempty"`
 	// NamespaceChanges mirrors CapChanges' blind-spot caveat below — its
 	// diffing state (watchNamespaceChanges' prevNetNS) resets on restart
@@ -1422,4 +1425,50 @@ type LockdownRequest struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Selector  map[string]string `json:"selector"`
+}
+
+// TCPEventsSummary is one node's cumulative TCP retransmit, reset and
+// state-transition counts from four kernel tracepoints (bpf/netra_tcpevents.c,
+// docs/tcp-events.md). Flows are a top-N by retransmits plus resets, not the
+// whole table.
+type TCPEventsSummary struct {
+	// Attached names the sensors running; Skipped maps each one that is not
+	// to the reason (a missing tracepoint, an unexpected record layout).
+	Attached    []string             `json:"attached"`
+	Skipped     map[string]string    `json:"skipped,omitempty"`
+	Totals      TCPEventTotals       `json:"totals"`
+	Transitions []TCPStateTransition `json:"transitions,omitempty"`
+	Flows       []TCPEventFlow       `json:"flows,omitempty"`
+}
+
+// TCPEventTotals are node-wide counters. ReadErrors, BadFamily and MapFull are
+// the sensor's own health: any non-zero value means the counts are an undercount.
+type TCPEventTotals struct {
+	Retransmits      uint64 `json:"retransmits"`
+	RSTSent          uint64 `json:"rstSent"`
+	RSTReceived      uint64 `json:"rstReceived"`
+	StateTransitions uint64 `json:"stateTransitions"`
+	ReadErrors       uint64 `json:"readErrors,omitempty"`
+	BadFamily        uint64 `json:"badFamily,omitempty"`
+	MapFull          uint64 `json:"mapFull,omitempty"`
+}
+
+// TCPStateTransition counts sockets moving From one TCP state To another.
+type TCPStateTransition struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Count uint64 `json:"count"`
+}
+
+// TCPEventFlow is one TCP tuple's retransmit and reset counts.
+type TCPEventFlow struct {
+	Family      string `json:"family"`
+	Src         string `json:"src"`
+	Dst         string `json:"dst"`
+	SrcPort     uint16 `json:"srcPort"`
+	DstPort     uint16 `json:"dstPort"`
+	Retransmits uint64 `json:"retransmits,omitempty"`
+	RSTSent     uint64 `json:"rstSent,omitempty"`
+	RSTReceived uint64 `json:"rstReceived,omitempty"`
+	LastSeenNS  uint64 `json:"lastSeenNs,omitempty"`
 }
