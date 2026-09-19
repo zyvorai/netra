@@ -77,6 +77,8 @@ export NO_COLOR=1
 export NETRA_SKIP_DOTENV=1
 # Bare netrad has no kube/Cilium/Hubble; structured API errors still prove wiring.
 export NETRA_CLI_ACCEPT_API_ERRORS=1
+# The controller is a throwaway local process, so mutating commands are safe to run.
+export NETRA_CLI_ALLOW_MUTATE=1
 ./scripts/ci-netractl-remote.sh
 
 # Two shipped helpers that no other job runs: the curl smoke in hack/ and the SIEM

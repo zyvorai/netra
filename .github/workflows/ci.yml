@@ -7,9 +7,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A newer push to a PR supersedes the older run; main is never cancelled, so
-  # every commit that lands keeps its own complete result.
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a PR supersedes the older run. A push to main gets a group of its
+  # own (its SHA): GitHub cancels a *pending* run in a shared group even when
+  # cancel-in-progress is false, and every commit that lands must keep its own result.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   go:
@@ -707,6 +708,58 @@ jobs:
         echo "$out"
         n="$(sed -n 's/^Ran \([0-9]*\) tests.*/\1/p' <<<"$out")"
         [ "${n:-0}" -ge 7 ] || { echo "only ${n:-0} python tests ran, expected at least 7" >&2; exit 1; }
+  mcp-live:
+    # The MCP server (netra-mcp) against a real netrad over stdio JSON-RPC: read-only
+    # by default, every mutating tool present only when enabled (names read from the
+    # source), a real deny rule added and removed through MCP with the MCP actor in
+    # the audit log, malformed input and a wrong key handled.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: MCP server against a live controller (scripted)
+      # Same command locally: ./scripts/ci-mcp-live.sh
+      run: ./scripts/ci-mcp-live.sh
+  persistence-live:
+    # State survives kill -9 and restarts, an enforcement lease is never resurrected,
+    # a second controller and a corrupt state file are refused, a damaged flow sidecar
+    # is set aside, and without a state file nothing persists.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: Controller state persistence (scripted)
+      # Same command locally: ./scripts/ci-persistence-live.sh
+      run: ./scripts/ci-persistence-live.sh
+  sinks-live:
+    # Webhook, Slack, Teams, HTTP bridge, SMTP, OTLP and syslog (UDP and TCP)
+    # delivered for real to loopback receivers: format, exactly-once, severity filter,
+    # retry, HMAC signatures, and no secret in any body, log line or API response.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: Alert and export sinks (scripted)
+      # Same command locally: ./scripts/ci-sinks-live.sh
+      run: ./scripts/ci-sinks-live.sh
+  doctor-live:
+    # netra-doctor on the runner itself (the agent's kernel, cgroup, bpffs, BTF and
+    # tracefs requirements) and on an empty root (must fail loudly with remediation).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: netra-doctor (scripted)
+      # Same command locally: ./scripts/ci-doctor-live.sh
+      run: ./scripts/ci-doctor-live.sh
   mtls-smoke:
     # The real netrad (every unsafe mTLS setting refused at startup; required mode
     # enforcing certificate, issuer and key usage) and the real agent, with and
