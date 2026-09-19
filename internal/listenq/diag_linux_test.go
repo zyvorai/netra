@@ -284,24 +284,54 @@ func TestDumpIsCorrectWhileOtherListenersChurn(t *testing.T) {
 	}
 	defer func() { close(stop); wg.Wait() }()
 
+	// inet_diag does not dump the listener hash atomically: a socket that stays in place
+	// can still be skipped once when its neighbours in the same bucket are added or removed
+	// mid-dump (seen on a CI runner: 1 miss in 14 rounds under this deliberately savage
+	// churn). What the sampler needs, and what this asserts, is that a listener that was
+	// there the whole time is never MISSING PERSISTENTLY: a fresh dump right away has it.
+	// Each round therefore allows a few immediate re-dumps, and counts the misses so a
+	// regression that made them routine (a broken dump loop) still fails.
+	const attempts, maxMissRounds = 5, 20
+	missRounds := 0
 	for round := 0; round < 200; round++ {
-		before := procListeners()
-		ls, err := Dump()
-		if err != nil {
-			t.Fatalf("round %d: %v", round, err)
-		}
-		after := procListeners()
-		got := map[int]bool{}
-		for _, l := range ls {
-			got[int(l.Port)] = true
-		}
-		if !got[held] {
-			t.Fatalf("round %d: the long-lived listener (port %d) is missing from the dump", round, held)
-		}
-		for p := range before {
-			if after[p] && !got[p] {
-				t.Fatalf("round %d: port %d was listening throughout but is missing from the dump", round, p)
+		var lastErr string
+		ok := false
+		missed := false
+		for try := 0; try < attempts && !ok; try++ {
+			before := procListeners()
+			ls, err := Dump()
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+			after := procListeners()
+			got := map[int]bool{}
+			for _, l := range ls {
+				got[int(l.Port)] = true
+			}
+			lastErr = ""
+			if !got[held] {
+				lastErr = fmt.Sprintf("the long-lived listener (port %d) is missing from the dump", held)
+			}
+			for p := range before {
+				if lastErr == "" && after[p] && !got[p] {
+					lastErr = fmt.Sprintf("port %d was listening throughout but is missing from the dump", p)
+				}
+			}
+			if lastErr == "" {
+				ok = true
+			} else {
+				missed = true
 			}
 		}
+		if !ok {
+			t.Fatalf("round %d: still %s after %d immediate re-dumps", round, lastErr, attempts)
+		}
+		if missed {
+			missRounds++
+		}
 	}
+	if missRounds > maxMissRounds {
+		t.Fatalf("%d of 200 dumps missed a stable listener at least once (more than %d): the dump is not merely non-atomic, it is unreliable", missRounds, maxMissRounds)
+	}
+	t.Logf("%d of 200 dumps missed a stable listener once and found it on an immediate re-dump", missRounds)
 }

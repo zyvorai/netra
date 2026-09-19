@@ -52,6 +52,12 @@ and `ListenOverflows` rose for the rest.
 - **Sampling, not events.** The agent reads the sockets once per report (a few seconds).
   A burst that fills and drains between two samples is not seen; the kernel's overflow
   counters still count it. `peak` is the deepest *sampled* depth.
+- **The kernel's dump is not atomic.** `inet_diag` walks the listener hash while other
+  processes create and close listeners; under extreme churn a listener that stays in place can
+  be skipped by one dump (seen once in 14 rounds while four goroutines opened and closed
+  listeners as fast as they could). The next report has it again. `TestDumpIsCorrectWhileOtherListenersChurn`
+  asserts a stable listener is never missing persistently (an immediate re-dump finds it) and
+  that misses stay rare.
 - **Listeners only.** This does not attribute an individual dropped SYN to a listener; the
   drop attribution sensor (`docs/drop-info.md`) shows the tuple and the kernel function
   (`tcp_conn_request`) for drops that carry a tuple.

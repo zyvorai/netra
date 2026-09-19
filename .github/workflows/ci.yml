@@ -757,9 +757,11 @@ jobs:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
-    - name: netra-doctor (scripted)
-      # Same command locally: ./scripts/ci-doctor-live.sh
-      run: ./scripts/ci-doctor-live.sh
+    - name: netra-doctor as root, like the agent (scripted)
+      # Same command locally: sudo ./scripts/ci-doctor-live.sh
+      # Root matters: tracefs and the BPF filesystem are not readable without it, and the
+      # agent runs privileged.
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-doctor-live.sh
   mtls-smoke:
     # The real netrad (every unsafe mTLS setting refused at startup; required mode
     # enforcing certificate, issuer and key usage) and the real agent, with and
