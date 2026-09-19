@@ -66,8 +66,8 @@ func (s *Server) intelHits(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	writeJSON(w, 200, map[string]any{
-		"feed": s.intelFeed.Status(),
-		"match": watchlist.Match(s.store.AgentStatuses(now, s.agentStaleAfter), entries, limit),
+		"feed":        s.intelFeed.Status(),
+		"match":       watchlist.Match(s.store.AgentStatuses(now, s.agentStaleAfter), entries, limit),
 		"autoApplied": false,
 		"note":        "Observe-only match of the active feed against live agent metadata.",
 	})

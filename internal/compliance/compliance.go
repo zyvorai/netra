@@ -40,10 +40,10 @@ type Pack struct {
 
 // Report is GET /api/v1/compliance.
 type Report struct {
-	GeneratedAt time.Time `json:"generatedAt"`
-	Packs       []Pack    `json:"packs"`
+	GeneratedAt   time.Time                 `json:"generatedAt"`
+	Packs         []Pack                    `json:"packs"`
 	SysctlSummary models.SysctlAuditSummary `json:"sysctlSummary"`
-	Note        string    `json:"note"`
+	Note          string                    `json:"note"`
 }
 
 // Build evaluates the network-hardening pack from agent sysctl snapshots.

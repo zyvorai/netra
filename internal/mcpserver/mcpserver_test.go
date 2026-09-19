@@ -255,7 +255,9 @@ func TestPromptsListAndGet(t *testing.T) {
 		t.Fatalf("list error: %+v", list.Error)
 	}
 	var listed struct {
-		Prompts []struct{ Name string `json:"name"` } `json:"prompts"`
+		Prompts []struct {
+			Name string `json:"name"`
+		} `json:"prompts"`
 	}
 	if err := json.Unmarshal(list.Result, &listed); err != nil {
 		t.Fatalf("unmarshal list: %v", err)

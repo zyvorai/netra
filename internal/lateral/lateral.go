@@ -15,18 +15,18 @@ import (
 
 // Playbook is one guided containment suggestion.
 type Playbook struct {
-	ID           string   `json:"id"`
-	FindingType  string   `json:"findingType"`
-	Severity     string   `json:"severity"`
-	Namespace    string   `json:"namespace,omitempty"`
-	Pod          string   `json:"pod,omitempty"`
-	Workload     string   `json:"workload,omitempty"`
-	Node         string   `json:"node,omitempty"`
-	Title        string   `json:"title"`
-	Steps        []string `json:"steps"`
-	LeaseDrafts  []map[string]any `json:"leaseDrafts"`
-	ExampleDsts  []string `json:"exampleDsts,omitempty"`
-	FindingID    string   `json:"findingId,omitempty"`
+	ID          string           `json:"id"`
+	FindingType string           `json:"findingType"`
+	Severity    string           `json:"severity"`
+	Namespace   string           `json:"namespace,omitempty"`
+	Pod         string           `json:"pod,omitempty"`
+	Workload    string           `json:"workload,omitempty"`
+	Node        string           `json:"node,omitempty"`
+	Title       string           `json:"title"`
+	Steps       []string         `json:"steps"`
+	LeaseDrafts []map[string]any `json:"leaseDrafts"`
+	ExampleDsts []string         `json:"exampleDsts,omitempty"`
+	FindingID   string           `json:"findingId,omitempty"`
 }
 
 // Result is GET /api/v1/insights/lateral.

@@ -47,30 +47,30 @@ func ParseSanctioned(raw string) []string {
 
 // Finding is one unsanctioned (or unknown) destination.
 type Finding struct {
-	Host       string `json:"host"`
-	Kind       string `json:"kind"` // sni | http-host | dns
-	Category   string `json:"category,omitempty"`
-	Label      string `json:"label,omitempty"`
-	Status     string `json:"status"` // shadow | unknown | sanctioned
-	Risk       string `json:"risk"`   // low | medium | high
-	Node       string `json:"node,omitempty"`
-	Namespace  string `json:"namespace,omitempty"`
-	Pod        string `json:"pod,omitempty"`
-	Packets    uint64 `json:"packets,omitempty"`
-	AIRelated  bool   `json:"aiRelated,omitempty"`
-	Rationale  string `json:"rationale,omitempty"`
+	Host      string `json:"host"`
+	Kind      string `json:"kind"` // sni | http-host | dns
+	Category  string `json:"category,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Status    string `json:"status"` // shadow | unknown | sanctioned
+	Risk      string `json:"risk"`   // low | medium | high
+	Node      string `json:"node,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	Packets   uint64 `json:"packets,omitempty"`
+	AIRelated bool   `json:"aiRelated,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
 }
 
 // Result is GET /api/v1/insights/shadow-saas.
 type Result struct {
-	Findings        []Finding `json:"findings"`
-	Count           int       `json:"count"`
-	Shadow          int       `json:"shadow"`
-	Unknown         int       `json:"unknown"`
-	SanctionedSeen  int       `json:"sanctionedSeen"`
-	SanctionedList  int       `json:"sanctionedListSize"`
-	Capped          bool      `json:"capped"`
-	Note            string    `json:"note"`
+	Findings       []Finding `json:"findings"`
+	Count          int       `json:"count"`
+	Shadow         int       `json:"shadow"`
+	Unknown        int       `json:"unknown"`
+	SanctionedSeen int       `json:"sanctionedSeen"`
+	SanctionedList int       `json:"sanctionedListSize"`
+	Capped         bool      `json:"capped"`
+	Note           string    `json:"note"`
 }
 
 const MaxFindings = 500

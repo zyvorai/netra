@@ -34,12 +34,12 @@ type Hit struct {
 
 // Result is GET /api/v1/intel/dns-hits.
 type Result struct {
-	Hits     []Hit `json:"hits"`
-	Count    int   `json:"count"`
-	Intel    int   `json:"intelHits"`
-	Heuristic int  `json:"heuristicHits"`
-	Capped   bool  `json:"capped"`
-	Note     string `json:"note"`
+	Hits      []Hit  `json:"hits"`
+	Count     int    `json:"count"`
+	Intel     int    `json:"intelHits"`
+	Heuristic int    `json:"heuristicHits"`
+	Capped    bool   `json:"capped"`
+	Note      string `json:"note"`
 }
 
 const MaxHits = 500
@@ -112,7 +112,7 @@ func Build(agents []models.AgentStatus, feed []intel.Entry, limit int) Result {
 				add(Hit{
 					Host: host, Kind: "heuristic-dga", Severity: "medium",
 					Node: a.Node, Namespace: d.Namespace, Pod: d.Pod,
-					Queries: d.Queries,
+					Queries:   d.Queries,
 					Rationale: "Hostname looks algorithmically generated (long consonant-heavy label)",
 					LeaseHint: "dns",
 				})

@@ -50,10 +50,10 @@ func Build(agents []models.AgentStatus, limit int) Result {
 	}
 	type key struct{ ns, pod, kind, name, node string }
 	type agg struct {
-		dsts     map[string]uint64
-		packets  uint64
-		bytes    uint64
-		hosts    map[string]uint64
+		dsts    map[string]uint64
+		packets uint64
+		bytes   uint64
+		hosts   map[string]uint64
 	}
 	by := map[key]*agg{}
 	globalHost := map[string]int{} // host → workload count

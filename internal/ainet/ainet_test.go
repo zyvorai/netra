@@ -25,7 +25,7 @@ func TestLookupLongestSuffix(t *testing.T) {
 func TestMatchSNI(t *testing.T) {
 	agents := []models.AgentStatus{{
 		AgentReport: models.AgentReport{
-			Node: "n1",
+			Node:        "n1",
 			TLSMetadata: []models.TLSMetadataStat{{SNI: "api.anthropic.com", Handshakes: 3, Namespace: "ns", Pod: "p"}},
 		},
 	}}

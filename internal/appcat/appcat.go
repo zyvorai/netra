@@ -116,12 +116,12 @@ type Hit struct {
 
 // Result is the API envelope.
 type Result struct {
-	Hits       []Hit             `json:"hits"`
-	Count      int               `json:"count"`
-	ByCategory map[Category]int  `json:"byCategory"`
-	Capped     bool              `json:"capped"`
-	Catalog    int               `json:"catalogSize"`
-	Note       string            `json:"note"`
+	Hits       []Hit            `json:"hits"`
+	Count      int              `json:"count"`
+	ByCategory map[Category]int `json:"byCategory"`
+	Capped     bool             `json:"capped"`
+	Catalog    int              `json:"catalogSize"`
+	Note       string           `json:"note"`
 }
 
 const MaxHits = 500
@@ -215,4 +215,3 @@ func MatchHostSuffix(host string, suffixes []string) bool {
 	}
 	return false
 }
-

@@ -17,7 +17,7 @@ func TestBuildGapsAndCoverage(t *testing.T) {
 	until := time.Now().UTC().Add(time.Hour)
 	s = Build(Input{
 		GeneratedAt: time.Now().UTC(), Mode: "enforce", LeaseUntil: &until,
-		IntelFeed: []intel.Entry{{Type: "ip", Value: "203.0.113.1"}},
+		IntelFeed:   []intel.Entry{{Type: "ip", Value: "203.0.113.1"}},
 		BlockedIPv4: 1, TLSFPUnique: 2,
 	})
 	if !s.LeaseActive || s.IntelFeedEntries != 1 {

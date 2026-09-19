@@ -183,7 +183,7 @@ func Build(agents []models.AgentStatus, sanctioned []string, limit int) Result {
 				"namespace": g.ns,
 				"labels": map[string]string{
 					"app.kubernetes.io/managed-by": "netra",
-					"netra.zyvor.dev/pack":          "sanctioned-egress",
+					"netra.zyvor.dev/pack":         "sanctioned-egress",
 				},
 				"annotations": map[string]string{
 					"netra.zyvor.dev/review-only": "true",

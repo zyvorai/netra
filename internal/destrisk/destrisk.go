@@ -21,18 +21,18 @@ import (
 
 // Item is one ranked destination.
 type Item struct {
-	Destination string   `json:"destination"`
-	Kind        string   `json:"kind"` // ip | host
-	Score       int      `json:"score"`
-	Severity    string   `json:"severity"`
-	Reasons     []string `json:"reasons"`
-	Category    string   `json:"category,omitempty"`
-	Label       string   `json:"label,omitempty"`
-	Packets     uint64   `json:"packets,omitempty"`
-	IntelHit    bool     `json:"intelHit,omitempty"`
-	AIRelated   bool     `json:"aiRelated,omitempty"`
-	EncryptedDNS bool    `json:"encryptedDns,omitempty"`
-	External    bool     `json:"external,omitempty"`
+	Destination  string   `json:"destination"`
+	Kind         string   `json:"kind"` // ip | host
+	Score        int      `json:"score"`
+	Severity     string   `json:"severity"`
+	Reasons      []string `json:"reasons"`
+	Category     string   `json:"category,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	Packets      uint64   `json:"packets,omitempty"`
+	IntelHit     bool     `json:"intelHit,omitempty"`
+	AIRelated    bool     `json:"aiRelated,omitempty"`
+	EncryptedDNS bool     `json:"encryptedDns,omitempty"`
+	External     bool     `json:"external,omitempty"`
 }
 
 // Result is GET /api/v1/insights/destination-risk.

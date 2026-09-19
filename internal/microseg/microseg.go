@@ -17,15 +17,15 @@ import (
 
 // Guidance is GET /api/v1/insights/microseg.
 type Guidance struct {
-	GeneratedAt     time.Time                `json:"generatedAt"`
-	CiliumDetected  bool                     `json:"ciliumDetected"`
-	Recommendation  string                   `json:"recommendation"`
-	PreferPacketWolf bool                    `json:"preferPacketWolf"`
-	EastWestEdges   int                      `json:"eastWestEdges"`
-	ExternalEdges   int                      `json:"externalEdges"`
-	LeaseDrafts     []insights.ZeroTrustDraft `json:"leaseDrafts,omitempty"`
-	Steps           []string                 `json:"steps"`
-	Note            string                   `json:"note"`
+	GeneratedAt      time.Time                 `json:"generatedAt"`
+	CiliumDetected   bool                      `json:"ciliumDetected"`
+	Recommendation   string                    `json:"recommendation"`
+	PreferPacketWolf bool                      `json:"preferPacketWolf"`
+	EastWestEdges    int                       `json:"eastWestEdges"`
+	ExternalEdges    int                       `json:"externalEdges"`
+	LeaseDrafts      []insights.ZeroTrustDraft `json:"leaseDrafts,omitempty"`
+	Steps            []string                  `json:"steps"`
+	Note             string                    `json:"note"`
 }
 
 // Build inspects the dependency graph and agent hooks for Cilium signals.

@@ -19,8 +19,8 @@ import (
 // Default upper bounds for exp2-style buckets (inclusive). The final +Inf
 // bucket is implied by CumulativeCounts having one more entry than Bounds.
 var (
-	RetransBounds  = []float64{0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512}
-	SRTTBoundsUS   = []float64{100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1e6}
+	RetransBounds   = []float64{0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512}
+	SRTTBoundsUS    = []float64{100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1e6}
 	ConnectBoundsUS = []float64{100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1e6, 5e6}
 )
 

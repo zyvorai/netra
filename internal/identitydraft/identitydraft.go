@@ -167,7 +167,7 @@ func Build(agents []models.AgentStatus, limit int) Result {
 				"namespace": g.ns,
 				"labels": map[string]string{
 					"app.kubernetes.io/managed-by": "netra",
-					"netra.zyvor.dev/pack":          "identity-egress",
+					"netra.zyvor.dev/pack":         "identity-egress",
 				},
 				"annotations": map[string]string{
 					"netra.zyvor.dev/review-only":     "true",
@@ -192,12 +192,12 @@ func Build(agents []models.AgentStatus, limit int) Result {
 				"Review-only — apply via PacketWolf/Cilium or use Netra leased allow_sni for incidents",
 			},
 			Draft: map[string]any{
-				"operation":         "review",
-				"serviceAccount":    g.sa,
-				"hosts":             hosts,
-				"ciliumManifest":    manifest,
-				"preferPacketWolf":  true,
-				"netraLeaseHint":    "allow_sni",
+				"operation":        "review",
+				"serviceAccount":   g.sa,
+				"hosts":            hosts,
+				"ciliumManifest":   manifest,
+				"preferPacketWolf": true,
+				"netraLeaseHint":   "allow_sni",
 			},
 			Severity: "info", Packets: pkts,
 		})

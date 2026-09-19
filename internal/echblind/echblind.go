@@ -16,25 +16,25 @@ import (
 
 // Finding is one blindness / ECH-related observation.
 type Finding struct {
-	Kind       string `json:"kind"` // missing-sni | ech-cdn | ech-hello
-	HostOrIP   string `json:"hostOrIp,omitempty"`
-	Node       string `json:"node,omitempty"`
-	Namespace  string `json:"namespace,omitempty"`
-	Pod        string `json:"pod,omitempty"`
-	Packets    uint64 `json:"packets,omitempty"`
-	Severity   string `json:"severity"`
-	Rationale  string `json:"rationale"`
+	Kind      string `json:"kind"` // missing-sni | ech-cdn | ech-hello
+	HostOrIP  string `json:"hostOrIp,omitempty"`
+	Node      string `json:"node,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	Packets   uint64 `json:"packets,omitempty"`
+	Severity  string `json:"severity"`
+	Rationale string `json:"rationale"`
 }
 
 // Result is GET /api/v1/insights/ech-blind.
 type Result struct {
-	Findings []Finding `json:"findings"`
-	Count    int       `json:"count"`
-	MissingSNI int     `json:"missingSni"`
-	ECHCDN   int       `json:"echCdn"`
-	ECHHello int       `json:"echHello"`
-	Capped   bool      `json:"capped"`
-	Note     string    `json:"note"`
+	Findings   []Finding `json:"findings"`
+	Count      int       `json:"count"`
+	MissingSNI int       `json:"missingSni"`
+	ECHCDN     int       `json:"echCdn"`
+	ECHHello   int       `json:"echHello"`
+	Capped     bool      `json:"capped"`
+	Note       string    `json:"note"`
 }
 
 const MaxFindings = 300
@@ -93,7 +93,7 @@ func Build(agents []models.AgentStatus, fps []tlsfp.Observation, limit int) Resu
 				out.Findings = append(out.Findings, Finding{
 					Kind: "missing-sni", HostOrIP: c.RemoteIP, Node: a.Node,
 					Namespace: c.Namespace, Pod: c.Pod, Packets: c.Attempts,
-					Severity: "medium",
+					Severity:  "medium",
 					Rationale: "TLS-port connect attempts with no observed SNI for this workload (ECH, IP-literal, or truncated ClientHello)",
 				})
 			}
@@ -110,7 +110,7 @@ func Build(agents []models.AgentStatus, fps []tlsfp.Observation, limit int) Resu
 						out.Findings = append(out.Findings, Finding{
 							Kind: "ech-cdn", HostOrIP: host, Node: a.Node,
 							Namespace: t.Namespace, Pod: t.Pod, Packets: t.Handshakes,
-							Severity: "info",
+							Severity:  "info",
 							Rationale: "Destination is a known ECH-capable CDN/provider suffix",
 						})
 					}
@@ -127,7 +127,7 @@ func Build(agents []models.AgentStatus, fps []tlsfp.Observation, limit int) Resu
 		if len(out.Findings) < limit {
 			out.Findings = append(out.Findings, Finding{
 				Kind: "ech-hello", HostOrIP: o.SNI, Node: o.Node, Packets: o.Count,
-				Severity: "high",
+				Severity:  "high",
 				Rationale: "ClientHello carried encrypted_client_hello (0xfe0d) — SNI may be opaque",
 			})
 		}

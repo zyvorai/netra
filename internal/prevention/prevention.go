@@ -18,47 +18,47 @@ import (
 
 // Input is gathered by the API layer from store + optional detectors.
 type Input struct {
-	GeneratedAt time.Time
-	Mode        string
-	LeaseUntil  *time.Time
-	Agents      []models.AgentStatus
-	IntelFeed   []intel.Entry
-	BlockedIPv4 int
-	BlockedIPv6 int
-	BlockedDNS  int
-	BlockedSNI  int
-	DNSFindings int
-	ScanFindings int
-	AIDestHits  int
-	EncDNSDoT   int
-	EncDNSDoH   int
-	TLSFPUnique int
+	GeneratedAt         time.Time
+	Mode                string
+	LeaseUntil          *time.Time
+	Agents              []models.AgentStatus
+	IntelFeed           []intel.Entry
+	BlockedIPv4         int
+	BlockedIPv6         int
+	BlockedDNS          int
+	BlockedSNI          int
+	DNSFindings         int
+	ScanFindings        int
+	AIDestHits          int
+	EncDNSDoT           int
+	EncDNSDoH           int
+	TLSFPUnique         int
 	AutoMitigateActions int
 }
 
 // Snapshot is the JSON report.
 type Snapshot struct {
-	GeneratedAt         time.Time `json:"generatedAt"`
-	Headline            string    `json:"headline"`
-	Mode                string    `json:"mode"`
-	LeaseActive         bool      `json:"leaseActive"`
-	LeaseExpiresAt      time.Time `json:"leaseExpiresAt,omitempty"`
-	IntelFeedEntries    int       `json:"intelFeedEntries"`
-	IntelLiveHits       int       `json:"intelLiveHits"`
-	DenyExactIPs        int       `json:"denyExactIps"`
-	DenyDNS             int       `json:"denyDns"`
-	DenySNI             int       `json:"denySni"`
-	DNSDetectorFindings int       `json:"dnsDetectorFindings"`
-	ScanDetectorFindings int      `json:"scanDetectorFindings"`
-	AIDestinationHits   int       `json:"aiDestinationHits"`
-	DoTSightings        int       `json:"dotSightings"`
-	DoHSightings        int       `json:"dohSightings"`
-	TLSFingerprints     int       `json:"tlsFingerprints"`
-	AutoMitigateActions int       `json:"autoMitigateActions"`
-	CoverageScore       int       `json:"coverageScore"` // 0-100 heuristic completeness
-	Coverage            []string  `json:"coverage"`
-	Gaps                []string  `json:"gaps"`
-	Note                string    `json:"note"`
+	GeneratedAt          time.Time `json:"generatedAt"`
+	Headline             string    `json:"headline"`
+	Mode                 string    `json:"mode"`
+	LeaseActive          bool      `json:"leaseActive"`
+	LeaseExpiresAt       time.Time `json:"leaseExpiresAt,omitempty"`
+	IntelFeedEntries     int       `json:"intelFeedEntries"`
+	IntelLiveHits        int       `json:"intelLiveHits"`
+	DenyExactIPs         int       `json:"denyExactIps"`
+	DenyDNS              int       `json:"denyDns"`
+	DenySNI              int       `json:"denySni"`
+	DNSDetectorFindings  int       `json:"dnsDetectorFindings"`
+	ScanDetectorFindings int       `json:"scanDetectorFindings"`
+	AIDestinationHits    int       `json:"aiDestinationHits"`
+	DoTSightings         int       `json:"dotSightings"`
+	DoHSightings         int       `json:"dohSightings"`
+	TLSFingerprints      int       `json:"tlsFingerprints"`
+	AutoMitigateActions  int       `json:"autoMitigateActions"`
+	CoverageScore        int       `json:"coverageScore"` // 0-100 heuristic completeness
+	Coverage             []string  `json:"coverage"`
+	Gaps                 []string  `json:"gaps"`
+	Note                 string    `json:"note"`
 }
 
 // Build derives a Snapshot. When IntelFeed is non-empty, live hits are
@@ -85,7 +85,7 @@ func Build(in Input) Snapshot {
 		GeneratedAt: now, Mode: in.Mode, LeaseActive: leaseActive,
 		IntelFeedEntries: len(in.IntelFeed), IntelLiveHits: intelHits,
 		DenyExactIPs: in.BlockedIPv4 + in.BlockedIPv6,
-		DenyDNS: in.BlockedDNS, DenySNI: in.BlockedSNI,
+		DenyDNS:      in.BlockedDNS, DenySNI: in.BlockedSNI,
 		DNSDetectorFindings: in.DNSFindings, ScanDetectorFindings: in.ScanFindings,
 		AIDestinationHits: in.AIDestHits, DoTSightings: in.EncDNSDoT, DoHSightings: in.EncDNSDoH,
 		TLSFingerprints: in.TLSFPUnique, AutoMitigateActions: in.AutoMitigateActions,
