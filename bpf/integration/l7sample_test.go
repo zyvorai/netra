@@ -19,8 +19,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"golang.org/x/sys/unix"
+
 	"github.com/zyvorai/netra/internal/l7sample"
 )
+
+func enableRunStats() (io.Closer, error) { return ebpf.EnableStats(unix.BPF_STATS_RUN_TIME) }
 
 // These tests load the real bpf/netra_l7sample.o into a real kernel and verifier,
 // attach it to a scratch cgroup that holds only the test process (so nothing else
@@ -231,15 +236,20 @@ func TestL7SampleRedisRequestAndResponseAreCapturedAndClassified(t *testing.T) {
 	}
 
 	// The whole path: kernel bytes -> parser -> bounded counters.
-	snap := counters.Snapshot()
-	var redis l7sample.ProtoStats
-	for _, p := range snap.Protocols {
+	// One PING crossed the wire in two directions and was seen on both sides, so it
+	// is one request in each role (the client's egress = issued, the server's
+	// ingress = served), and never two in one number.
+	byRole := map[string]l7sample.ProtoStats{}
+	for _, p := range counters.Snapshot().Protocols {
 		if p.Protocol == "redis" {
-			redis = p
+			byRole[p.Role] = p
 		}
 	}
-	if redis.Requests < 2 || redis.Responses < 2 || len(redis.Ops) == 0 || redis.Ops[0].Op != "PING" || redis.Errors != 0 {
-		t.Fatalf("counters = %+v", redis)
+	for _, role := range []string{l7sample.RoleServed, l7sample.RoleIssued} {
+		r := byRole[role]
+		if r.Requests != 1 || r.Responses != 1 || len(r.Ops) != 1 || r.Ops[0].Op != "PING" || r.Errors != 0 {
+			t.Fatalf("%s: counters = %+v, want exactly 1 PING request and 1 response", role, r)
+		}
 	}
 
 	st, err := h.s.KernelStats()
@@ -372,11 +382,11 @@ func TestL7SampleIPv6(t *testing.T) {
 	}
 	var pg l7sample.ProtoStats
 	for _, p := range counters.Snapshot().Protocols {
-		if p.Protocol == "postgres" {
+		if p.Protocol == "postgres" && p.Role == l7sample.RoleServed {
 			pg = p
 		}
 	}
-	if pg.Requests == 0 || len(pg.Ops) == 0 || pg.Ops[0].Op != "SELECT" {
+	if pg.Requests != 1 || len(pg.Ops) != 1 || pg.Ops[0].Op != "SELECT" {
 		t.Fatalf("postgres counters = %+v", pg)
 	}
 }
@@ -403,4 +413,66 @@ func TestL7SampleReadsNothingWhenNoPayloadIsCarried(t *testing.T) {
 		t.Fatalf("payload-less segments counted as eligible: %+v", st)
 	}
 	_ = io.EOF
+}
+
+// The program runs on every TCP segment in the cgroup it is attached to, so its
+// per-packet cost is what a user pays. Measured with the kernel's own BPF run-time
+// accounting: on traffic to a port that is NOT configured (the common case: a
+// header parse and two map lookups), and on a configured port with the default
+// 100 ms rate limit (mostly rate-limited). Always run, with a generous ceiling, so
+// an order-of-magnitude regression is caught; NETRA_BPF_COST_N sets the count.
+func TestL7SampleCostPerPacket(t *testing.T) {
+	n := 20000
+	if v, err := strconv.Atoi(os.Getenv("NETRA_BPF_COST_N")); err == nil && v > 0 {
+		n = v
+	}
+	closer, err := enableRunStats()
+	if err != nil {
+		t.Skipf("cannot enable BPF run-time statistics: %v", err)
+	}
+	defer closer.Close()
+
+	sampled := freePort(t)
+	h := startL7(t, map[uint16]l7sample.Protocol{uint16(sampled): l7sample.ProtoRedis}, 100*time.Millisecond)
+	measure := func(port int) (perRun time.Duration, runs uint64) {
+		r0, s0, err := h.s.ProgramStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := dialNoDelay(t, "tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+		req := []byte("*1\r\n$4\r\nPING\r\n")
+		buf := make([]byte, 64)
+		for i := 0; i < n; i++ {
+			if _, err := c.Write(req); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.Read(buf); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r1, s1, err := h.s.ProgramStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs = r1 - r0
+		if runs == 0 {
+			t.Fatal("the program did not run")
+		}
+		return (s1 - s0) / time.Duration(runs), runs
+	}
+
+	other, stopOther := serve(t, "tcp4", "127.0.0.1:0", []byte("+PONG\r\n"))
+	defer stopOther()
+	_, stopSampled := serve(t, "tcp4", fmt.Sprintf("127.0.0.1:%d", sampled), []byte("+PONG\r\n"))
+	defer stopSampled()
+
+	unconfigured, ur := measure(other)
+	configured, cr := measure(sampled)
+	t.Logf("unconfigured port : %v per program run (%d runs: header parse + two map lookups)", unconfigured, ur)
+	t.Logf("configured, 100ms : %v per program run (%d runs: mostly rate-limited)", configured, cr)
+	for name, d := range map[string]time.Duration{"unconfigured": unconfigured, "configured": configured} {
+		if d > 30*time.Microsecond {
+			t.Fatalf("%s: %v per packet is far beyond what a header parse and two lookups should cost", name, d)
+		}
+	}
 }

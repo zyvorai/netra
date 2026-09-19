@@ -16,7 +16,27 @@ const (
 	topHosts     = 50
 )
 
+// Role says which side of the conversation this node observed. A request is seen
+// twice on the wire: leaving the client (egress) and arriving at the server
+// (ingress). Counting both would double every request, so they are kept apart:
+// "served" is what this node's services handled (requests arriving, responses
+// leaving) and "issued" is what its workloads asked of others (requests leaving,
+// responses arriving). Sum a role across nodes, never the two roles together.
+const (
+	RoleServed = "served"
+	RoleIssued = "issued"
+)
+
+// RoleOf reports the role a sample belongs to.
+func RoleOf(s Sample) string {
+	if s.ToServer == s.Egress { // request leaving, or response arriving
+		return RoleIssued
+	}
+	return RoleServed
+}
+
 type opKey struct {
+	role   string
 	proto  Protocol
 	kind   Kind
 	op     string
@@ -37,14 +57,18 @@ type Counters struct {
 	overflow     uint64 // observations dropped because a table was full
 	hosts        map[hostKey]uint64
 	hostOverflow uint64
-	seen         uint64 // samples offered
-	classified   uint64 // samples a parser recognised
-	undecodable  map[Protocol]uint64
+	seen         uint64           // samples offered
+	classified   uint64           // samples a parser recognised
+	undecodable  map[opKey]uint64 // keyed by (role, protocol); other fields zero
+}
+
+func (c *Counters) undecodableFor(p Protocol, role string) uint64 {
+	return c.undecodable[opKey{role: role, proto: p}]
 }
 
 // NewCounters returns empty Counters.
 func NewCounters() *Counters {
-	return &Counters{ops: map[opKey]uint64{}, hosts: map[hostKey]uint64{}, undecodable: map[Protocol]uint64{}}
+	return &Counters{ops: map[opKey]uint64{}, hosts: map[hostKey]uint64{}, undecodable: map[opKey]uint64{}}
 }
 
 // Observe classifies one sample and counts it. The payload is not retained.
@@ -58,9 +82,9 @@ func (c *Counters) Observe(s Sample) {
 	}
 	c.classified++
 	if o.Op == "undecodable_headers" {
-		c.undecodable[o.Proto]++
+		c.undecodable[opKey{role: RoleOf(s), proto: o.Proto}]++
 	}
-	k := opKey{o.Proto, o.Kind, o.Op, o.Status, o.Code, o.GRPC}
+	k := opKey{RoleOf(s), o.Proto, o.Kind, o.Op, o.Status, o.Code, o.GRPC}
 	if _, exists := c.ops[k]; !exists && len(c.ops) >= maxOpKeys {
 		c.overflow++
 	} else {
@@ -89,9 +113,10 @@ type CodeCount struct {
 	Count  uint64 `json:"count"`
 }
 
-// ProtoStats is one protocol's counts.
+// ProtoStats is one protocol's counts in one role.
 type ProtoStats struct {
 	Protocol    string      `json:"protocol"`
+	Role        string      `json:"role"`
 	Requests    uint64      `json:"requests"`
 	Responses   uint64      `json:"responses"`
 	Errors      uint64      `json:"errors"`
@@ -124,22 +149,27 @@ func (c *Counters) Snapshot() Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := Snapshot{Seen: c.seen, Classified: c.classified, Overflow: c.overflow, HostsOthers: c.hostOverflow}
-	byProto := map[Protocol]*ProtoStats{}
-	ops := map[Protocol]map[string]uint64{}
-	codes := map[Protocol]map[CodeCount]uint64{}
+	type pr struct {
+		proto Protocol
+		role  string
+	}
+	byProto := map[pr]*ProtoStats{}
+	ops := map[pr]map[string]uint64{}
+	codes := map[pr]map[CodeCount]uint64{}
 	for k, n := range c.ops {
-		ps := byProto[k.proto]
+		key := pr{k.proto, k.role}
+		ps := byProto[key]
 		if ps == nil {
-			ps = &ProtoStats{Protocol: k.proto.String(), Undecodable: c.undecodable[k.proto]}
-			byProto[k.proto] = ps
-			ops[k.proto] = map[string]uint64{}
-			codes[k.proto] = map[CodeCount]uint64{}
+			ps = &ProtoStats{Protocol: k.proto.String(), Role: k.role, Undecodable: c.undecodableFor(k.proto, k.role)}
+			byProto[key] = ps
+			ops[key] = map[string]uint64{}
+			codes[key] = map[CodeCount]uint64{}
 		}
 		switch k.kind {
 		case KindRequest:
 			ps.Requests += n
 			if k.op != "" {
-				ops[k.proto][k.op] += n
+				ops[key][k.op] += n
 			}
 			if k.grpc {
 				ps.GRPC += n
@@ -150,7 +180,7 @@ func (c *Counters) Snapshot() Snapshot {
 				ps.Errors += n
 			}
 			if k.code != "" {
-				codes[k.proto][CodeCount{Code: k.code, Status: k.status.String()}] += n
+				codes[key][CodeCount{Code: k.code, Status: k.status.String()}] += n
 			}
 		}
 	}
@@ -185,7 +215,12 @@ func (c *Counters) Snapshot() Snapshot {
 		})
 		out.Protocols = append(out.Protocols, *ps)
 	}
-	sort.Slice(out.Protocols, func(i, j int) bool { return out.Protocols[i].Protocol < out.Protocols[j].Protocol })
+	sort.Slice(out.Protocols, func(i, j int) bool {
+		if out.Protocols[i].Protocol != out.Protocols[j].Protocol {
+			return out.Protocols[i].Protocol < out.Protocols[j].Protocol
+		}
+		return out.Protocols[i].Role < out.Protocols[j].Role
+	})
 	for hk, n := range c.hosts {
 		out.Hosts = append(out.Hosts, HostCount{hk.host, hk.op, n})
 	}

@@ -79,8 +79,44 @@ func TestDecodeEventRejectsMalformedRecords(t *testing.T) {
 	}
 }
 
+// sample is a server-side view: a request arrives (ingress) and its reply leaves
+// (egress), so both fall in the "served" role.
 func sample(p Protocol, toServer bool, payload string) Sample {
-	return Sample{Proto: p, ToServer: toServer, Data: []byte(payload)}
+	return Sample{Proto: p, ToServer: toServer, Egress: !toServer, Data: []byte(payload)}
+}
+
+func TestRoleSeparatesWhatWasServedFromWhatWasIssued(t *testing.T) {
+	for _, c := range []struct {
+		toServer, egress bool
+		want             string
+	}{
+		{true, false, RoleServed},  // a request arriving at a service on this node
+		{false, true, RoleServed},  // its response leaving
+		{true, true, RoleIssued},   // a request this node's workload sends
+		{false, false, RoleIssued}, // the response it gets back
+	} {
+		if got := RoleOf(Sample{ToServer: c.toServer, Egress: c.egress}); got != c.want {
+			t.Errorf("toServer=%v egress=%v => %s, want %s", c.toServer, c.egress, got, c.want)
+		}
+	}
+}
+
+// The same GET seen leaving the client and arriving at the server must not be
+// counted as two requests in one number.
+func TestARequestSeenOnBothSidesIsCountedOncePerRole(t *testing.T) {
+	c := NewCounters()
+	get := []byte("*2\r\n$3\r\nGET\r\n$1\r\nk\r\n")
+	for i := 0; i < 5; i++ {
+		c.Observe(Sample{Proto: ProtoRedis, ToServer: true, Egress: true, Data: get})  // client egress
+		c.Observe(Sample{Proto: ProtoRedis, ToServer: true, Egress: false, Data: get}) // server ingress
+	}
+	byRole := map[string]uint64{}
+	for _, p := range c.Snapshot().Protocols {
+		byRole[p.Role] += p.Requests
+	}
+	if byRole[RoleServed] != 5 || byRole[RoleIssued] != 5 || len(byRole) != 2 {
+		t.Fatalf("requests by role = %v, want 5 served and 5 issued, never 10 in one number", byRole)
+	}
 }
 
 func TestCountersAggregateRequestsResponsesAndErrors(t *testing.T) {
@@ -104,6 +140,9 @@ func TestCountersAggregateRequestsResponsesAndErrors(t *testing.T) {
 		t.Fatalf("protocols = %+v", s.Protocols)
 	}
 	p := s.Protocols[0]
+	if p.Role != RoleServed {
+		t.Fatalf("role = %q", p.Role)
+	}
 	if p.Protocol != "redis" || p.Requests != 7 || p.Responses != 7 || p.Errors != 1 {
 		t.Fatalf("redis = %+v", p)
 	}

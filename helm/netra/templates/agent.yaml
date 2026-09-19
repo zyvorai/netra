@@ -65,6 +65,16 @@ spec:
           value: {{ .Values.agent.dropInfo | default "auto" | quote }}
         - name: NETRA_LISTEN_QUEUES
           value: {{ .Values.agent.listenQueues | default "auto" | quote }}
+        - name: NETRA_L7_SAMPLE
+          value: {{ .Values.agent.l7Sample | default "off" | quote }}
+        {{- if .Values.agent.l7SamplePorts }}
+        - name: NETRA_L7_SAMPLE_PORTS
+          value: {{ .Values.agent.l7SamplePorts | quote }}
+        {{- end }}
+        {{- if .Values.agent.l7SampleGap }}
+        - name: NETRA_L7_SAMPLE_GAP
+          value: {{ .Values.agent.l7SampleGap | quote }}
+        {{- end }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:

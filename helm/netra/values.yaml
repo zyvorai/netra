@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.108"
+  tag: "0.27.109"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.108"
+  tag: "0.27.109"
 replicaCount: 1
 ha:
   enabled: false
@@ -292,6 +292,18 @@ agent:
   # TCP accept-queue depth per listener, from inet_diag (docs/listen-queues.md).
   # No BPF and no extra privilege. auto|off.
   listenQueues: auto
+  # Sampled application-protocol observation (bpf/netra_l7sample.c,
+  # docs/l7-sampling.md): which Redis commands, SQL verbs, Kafka APIs and gRPC
+  # methods workloads use and how often they fail. It reads application payload
+  # bytes in the agent's memory (never stored, never exported; only bounded
+  # operation names and coarse outcomes leave), so it is OFF by default.
+  # off|auto|required.
+  l7Sample: "off"
+  # "port:protocol,..." (redis, postgres, mysql, kafka, http2/grpc, http1). Empty
+  # uses the agent default: 6379:redis,5432:postgres,3306:mysql,9092:kafka,50051:grpc.
+  l7SamplePorts: ""
+  # Minimum time between samples of one flow and direction. Empty: 100ms.
+  l7SampleGap: ""
   # Mount the host's tracefs (/sys/kernel/tracing) read-only into the agent.
   # A container's own /sys is a bare sysfs with no tracefs, so without this the
   # agent cannot read tracepoint record layouts: the TCP event sensors and the

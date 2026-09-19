@@ -1133,6 +1133,9 @@ type AgentReport struct {
 	// DropInfo is nil when drop attribution is off; when it tried and could not
 	// load, it carries Unavailable with the reason.
 	DropInfo *DropInfoSummary `json:"dropInfo,omitempty"`
+	// L7Sample is nil when sampled L7 protocol observation is off (the default);
+	// when it tried and could not start it carries Unavailable with the reason.
+	L7Sample *L7SampleSummary `json:"l7Sample,omitempty"`
 	// MapScans is the cost of the agent's latest read of each big BPF map.
 	MapScans []MapScanStat `json:"mapScans,omitempty"`
 	// ListenQueues is nil when listen-queue sampling is off; when it tried and
@@ -1433,6 +1436,74 @@ type LockdownRequest struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Selector  map[string]string `json:"selector"`
+}
+
+// L7SampleSummary is one node's sampled application-protocol counts: which
+// Redis commands, SQL verbs, Kafka APIs and gRPC methods a workload uses and how
+// often they fail (internal/l7sample, docs/l7-sampling.md). It is built from a
+// rate-limited sample of packets, so every count is an estimate; ScaleFactor
+// converts it. Payloads are parsed in the agent and never leave it: only bounded
+// operation names and coarse outcomes are reported.
+type L7SampleSummary struct {
+	Attached    bool   `json:"attached"`
+	Unavailable string `json:"unavailable,omitempty"`
+	// Ports lists the configured service ports as "port:protocol".
+	Ports []string `json:"ports,omitempty"`
+	// Kernel counters: payload-bearing segments seen on a configured port, how many
+	// were sampled, and why the rest were not.
+	Eligible    uint64 `json:"eligible"`
+	Emitted     uint64 `json:"emitted"`
+	RateLimited uint64 `json:"rateLimited,omitempty"`
+	RingbufFull uint64 `json:"ringbufFull,omitempty"`
+	LoadFail    uint64 `json:"loadFail,omitempty"`
+	// ScaleFactor is Eligible/Emitted (>= 1): multiply a sampled count by it to
+	// estimate the real count. 0 when nothing has been sampled.
+	ScaleFactor float64 `json:"scaleFactor,omitempty"`
+	// Seen/Classified: samples the agent parsed, and how many a parser recognised.
+	Seen       uint64             `json:"seen"`
+	Classified uint64             `json:"classified"`
+	Overflow   uint64             `json:"overflow,omitempty"`
+	Protocols  []L7SampleProtocol `json:"protocols,omitempty"`
+	Hosts      []L7SampleHost     `json:"hosts,omitempty"`
+}
+
+// L7SampleProtocol is one protocol's sampled counts.
+type L7SampleProtocol struct {
+	Protocol string `json:"protocol"`
+	// Role is "served" (requests arriving at this node's services, responses
+	// leaving) or "issued" (requests this node's workloads send, responses that
+	// come back). A request crosses the wire twice, so the two roles must be
+	// summed separately, never together.
+	Role        string         `json:"role"`
+	Requests    uint64         `json:"requests"`
+	Responses   uint64         `json:"responses"`
+	Errors      uint64         `json:"errors"`
+	Undecodable uint64         `json:"undecodable,omitempty"`
+	GRPC        uint64         `json:"grpc,omitempty"`
+	Ops         []L7SampleOp   `json:"ops,omitempty"`
+	Codes       []L7SampleCode `json:"codes,omitempty"`
+}
+
+// L7SampleOp is an operation name (a Redis command, SQL verb, Kafka API, gRPC
+// method) and its sampled request count.
+type L7SampleOp struct {
+	Op    string `json:"op"`
+	Count uint64 `json:"count"`
+}
+
+// L7SampleCode is a response outcome (Redis error kind, SQLSTATE class, HTTP or
+// gRPC status) and its sampled count.
+type L7SampleCode struct {
+	Code   string `json:"code"`
+	Status string `json:"status,omitempty"`
+	Count  uint64 `json:"count"`
+}
+
+// L7SampleHost is a bounded (host, method) HTTP request count.
+type L7SampleHost struct {
+	Host  string `json:"host"`
+	Op    string `json:"op"`
+	Count uint64 `json:"count"`
 }
 
 // MapScanStat is what the agent's latest read of one BPF map cost, so a node whose

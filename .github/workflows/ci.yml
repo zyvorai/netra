@@ -218,6 +218,18 @@ jobs:
         awk '/name: NETRA_DROP_INFO$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-sensors-off.yaml
         # The plain manifest mounts it too.
         grep -q 'mountPath: /sys/kernel/tracing' deploy/agent.yaml
+        # Sampled L7 protocol observation reads application payloads: it must render
+        # OFF by default, and its port list and rate limit must reach the agent.
+        awk '/name: NETRA_L7_SAMPLE$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra.yaml
+        if grep -q 'NETRA_L7_SAMPLE_PORTS' /tmp/netra.yaml; then
+          echo "NETRA_L7_SAMPLE_PORTS rendered by default" >&2
+          exit 1
+        fi
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.l7Sample=auto --set 'agent.l7SamplePorts=6379:redis\,8080:http1' --set agent.l7SampleGap=250ms >/tmp/netra-l7s.yaml
+        awk '/name: NETRA_L7_SAMPLE$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra-l7s.yaml
+        grep -q '6379:redis,8080:http1' /tmp/netra-l7s.yaml
+        grep -q '250ms' /tmp/netra-l7s.yaml
         # Listen-queue sampling is a plain env knob (no BPF).
         awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
@@ -554,6 +566,22 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev iperf3 iproute2 openssl
     - name: TLS fingerprint openssl + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-tlsfp-smoke.sh
+  l7sample-smoke:
+    # The real agent and controller with NETRA_L7_SAMPLE=required, fake Redis and
+    # PostgreSQL servers on loopback, real traffic: exact per-role operation counts
+    # in the API and /metrics, the kernel's eligible/emitted counters, and a
+    # planted secret that must appear nowhere the agent or controller exposes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install clang
+      run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev
+    - name: Sampled L7 protocol observation end to end (scripted)
+      # Same command locally: sudo ./scripts/ci-l7sample-smoke.sh
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-l7sample-smoke.sh
   agent-image:
     # Builds Dockerfile.agent with the image's own clang and checks what
     # shipped: the agent binary and a BPF object for every bpf/netra_*.c. A

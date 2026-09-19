@@ -39,5 +39,8 @@ func (*Sampler) Run(context.Context, func(Sample)) {}
 // KernelStats always fails off Linux.
 func (*Sampler) KernelStats() (KernelStats, error) { return KernelStats{}, ErrUnsupported }
 
+// ProgramStats always fails off Linux.
+func (*Sampler) ProgramStats() (uint64, time.Duration, error) { return 0, 0, ErrUnsupported }
+
 // Close is a no-op.
 func (*Sampler) Close() error { return nil }

@@ -159,6 +159,29 @@ func (s *Sampler) KernelStats() (KernelStats, error) {
 	return out, nil
 }
 
+// ProgramStats reports how many times the egress and ingress programs have run
+// and the total time they spent, from the kernel's own BPF accounting. Both are
+// zero unless run-time statistics are enabled (ebpf.EnableStats with
+// unix.BPF_STATS_RUN_TIME, or kernel.bpf_stats_enabled=1).
+func (s *Sampler) ProgramStats() (runs uint64, spent time.Duration, err error) {
+	if s == nil || s.coll == nil {
+		return 0, 0, errors.New("sampler is closed")
+	}
+	for _, name := range []string{"netra_l7s_egress", "netra_l7s_ingress"} {
+		p := s.coll.Programs[name]
+		if p == nil {
+			return 0, 0, fmt.Errorf("program %s missing", name)
+		}
+		st, err := p.Stats()
+		if err != nil {
+			return 0, 0, err
+		}
+		runs += st.RunCount
+		spent += st.Runtime
+	}
+	return runs, spent, nil
+}
+
 // Close detaches the programs and frees the maps.
 func (s *Sampler) Close() error {
 	var errs []error

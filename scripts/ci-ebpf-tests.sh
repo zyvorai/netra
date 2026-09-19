@@ -94,9 +94,9 @@ l7_log="${OUT}/l7sample.log"
 NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
   "$BIN" -test.v -test.count=1 -test.run 'TestL7Sample' >"$l7_log" 2>&1 || { cat "$l7_log"; exit 1; }
 l7_pass="$(grep -c -- '^--- PASS: TestL7Sample' "$l7_log" || true)"
-if grep -q -- '^--- SKIP: TestL7Sample' "$l7_log" || (( l7_pass < 6 )); then
+if grep -q -- '^--- SKIP: TestL7Sample' "$l7_log" || (( l7_pass < 7 )); then
   cat "$l7_log"
-  echo "L7 sampler tests: ${l7_pass} passed (want 6) or some skipped" >&2
+  echo "L7 sampler tests: ${l7_pass} passed (want 7) or some skipped" >&2
   exit 1
 fi
 echo "    ${l7_pass} passed"

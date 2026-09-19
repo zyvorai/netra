@@ -36,6 +36,7 @@ import (
 	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/kerneldiag"
+	"github.com/zyvorai/netra/internal/l7sample"
 	"github.com/zyvorai/netra/internal/listenq"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
@@ -111,6 +112,14 @@ type Agent struct {
 	// to one log line rather than one per report.
 	listenQ       *listenq.Sampler
 	listenQWarned bool
+	// l7sample* are the sampled application-protocol observer (bpf/netra_l7sample.c,
+	// docs/l7-sampling.md). Off unless NETRA_L7_SAMPLE is set; the sampler is nil
+	// when it is off or could not start (l7SampleWhy says why).
+	l7SampleObject string
+	l7Sampler      *l7sample.Sampler
+	l7Counters     *l7sample.Counters
+	l7SampleWhy    string
+	l7SamplePorts  []string
 	// scans is the latest cost of each map read (mapread.go), for the report.
 	scanMu        sync.Mutex
 	scans         map[string]models.MapScanStat
@@ -198,6 +207,7 @@ func New(log *slog.Logger) *Agent {
 		tlsfpObject:     env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
 		tcpEventsObject: env("NETRA_BPF_TCPEVENTS_OBJECT", "/opt/netra/bpf/netra_tcpevents.o"),
 		dropInfoObject:  env("NETRA_BPF_DROPINFO_OBJECT", "/opt/netra/bpf/netra_dropinfo.o"),
+		l7SampleObject:  env("NETRA_BPF_L7SAMPLE_OBJECT", "/opt/netra/bpf/netra_l7sample.o"),
 		cgroupPath:      env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
 		interfaces: splitCSV(os.Getenv("NETRA_INTERFACES")), xdpInterfaces: splitCSV(os.Getenv("NETRA_XDP_INTERFACES")),
 		http: client, events: make(chan models.FastPathEvent, 4096), tlsFP: tlsfp.NewDetector(2048),
@@ -221,6 +231,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.lastSync = time.Now()
 	go a.readEvents(ctx)
 	go a.readTLSHelloEvents(ctx)
+	if a.l7Sampler != nil {
+		go a.l7Sampler.Run(ctx, a.l7Counters.Observe)
+	}
 	t := time.NewTicker(3 * time.Second)
 	defer t.Stop()
 	for {
@@ -497,6 +510,9 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	a.attachListenQueues()
+	if err := a.attachL7Sample(); err != nil {
+		return err
+	}
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
 	if err != nil {
 		return err
@@ -938,6 +954,10 @@ func (a *Agent) Close() {
 		_ = a.dropInfo.Close()
 		a.dropInfo = nil
 	}
+	if a.l7Sampler != nil {
+		_ = a.l7Sampler.Close()
+		a.l7Sampler = nil
+	}
 }
 
 func (a *Agent) syncAndReport(ctx context.Context) error {
@@ -1114,6 +1134,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	tcpEvents := a.readTCPEvents()
 	dropInfo := a.readDropInfo()
 	listenQueues := a.readListenQueues()
+	l7 := a.readL7Sample()
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1121,7 +1142,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, L7Sample: l7, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
