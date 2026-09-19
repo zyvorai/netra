@@ -157,6 +157,22 @@ spec:
           value: {{ .Values.auth.oidc.identityClaim | quote }}
         {{- end }}
         {{- end }}
+        {{- if .Values.metrics.workloadLabels.enabled }}
+        - name: NETRA_METRICS_WORKLOAD_LABELS
+          value: "on"
+        - name: NETRA_METRICS_WORKLOAD_MAX
+          value: {{ .Values.metrics.workloadLabels.maxWorkloads | quote }}
+        - name: NETRA_METRICS_WORKLOAD_IDLE
+          value: {{ .Values.metrics.workloadLabels.idleTimeout | quote }}
+        {{- end }}
+        {{- if .Values.slo.definitions }}
+        - name: NETRA_SLO_DEFINITIONS
+          value: {{ .Values.slo.definitions | toJson | quote }}
+        {{- end }}
+        {{- if or .Values.metrics.workloadLabels.enabled .Values.slo.definitions }}
+        - name: NETRA_WORKLOAD_OBS_INTERVAL
+          value: {{ .Values.slo.interval | quote }}
+        {{- end }}
         {{- if .Values.ai.enabled }}
         - name: NETRA_AI_BASE_URL
           value: {{ .Values.ai.baseURL | quote }}

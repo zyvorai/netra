@@ -53,6 +53,12 @@ jobs:
       # lifecycle (repeated under -race). Same command locally:
       # ./scripts/ci-otlp-unit.sh
       run: ./scripts/ci-otlp-unit.sh
+    - name: Workload metrics + SLO unit + race (scripted)
+      # Per-workload monotonic counters (pod churn, agent resets, stale nodes,
+      # cardinality cap), SLO registry extensions, observer burn/recovery
+      # lifecycle, /metrics + /api/v1/slo. Same command locally:
+      # ./scripts/ci-workload-obs-unit.sh
+      run: ./scripts/ci-workload-obs-unit.sh
     - name: Race-detect HA leader election (no-double-ship push sinks)
       # electionLoop's promote/demote wiring is what both startSyslog and
       # startSnowflake rely on to guarantee only the active leader ever
@@ -186,6 +192,43 @@ jobs:
         grep -q 'name: NETRA_OIDC_ROLE_MAP' /tmp/netra-oidc.yaml
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key --set auth.metricsToken=ci-metrics >/tmp/netra-mt.yaml
         grep -q 'metrics-token: "ci-metrics"' /tmp/netra-mt.yaml
+    - name: Workload metrics, SLOs, ServiceMonitor and PrometheusRule are opt-in and well-formed
+      run: |
+        A=(--set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key)
+        # Off by default: nothing new rendered.
+        if grep -qE 'kind: (ServiceMonitor|PrometheusRule)|NETRA_SLO_DEFINITIONS|NETRA_METRICS_WORKLOAD' /tmp/netra.yaml; then
+          echo "workload metrics / SLO / monitoring objects unexpectedly rendered by default" >&2
+          exit 1
+        fi
+        # The Service must carry labels, or a ServiceMonitor selector matches nothing.
+        awk '/^kind: Service$/{f=1} f&&/app.kubernetes.io\/name: netra/{ok=1} /^---/{f=0} END{exit !ok}' /tmp/netra.yaml
+        # Everything on, with a token-gated /metrics.
+        helm template test helm/netra "${A[@]}" --set auth.metricsToken=ci-metrics \
+          --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
+          --set metrics.workloadLabels.enabled=true --set metrics.workloadLabels.maxWorkloads=50 \
+          --set 'slo.definitions[0].name=checkout' --set 'slo.definitions[0].sli=http_5xx' \
+          --set 'slo.definitions[0].targetPct=99.9' >/tmp/netra-e2.yaml
+        python3 - <<'PY'
+        import yaml
+        docs = [d for d in yaml.safe_load_all(open("/tmp/netra-e2.yaml")) if d]
+        kinds = {d["kind"] for d in docs}
+        assert {"ServiceMonitor", "PrometheusRule"} <= kinds, kinds
+        sm = next(d for d in docs if d["kind"] == "ServiceMonitor")["spec"]
+        ep = sm["endpoints"][0]
+        assert ep["port"] == "https" and ep["scheme"] == "https" and ep["path"] == "/metrics", ep
+        assert ep["authorization"]["credentials"]["key"] == "metrics-token", ep
+        assert sm["selector"]["matchLabels"] == {"app.kubernetes.io/name": "netra"}, sm
+        dep = next(d for d in docs if d["kind"] == "Deployment")
+        env = {e["name"]: e.get("value") for c in dep["spec"]["template"]["spec"]["containers"] for e in c.get("env", [])}
+        assert env["NETRA_METRICS_WORKLOAD_LABELS"] == "on" and env["NETRA_METRICS_WORKLOAD_MAX"] == "50", env
+        assert '"name":"checkout"' in env["NETRA_SLO_DEFINITIONS"], env
+        PY
+        # Without a token there is no authorization block (an open /metrics needs none).
+        helm template test helm/netra "${A[@]}" --set metrics.serviceMonitor.enabled=true >/tmp/netra-sm.yaml
+        if grep -q 'authorization:' /tmp/netra-sm.yaml; then
+          echo "ServiceMonitor sends a bearer token although none is configured" >&2
+          exit 1
+        fi
     - name: Default render must not enable dns/scan detectors
       run: |
         if grep -q 'name: NETRA_DNSDETECT_ENABLED' /tmp/netra.yaml || grep -q 'name: NETRA_SCANDETECT_ENABLED' /tmp/netra.yaml; then
@@ -458,3 +501,37 @@ jobs:
       with: {go-version: '1.27.1', cache: true}
     - name: OIDC + RBAC against a live netrad
       run: ./scripts/ci-oidc-live.sh
+  workload-obs-live:
+    # The real netrad fed synthetic agent reports over POST /api/v1/agents/report:
+    # growth, the cardinality cap + __other__, an agent counter reset, a vanished
+    # workload, an SLO burn that pages and is audited, and monotonic counters
+    # throughout. No root, cluster or agent. Same command locally:
+    # ./scripts/ci-workload-obs-live.sh
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Per-workload metrics + SLO against a live netrad
+      run: ./scripts/ci-workload-obs-live.sh
+  prometheus-rules:
+    # The chart's PrometheusRule rendered and unit-tested with promtool:
+    # `check rules`, then `test rules` with synthetic series asserting when each
+    # alert does and does not fire. Same command locally (promtool on PATH):
+    # ./scripts/ci-prometheus-rules.sh
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4
+    - run: pip install pyyaml
+    - name: Install promtool (pinned, checksum-verified)
+      run: |
+        v=3.5.0
+        f=prometheus-${v}.linux-amd64.tar.gz
+        curl -fsSL -o "$f" "https://github.com/prometheus/prometheus/releases/download/v${v}/${f}"
+        echo "e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a  ${f}" | sha256sum -c -
+        tar xzf "$f" --strip-components=1 "prometheus-${v}.linux-amd64/promtool"
+        sudo install -m 0755 promtool /usr/local/bin/promtool
+        promtool --version
+    - name: promtool check + test the chart's alert rules
+      run: ./scripts/ci-prometheus-rules.sh

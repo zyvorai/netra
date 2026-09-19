@@ -9,6 +9,7 @@
 package slo
 
 import (
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ type Definition struct {
 	TargetPct   float64       `json:"targetPct"`   // e.g. 99.9
 	LatencyGoal time.Duration `json:"latencyGoal"` // e.g. 200ms
 	Window      time.Duration `json:"window"`      // e.g. 30d
+	// SLI selects which signal feeds this SLO. Empty means classic
+	// per-request Observe calls; a named SLI only matches observations
+	// tagged with the same name (see ObserveCounts).
+	SLI string `json:"sli,omitempty"`
 }
 
 // Observation is one request outcome attributed to a service.
@@ -31,6 +36,29 @@ type Observation struct {
 	Workload  string
 	Latency   time.Duration
 	IsError   bool
+	// SLI tags the observation with the signal it measures ("" = classic).
+	SLI string
+	// Total and Errors, when Total > 0, make this one observation stand for
+	// Total events of which Errors failed. Netra sees counters, not single
+	// requests, so its feeds arrive pre-aggregated. Total == 0 keeps the
+	// original meaning: one event, failed if IsError.
+	Total  uint64
+	Errors uint64
+}
+
+// weights is the (total, errors) an observation contributes to a window.
+func weights(o Observation) (total, errs uint64) {
+	if o.Total > 0 {
+		errs = o.Errors
+		if errs > o.Total {
+			errs = o.Total
+		}
+		return o.Total, errs
+	}
+	if o.IsError {
+		return 1, 1
+	}
+	return 1, 0
 }
 
 // BurnSeverity classifies how urgently a burn-rate breach should be handled.
@@ -68,6 +96,13 @@ type Config struct {
 
 	MaxSLOs      int
 	MaxObsPerSLO int
+
+	// BucketWidth, when > 0, coalesces observations into fixed time buckets
+	// so a long window costs Window/BucketWidth entries instead of one per
+	// event. Zero (the default) keeps one entry per Observe call. Size
+	// MaxObsPerSLO to at least Window/BucketWidth or old buckets are dropped
+	// early and long-window rates cover less time than they claim.
+	BucketWidth time.Duration
 }
 
 // DefaultConfig returns Google SRE workbook-style defaults.
@@ -154,6 +189,16 @@ func (r *Registry) Observe(o Observation) {
 	for _, st := range r.slos {
 		if !matches(st.def, o) {
 			continue
+		}
+		if r.cfg.BucketWidth > 0 {
+			o.Timestamp = o.Timestamp.Truncate(r.cfg.BucketWidth)
+			o.Total, o.Errors = weights(o)
+			o.IsError = false
+			if n := len(st.obs); n > 0 && st.obs[n-1].Timestamp.Equal(o.Timestamp) {
+				st.obs[n-1].Total += o.Total
+				st.obs[n-1].Errors += o.Errors
+				continue
+			}
 		}
 		st.obs = append(st.obs, o)
 		// Trim by time window.
@@ -260,10 +305,9 @@ func burnRate(obs []Observation, now time.Time, window time.Duration, budget flo
 		if o.Timestamp.Before(cutoff) {
 			break
 		}
-		total++
-		if o.IsError {
-			errs++
-		}
+		t, e := weights(o)
+		total += t
+		errs += e
 	}
 	if total == 0 {
 		return 0
@@ -279,15 +323,17 @@ func countWindow(obs []Observation, now time.Time, window time.Duration) (total,
 		if o.Timestamp.Before(cutoff) {
 			break
 		}
-		total++
-		if o.IsError {
-			errs++
-		}
+		t, e := weights(o)
+		total += t
+		errs += e
 	}
 	return
 }
 
 func matches(def Definition, o Observation) bool {
+	if def.SLI != o.SLI {
+		return false
+	}
 	if def.Namespace != "" && def.Namespace != o.Namespace {
 		return false
 	}
@@ -350,4 +396,80 @@ func normalize(c Config) Config {
 		c.MaxObsPerSLO = 4096
 	}
 	return c
+}
+
+// WindowStatus is one burn-rate window pair and whether it is firing now.
+type WindowStatus struct {
+	Kind      string        `json:"kind"` // "page" or "ticket"
+	Long      time.Duration `json:"long"`
+	Short     time.Duration `json:"short"`
+	LongBurn  float64       `json:"longBurn"`
+	ShortBurn float64       `json:"shortBurn"`
+	Threshold float64       `json:"threshold"`
+	Firing    bool          `json:"firing"`
+}
+
+// Status is the current state of one SLO. Unlike Evaluate, which reports each
+// breach once and only while breaching, Status describes every SLO on every
+// call, so it can back gauges and an API view.
+type Status struct {
+	Definition      Definition     `json:"definition"`
+	Severity        BurnSeverity   `json:"severity"`
+	HasData         bool           `json:"hasData"`
+	Total           uint64         `json:"total"`
+	Errors          uint64         `json:"errors"`
+	CompliancePct   float64        `json:"compliancePct"`
+	BudgetRemaining float64        `json:"budgetRemaining"` // 0..1
+	Windows         []WindowStatus `json:"windows"`
+}
+
+// Status returns the current state of every SLO, ordered by name.
+func (r *Registry) Status(now time.Time) []Status {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	names := make([]string, 0, len(r.slos))
+	for n := range r.slos {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	out := make([]Status, 0, len(names))
+	for _, name := range names {
+		st := r.slos[name]
+		budget := 1.0 - st.def.TargetPct/100.0
+		if budget <= 0 {
+			budget = 0.001
+		}
+		total, errs := countWindow(st.obs, now, st.def.Window)
+		s := Status{
+			Definition:      st.def,
+			Severity:        evaluateSLO(name, st, r.cfg, now, budget).Severity,
+			HasData:         total > 0,
+			Total:           total,
+			Errors:          errs,
+			CompliancePct:   100,
+			BudgetRemaining: 1,
+		}
+		if total > 0 {
+			s.CompliancePct = 100 * (1 - float64(errs)/float64(total))
+			s.BudgetRemaining = 1 - float64(errs)/(float64(total)*budget)
+			if s.BudgetRemaining < 0 {
+				s.BudgetRemaining = 0
+			}
+		}
+		add := func(kind string, pairs [][2]time.Duration, threshold float64) {
+			for _, w := range pairs {
+				lb, sb := burnRate(st.obs, now, w[0], budget), burnRate(st.obs, now, w[1], budget)
+				s.Windows = append(s.Windows, WindowStatus{
+					Kind: kind, Long: w[0], Short: w[1], LongBurn: lb, ShortBurn: sb,
+					Threshold: threshold, Firing: lb >= threshold && sb >= threshold,
+				})
+			}
+		}
+		add("page", r.cfg.PageWindows, r.cfg.PageBurn)
+		add("ticket", r.cfg.TicketWindows, r.cfg.TicketBurn)
+		out = append(out, s)
+	}
+	return out
 }

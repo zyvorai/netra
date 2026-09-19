@@ -33,9 +33,10 @@ import (
 	"github.com/zyvorai/netra/internal/snowflakesink"
 	"github.com/zyvorai/netra/internal/store"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
+	"github.com/zyvorai/netra/internal/workloadobs"
 )
 
-const version = "0.27.99"
+const version = "0.27.100"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -96,7 +97,8 @@ func main() {
 	dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 	scanDet, scanInterval, scanEnabled := buildScanDetect()
 	autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
-	handler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
+	wobs := buildWorkloadObs(log)
+	handler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithWorkloadObs(wobs).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
 
 	if shouldRunAlertPoller(dispatcher) {
 		var pollerWG sync.WaitGroup
@@ -134,6 +136,11 @@ func main() {
 	if stop := startOTLP(ctx, log, st, handler, &otlpWG); stop != nil {
 		defer stop()
 		defer otlpWG.Wait()
+	}
+	var wobsWG sync.WaitGroup
+	if stop := startWorkloadObs(ctx, log, st, wobs, &wobsWG); stop != nil {
+		defer stop()
+		defer wobsWG.Wait()
 	}
 	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 	if dnsEnabled {
@@ -310,6 +317,51 @@ func startSnowflake(ctx context.Context, log *slog.Logger, st *store.Store, wg *
 		sink.Close()
 	}()
 
+	return cancel
+}
+
+// buildWorkloadObs reads NETRA_METRICS_WORKLOAD_* and NETRA_SLO_DEFINITIONS and
+// returns the per-workload counter tracker / SLO observer, or nil when neither
+// feature is on (the default). Malformed settings exit at startup: an SLO that
+// is silently ignored is worse than a controller that refuses to start.
+func buildWorkloadObs(log *slog.Logger) *workloadobs.Observer {
+	cfg, err := workloadobs.ConfigFromEnv(os.Getenv)
+	if err != nil {
+		log.Error("workload observability config", "error", err)
+		os.Exit(1)
+	}
+	if !cfg.Enabled() {
+		return nil
+	}
+	o, err := workloadobs.NewObserver(cfg)
+	if err != nil {
+		log.Error("workload observability config", "error", err)
+		os.Exit(1)
+	}
+	log.Info("workload observability enabled", "promSeries", cfg.PromSeries, "maxWorkloads", cfg.MaxWorkloads, "slos", len(cfg.SLOs), "interval", cfg.Interval)
+	return o
+}
+
+// startWorkloadObs runs the observer loop, leader-only like the other push and
+// detector loops. SLO burn/recovery transitions are written to the audit log,
+// so they reach the SIEM, OTLP and Snowflake sinks without extra wiring.
+func startWorkloadObs(ctx context.Context, log *slog.Logger, st *store.Store, o *workloadobs.Observer, wg *sync.WaitGroup) func() {
+	if o == nil || st == nil || wg == nil {
+		return nil
+	}
+	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+	octx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		o.Run(octx,
+			func() []models.AgentStatus { return st.AgentStatuses(time.Now(), staleAfter) },
+			func(e models.AuditEvent) {
+				if err := st.AddAudit(e); err != nil {
+					log.Warn("slo audit event not recorded", "slo", e.Target, "error", err)
+				}
+			})
+	}()
 	return cancel
 }
 
@@ -700,6 +752,8 @@ func electionLoop(
 	var snowflakeWG sync.WaitGroup
 	var otlpCancel func()
 	var otlpWG sync.WaitGroup
+	var wobsCancel func()
+	var wobsWG sync.WaitGroup
 	var dnsDetectCancel func()
 	var dnsDetectWG sync.WaitGroup
 	var scanDetectCancel func()
@@ -736,6 +790,11 @@ func electionLoop(
 			otlpCancel()
 			otlpWG.Wait()
 			otlpCancel = nil
+		}
+		if wobsCancel != nil {
+			wobsCancel()
+			wobsWG.Wait()
+			wobsCancel = nil
 		}
 		if dnsDetectCancel != nil {
 			dnsDetectCancel()
@@ -805,7 +864,8 @@ func electionLoop(
 		dnsDet, dnsInterval, dnsEnabled := buildDNSDetect()
 		scanDet, scanInterval, scanEnabled := buildScanDetect()
 		autoEng, autoEnabled := buildAutoMitigate(log, st, scanDet)
-		apiHandler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
+		wobs := buildWorkloadObs(log)
+		apiHandler := api.New(log, k, h, st).WithOIDC(buildOIDC(log)).WithWorkloadObs(wobs).WithGitOps(gr).WithDNSDetect(dnsDet).WithScanDetect(scanDet).WithAutoMitigate(autoEng).WithArtifacts(artifacts).Handler()
 		gate.Promote(apiHandler)
 		if shouldRunAlertPoller(dispatcher) {
 			pctx, cancel := context.WithCancel(ctx)
@@ -833,6 +893,9 @@ func electionLoop(
 		}
 		if stop := startOTLP(ctx, log, st, apiHandler, &otlpWG); stop != nil {
 			otlpCancel = stop
+		}
+		if stop := startWorkloadObs(ctx, log, st, wobs, &wobsWG); stop != nil {
+			wobsCancel = stop
 		}
 		staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 		// leaderSt pins this stint's specific *store.Store: st is an outer

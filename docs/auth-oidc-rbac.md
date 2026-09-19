@@ -129,7 +129,9 @@ Prometheus scrape config with the token:
 
 > **Heads-up:** the chart's pod annotations (`prometheus.io/scrape|path`) use
 > annotation-based discovery, which cannot send a bearer token. Once you set
-> `metricsToken`, scrape with the config above (or a ServiceMonitor) instead.
+> `metricsToken`, scrape with the config above or enable the chart's
+> ServiceMonitor (`metrics.serviceMonitor.enabled`), which sends the token from
+> the auth Secret automatically (`docs/workload-metrics-slo.md`).
 
 ## Using it
 

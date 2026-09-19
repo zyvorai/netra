@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.99"
+  tag: "0.27.100"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.99"
+  tag: "0.27.100"
 replicaCount: 1
 ha:
   enabled: false
@@ -198,6 +198,43 @@ tls:
 metrics:
   enabled: true
   prometheusAnnotations: false
+  # Opt-in per-workload counters: netra_workload_<name>_total{namespace,workload}.
+  # Off by default (the aggregate metrics carry no workload labels). Cardinality
+  # is bounded: at most `maxWorkloads` named workloads (admitted busiest-first,
+  # then sticky) plus one workload="__other__" bucket; a named workload idle for
+  # `idleTimeout` gives up its slot. See docs/workload-metrics-slo.md.
+  workloadLabels:
+    enabled: false
+    maxWorkloads: 100
+    idleTimeout: 1h
+  # Prometheus Operator ServiceMonitor for /metrics. Requires the operator CRDs.
+  serviceMonitor:
+    enabled: false
+    namespace: ""            # default: the release namespace
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}               # e.g. {release: kube-prometheus-stack}
+    insecureSkipVerify: true # the chart's default cert is self-signed
+    # Bearer token for a token-gated /metrics. Defaults to the "metrics-token" key
+    # of the auth Secret whenever auth.metricsToken is set; otherwise name a
+    # Secret here. (The pod annotations above cannot send a token.)
+    bearerTokenSecret:
+      name: ""
+      key: metrics-token
+  # PrometheusRule: SLO burn alerts plus a few controller-health alerts.
+  prometheusRule:
+    enabled: false
+    namespace: ""
+    labels: {}
+# Network SLOs from Netra's own counters, burn-rate alerted (multi-window,
+# Google SRE style) and audited on every state change. Each entry:
+#   {name, namespace, workload ("Kind/Name"), sli, targetPct, window}
+# sli is http_5xx (cleartext HTTP/1 5xx / responses), dns_failure (non-zero
+# rcode / queries) or tcp_retransmit (retransmissions / segments). window takes
+# 1h..90d ("30d", "720h"). Empty namespace/workload matches all.
+slo:
+  interval: 60s
+  definitions: []
 resources:
   requests: {cpu: 50m, memory: 64Mi}
   limits: {cpu: 500m, memory: 256Mi}
