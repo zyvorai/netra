@@ -24,10 +24,12 @@ import (
 	"github.com/zyvorai/netra/internal/ha"
 	"github.com/zyvorai/netra/internal/hubble"
 	"github.com/zyvorai/netra/internal/kube"
+	"github.com/zyvorai/netra/internal/lokipush"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/notify"
 	"github.com/zyvorai/netra/internal/oidcauth"
 	"github.com/zyvorai/netra/internal/otlppush"
+	"github.com/zyvorai/netra/internal/pushfeed"
 	"github.com/zyvorai/netra/internal/scandetect"
 	"github.com/zyvorai/netra/internal/siem"
 	"github.com/zyvorai/netra/internal/snowflakesink"
@@ -36,7 +38,7 @@ import (
 	"github.com/zyvorai/netra/internal/workloadobs"
 )
 
-const version = "0.27.101"
+const version = "0.27.102"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -141,6 +143,11 @@ func main() {
 	if stop := startWorkloadObs(ctx, log, st, wobs, &wobsWG); stop != nil {
 		defer stop()
 		defer wobsWG.Wait()
+	}
+	var lokiWG sync.WaitGroup
+	if stop := startLoki(ctx, log, st, &lokiWG); stop != nil {
+		defer stop()
+		defer lokiWG.Wait()
 	}
 	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 	if dnsEnabled {
@@ -361,6 +368,69 @@ func startWorkloadObs(ctx context.Context, log *slog.Logger, st *store.Store, o 
 					log.Warn("slo audit event not recorded", "slo", e.Target, "error", err)
 				}
 			})
+	}()
+	return cancel
+}
+
+// startLoki starts the optional Loki push sink when NETRA_LOKI_URL is set. Off
+// by default. Same optional-feature shape as startSyslog/startOTLP: env-var
+// gated, best-effort per push, fail-fast on a bad config, and leader-only in
+// HA mode so two replicas never double-ship. Audit events (including SLO burn
+// and recovery) and block/deny events are pushed as JSON lines under a small
+// bounded label set; see docs/loki-push.md.
+func startLoki(ctx context.Context, log *slog.Logger, st *store.Store, wg *sync.WaitGroup) func() {
+	url := strings.TrimSpace(os.Getenv("NETRA_LOKI_URL"))
+	if url == "" || st == nil || wg == nil {
+		return nil
+	}
+	fail := func(what string, err error) {
+		log.Error("loki config", "setting", what, "error", err)
+		os.Exit(1)
+	}
+	headers, err := pushfeed.ParseKeyValues(env("NETRA_LOKI_HEADERS", ""), "NETRA_LOKI_HEADERS")
+	if err != nil {
+		fail("headers", err)
+	}
+	labels, err := pushfeed.ParseKeyValues(env("NETRA_LOKI_LABELS", ""), "NETRA_LOKI_LABELS")
+	if err != nil {
+		fail("labels", err)
+	}
+	classes, err := lokipush.ParseClasses(env("NETRA_LOKI_CLASSES", ""))
+	if err != nil {
+		fail("classes", err)
+	}
+	pusher, err := lokipush.New(lokipush.Config{
+		URL:      url,
+		TenantID: strings.TrimSpace(os.Getenv("NETRA_LOKI_TENANT")),
+		Username: os.Getenv("NETRA_LOKI_USERNAME"),
+		Password: os.Getenv("NETRA_LOKI_PASSWORD"),
+		Headers:  headers,
+		Job:      strings.TrimSpace(os.Getenv("NETRA_LOKI_JOB")),
+		Labels:   labels,
+		Timeout:  envDuration("NETRA_LOKI_TIMEOUT", 5*time.Second),
+		Classes:  classes,
+	}, log)
+	if err != nil {
+		fail("exporter", err)
+	}
+	interval := envDuration("NETRA_LOKI_INTERVAL", 15*time.Second)
+	staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
+	src := lokipush.Sources{
+		Audit: func() []models.AuditEvent { return st.Audit(200) },
+		Blocks: func() map[string][]models.FastPathEvent {
+			out := map[string][]models.FastPathEvent{}
+			for _, a := range st.AgentStatuses(time.Now(), staleAfter) {
+				out[a.Node] = append(out[a.Node], a.Events...)
+			}
+			return out
+		},
+	}
+	lctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Info("loki sink started", "url", url, "interval", interval, "tenant", os.Getenv("NETRA_LOKI_TENANT") != "")
+		pusher.Run(lctx, interval, src)
 	}()
 	return cancel
 }
@@ -754,6 +824,8 @@ func electionLoop(
 	var otlpWG sync.WaitGroup
 	var wobsCancel func()
 	var wobsWG sync.WaitGroup
+	var lokiCancel func()
+	var lokiWG sync.WaitGroup
 	var dnsDetectCancel func()
 	var dnsDetectWG sync.WaitGroup
 	var scanDetectCancel func()
@@ -795,6 +867,11 @@ func electionLoop(
 			wobsCancel()
 			wobsWG.Wait()
 			wobsCancel = nil
+		}
+		if lokiCancel != nil {
+			lokiCancel()
+			lokiWG.Wait()
+			lokiCancel = nil
 		}
 		if dnsDetectCancel != nil {
 			dnsDetectCancel()
@@ -896,6 +973,9 @@ func electionLoop(
 		}
 		if stop := startWorkloadObs(ctx, log, st, wobs, &wobsWG); stop != nil {
 			wobsCancel = stop
+		}
+		if stop := startLoki(ctx, log, st, &lokiWG); stop != nil {
+			lokiCancel = stop
 		}
 		staleAfter := envDuration("NETRA_AGENT_STALE_AFTER", 45*time.Second)
 		// leaderSt pins this stint's specific *store.Store: st is an outer

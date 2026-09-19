@@ -53,6 +53,11 @@ jobs:
       # lifecycle (repeated under -race). Same command locally:
       # ./scripts/ci-otlp-unit.sh
       run: ./scripts/ci-otlp-unit.sh
+    - name: Loki push sink + shared delivery logic unit + race (scripted)
+      # Client vs a fake decoding real push payloads (bounded labels, gzip and
+      # size split, retry vs drop of a rejected batch), shared pushfeed, and
+      # netrad wiring. Same command locally: ./scripts/ci-loki-unit.sh
+      run: ./scripts/ci-loki-unit.sh
     - name: Workload metrics + SLO unit + race (scripted)
       # Per-workload monotonic counters (pod churn, agent resets, stale nodes,
       # cardinality cap), SLO registry extensions, observer burn/recovery
@@ -227,6 +232,28 @@ jobs:
         helm template test helm/netra "${A[@]}" --set metrics.serviceMonitor.enabled=true >/tmp/netra-sm.yaml
         if grep -q 'authorization:' /tmp/netra-sm.yaml; then
           echo "ServiceMonitor sends a bearer token although none is configured" >&2
+          exit 1
+        fi
+    - name: Loki push is off by default and validated when on
+      run: |
+        A=(--set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key)
+        if grep -q 'NETRA_LOKI' /tmp/netra.yaml; then
+          echo "Loki env vars unexpectedly rendered when loki.enabled is false" >&2
+          exit 1
+        fi
+        if helm template test helm/netra "${A[@]}" --set loki.enabled=true >/dev/null 2>&1; then
+          echo "loki.enabled=true without a url unexpectedly rendered" >&2
+          exit 1
+        fi
+        helm template test helm/netra "${A[@]}" --set loki.enabled=true --set loki.url=http://loki:3100 \
+          --set loki.tenantId=acme --set loki.labels.cluster=prod --set loki.labels.env=live \
+          --set loki.existingSecret=loki-auth >/tmp/netra-loki.yaml
+        grep -q 'name: NETRA_LOKI_URL' /tmp/netra-loki.yaml
+        grep -q 'value: "cluster=prod,env=live"' /tmp/netra-loki.yaml
+        grep -q 'key: password' /tmp/netra-loki.yaml
+        # Credentials only ever come from the Secret, never from values.
+        if grep -q 'name: NETRA_LOKI_PASSWORD' /tmp/netra-loki.yaml && ! grep -A2 'name: NETRA_LOKI_PASSWORD' /tmp/netra-loki.yaml | grep -q secretKeyRef; then
+          echo "Loki password rendered as a plain value" >&2
           exit 1
         fi
     - name: Default render must not enable dns/scan detectors
@@ -535,3 +562,23 @@ jobs:
         promtool --version
     - name: promtool check + test the chart's alert rules
       run: ./scripts/ci-prometheus-rules.sh
+  loki-live:
+    # The real netrad pushing to a real (multi-tenant) Loki, read back through
+    # Loki's own API: audit and block events, `| json`, bounded labels, tenancy,
+    # and events made during a Loki outage arriving after it returns.
+    # Same command locally: LOKI_BIN=/path/to/loki ./scripts/ci-loki-live.sh
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install Loki (pinned, checksum-verified)
+      run: |
+        v=3.7.8
+        curl -fsSL -o loki.zip "https://github.com/grafana/loki/releases/download/v${v}/loki-linux-amd64.zip"
+        echo "62aea42c9cba52cd1642b3666ab37019a0ce4c24ab50b07e85dccc8d812f7d61  loki.zip" | sha256sum -c -
+        unzip -q loki.zip
+        chmod +x loki-linux-amd64
+        echo "LOKI_BIN=$PWD/loki-linux-amd64" >> "$GITHUB_ENV"
+    - name: netrad -> Loki, verified through Loki's API
+      run: ./scripts/ci-loki-live.sh

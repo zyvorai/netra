@@ -157,6 +157,35 @@ spec:
           value: {{ .Values.auth.oidc.identityClaim | quote }}
         {{- end }}
         {{- end }}
+        {{- if .Values.loki.enabled }}
+        - name: NETRA_LOKI_URL
+          value: {{ required "loki.url is required when loki.enabled=true" .Values.loki.url | quote }}
+        - name: NETRA_LOKI_INTERVAL
+          value: {{ .Values.loki.interval | quote }}
+        {{- if .Values.loki.tenantId }}
+        - name: NETRA_LOKI_TENANT
+          value: {{ .Values.loki.tenantId | quote }}
+        {{- end }}
+        {{- if .Values.loki.classes }}
+        - name: NETRA_LOKI_CLASSES
+          value: {{ .Values.loki.classes | quote }}
+        {{- end }}
+        {{- if .Values.loki.labels }}
+        - name: NETRA_LOKI_LABELS
+          value: {{ include "netra.lokiLabels" . | quote }}
+        {{- end }}
+        {{- if .Values.loki.existingSecret }}
+        - name: NETRA_LOKI_USERNAME
+          valueFrom:
+            secretKeyRef: {name: {{ .Values.loki.existingSecret | quote }}, key: username, optional: true}
+        - name: NETRA_LOKI_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: {{ .Values.loki.existingSecret | quote }}, key: password, optional: true}
+        - name: NETRA_LOKI_HEADERS
+          valueFrom:
+            secretKeyRef: {name: {{ .Values.loki.existingSecret | quote }}, key: headers, optional: true}
+        {{- end }}
+        {{- end }}
         {{- if .Values.metrics.workloadLabels.enabled }}
         - name: NETRA_METRICS_WORKLOAD_LABELS
           value: "on"

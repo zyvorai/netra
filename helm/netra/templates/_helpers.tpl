@@ -10,3 +10,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 netra-auth
 {{- end -}}
 {{- end -}}
+{{- define "netra.lokiLabels" -}}
+{{- $pairs := list -}}
+{{- range $k, $v := .Values.loki.labels -}}
+{{- $pairs = append $pairs (printf "%s=%s" $k ($v | toString)) -}}
+{{- end -}}
+{{- join "," $pairs -}}
+{{- end -}}

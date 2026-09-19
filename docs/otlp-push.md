@@ -72,6 +72,13 @@ the Secret, never in values.
   own clocks, so one global cutoff would drop a lagging node's events once a
   faster node had advanced it. Block events with no timestamp are skipped
   (they cannot be deduplicated).
+- **A batch the collector rejects as malformed is dropped, not retried.** HTTP
+  400, 413 and 422 mean the batch can never succeed (the OTLP spec forbids
+  retrying a 400), so it is logged with the collector's reason and the watermark
+  moves on; retrying it forever would wedge the exporter behind one poison batch.
+  Everything else — network errors, 5xx, 429, and 401/403/404 (a bad token or URL
+  is fixable, so the data is kept) — is retried next cycle. Shared with the Loki
+  sink (`internal/pushfeed`, `docs/loki-push.md`).
 - **Redirects are failures.** A redirected POST would silently turn into a GET
   and lose the data, so a 3xx is logged as an error instead of followed.
 - **Partial success** (HTTP 200 with `partialSuccess.errorMessage`) is logged

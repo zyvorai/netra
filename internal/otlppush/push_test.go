@@ -531,3 +531,48 @@ func TestScrapeHandlerSendsConfiguredHeaders(t *testing.T) {
 		t.Fatalf("Authorization = %q, want the configured bearer", got)
 	}
 }
+
+// A collector that permanently rejects a batch (HTTP 400) must not wedge the
+// exporter behind it: the OTLP spec says a 400 is never retried.
+func TestAPermanentlyRejectedLogBatchIsDroppedNotRetriedForever(t *testing.T) {
+	c := newCollector(t)
+	c.status = func(path string, _ int) int {
+		if path == "/v1/logs" && len(c.got) == 1 { // the very first logs request
+			return http.StatusBadRequest
+		}
+		return http.StatusOK
+	}
+	p := newPusher(t, c, func(cfg *Config) { cfg.Signals = []Signal{SignalLogs} })
+	first := auditEvents(t0, 3)
+	p.Once(context.Background(), Sources{Audit: func() []models.AuditEvent { return first }})
+	p.Once(context.Background(), Sources{Audit: func() []models.AuditEvent { return first }})
+	if got := len(c.byPath("/v1/logs")); got != 1 {
+		t.Fatalf("logs posted %d times; the rejected batch was retried instead of dropped", got)
+	}
+	// Later events still flow.
+	later := auditEvents(t0, 5)
+	p.Once(context.Background(), Sources{Audit: func() []models.AuditEvent { return later }})
+	logs := c.byPath("/v1/logs")
+	if len(logs) != 2 || countLogRecords(t, logs[1].body) != 2 {
+		t.Fatalf("after the drop, only the 2 new events should ship; posts=%d", len(logs))
+	}
+}
+
+func TestAuthFailuresAreRetriedNotDropped(t *testing.T) {
+	c := newCollector(t)
+	c.status = func(path string, _ int) int {
+		if path == "/v1/logs" && len(c.got) <= 2 {
+			return http.StatusUnauthorized // a fixable credentials problem: keep the data
+		}
+		return http.StatusOK
+	}
+	p := newPusher(t, c, func(cfg *Config) { cfg.Signals = []Signal{SignalLogs} })
+	src := Sources{Audit: func() []models.AuditEvent { return auditEvents(t0, 3) }}
+	p.Once(context.Background(), src)
+	p.Once(context.Background(), src)
+	p.Once(context.Background(), src) // credentials fixed: the same 3 events now go through
+	logs := c.byPath("/v1/logs")
+	if len(logs) != 3 || countLogRecords(t, logs[2].body) != 3 {
+		t.Fatalf("posts=%d; the events must survive an outage of credentials and arrive once fixed", len(logs))
+	}
+}

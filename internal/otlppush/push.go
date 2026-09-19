@@ -19,12 +19,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/pushfeed"
 	"github.com/zyvorai/netra/internal/siem"
 )
 
@@ -75,10 +75,10 @@ type Pusher struct {
 	start   time.Time
 	now     func() time.Time
 
+	feed *pushfeed.Feed
+
 	mu      sync.Mutex
 	started bool
-	auditAt time.Time
-	blockAt map[string]time.Time
 }
 
 // New validates cfg. It rejects an endpoint that already names a signal
@@ -133,7 +133,7 @@ func New(cfg Config, log *slog.Logger) (*Pusher, error) {
 		log:     log,
 		now:     time.Now,
 		start:   time.Now(),
-		blockAt: map[string]time.Time{},
+		feed:    pushfeed.New("otlp", log),
 		client: &http.Client{
 			Timeout: cfg.Timeout,
 			// A redirected POST becomes a GET and the data is silently
@@ -150,24 +150,7 @@ func New(cfg Config, log *slog.Logger) (*Pusher, error) {
 
 // ParseHeaders reads the OTEL_EXPORTER_OTLP_HEADERS format: "k1=v1,k2=v2".
 func ParseHeaders(s string) (map[string]string, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	out := map[string]string{}
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		k, v, ok := strings.Cut(part, "=")
-		k = strings.TrimSpace(k)
-		if !ok || k == "" {
-			return nil, errors.New("otlp headers must be comma-separated key=value pairs")
-		}
-		out[k] = strings.TrimSpace(v)
-	}
-	return out, nil
+	return pushfeed.ParseKeyValues(s, "otlp headers")
 }
 
 // ParseSignals reads a comma-separated subset of metrics,logs,traces.
@@ -276,87 +259,23 @@ func (p *Pusher) pushMetrics(ctx context.Context, scrape func() ([]byte, error))
 }
 
 func (p *Pusher) pushLogs(ctx context.Context, events []models.AuditEvent) {
-	p.mu.Lock()
-	cutoff := p.auditAt
-	p.mu.Unlock()
-
-	fresh, _ := siem.NewSince(events, cutoff)
-	for len(fresh) > 0 {
-		n := min(len(fresh), maxBatch)
-		batch := fresh[:n]
-		recs := make([]siem.Record, len(batch))
-		for i, e := range batch {
-			recs[i] = siem.FromAudit(e)
-		}
+	p.feed.DrainAudit(events, maxBatch, func(recs []siem.Record) error {
 		body, err := siem.Encode(siem.FormatOTLP, recs)
 		if err != nil {
-			p.log.Warn("otlp logs encode failed", "error", err)
-			return
+			return err
 		}
-		if err := p.post(ctx, SignalLogs, body); err != nil {
-			p.log.Warn("otlp push failed", "signal", SignalLogs, "error", err, "pending", len(fresh))
-			return
-		}
-		// fresh is oldest-first, so the batch's last element is its newest.
-		p.mu.Lock()
-		if at := batch[len(batch)-1].At; at.After(p.auditAt) {
-			p.auditAt = at
-		}
-		p.mu.Unlock()
-		fresh = fresh[n:]
-	}
+		return p.post(ctx, SignalLogs, body)
+	})
 }
 
 func (p *Pusher) pushTraces(ctx context.Context, byNode map[string][]models.FastPathEvent) {
-	nodes := make([]string, 0, len(byNode))
-	for n := range byNode {
-		nodes = append(nodes, n)
-	}
-	sort.Strings(nodes)
-
-	// The watermark is per node: agents stamp ObservedAt on their own
-	// clocks, so a single global cutoff would drop a slower node's events.
-	for _, node := range nodes {
-		p.mu.Lock()
-		cutoff := p.blockAt[node]
-		p.mu.Unlock()
-
-		var fresh []models.FastPathEvent
-		for _, ev := range byNode[node] {
-			if ev.ObservedAt.IsZero() || !siem.IsBlocked(ev.Action) {
-				continue
-			}
-			if !cutoff.IsZero() && !ev.ObservedAt.After(cutoff) {
-				continue
-			}
-			fresh = append(fresh, ev)
+	p.feed.DrainBlocks(byNode, maxBatch, func(_ string, recs []siem.Record) error {
+		body, err := siem.Encode(siem.FormatOTLPTrace, recs)
+		if err != nil {
+			return err
 		}
-		sort.SliceStable(fresh, func(i, j int) bool { return fresh[i].ObservedAt.Before(fresh[j].ObservedAt) })
-
-		for len(fresh) > 0 {
-			n := min(len(fresh), maxBatch)
-			batch := fresh[:n]
-			recs := make([]siem.Record, len(batch))
-			for i, ev := range batch {
-				recs[i] = siem.FromBlockEvent(node, ev)
-			}
-			body, err := siem.Encode(siem.FormatOTLPTrace, recs)
-			if err != nil {
-				p.log.Warn("otlp traces encode failed", "error", err)
-				return
-			}
-			if err := p.post(ctx, SignalTraces, body); err != nil {
-				p.log.Warn("otlp push failed", "signal", SignalTraces, "node", node, "error", err, "pending", len(fresh))
-				return
-			}
-			p.mu.Lock()
-			if at := batch[len(batch)-1].ObservedAt; at.After(p.blockAt[node]) {
-				p.blockAt[node] = at
-			}
-			p.mu.Unlock()
-			fresh = fresh[n:]
-		}
-	}
+		return p.post(ctx, SignalTraces, body)
+	})
 }
 
 func (p *Pusher) post(ctx context.Context, sig Signal, body []byte) error {
@@ -377,7 +296,7 @@ func (p *Pusher) post(ctx context.Context, sig Signal, body []byte) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return &pushfeed.StatusError{Code: resp.StatusCode, Body: string(b)}
 	}
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	p.warnPartial(sig, b)

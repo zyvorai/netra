@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.101"
+  tag: "0.27.102"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.101"
+  tag: "0.27.102"
 replicaCount: 1
 ha:
   enabled: false
@@ -70,6 +70,21 @@ otlp:
   endpoint: ""
   interval: 30s
   signals: ""
+  existingSecret: ""
+# Optional push of audit events (including SLO burn/recovery) and block/deny
+# events to Grafana Loki. Off by default. Leader-only in HA. Streams carry a
+# small bounded label set (job, class, severity, node + `labels` below); the
+# whole event is the JSON log line, queried with `| json`. `url` is Loki's base
+# URL (http://loki:3100) or its full /loki/api/v1/push URL. Credentials come from
+# an existing Secret with any of the keys: username, password (basic auth) and
+# headers ("k=v,k2=v2") — never put them in values. See docs/loki-push.md.
+loki:
+  enabled: false
+  url: ""
+  tenantId: ""        # X-Scope-OrgID for multi-tenant Loki
+  interval: 15s
+  classes: ""         # subset of audit,block; empty = both
+  labels: {}          # extra static stream labels, e.g. {cluster: prod}
   existingSecret: ""
 # Optional policy-as-code / GitOps reconciliation. Off by default. Reads
 # CiliumNetworkPolicy manifests from `dir` inside the netrad container —
