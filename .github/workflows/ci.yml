@@ -50,6 +50,12 @@ jobs:
       # drop out. The kernel half is the `ebpf` job. Same command locally:
       # ./scripts/ci-kernel-sensors-unit.sh
       run: ./scripts/ci-kernel-sensors-unit.sh
+    - name: Listen-queue sampling unit + race, real inet_diag (scripted)
+      # Accept-queue depth per listener: fill arithmetic, histogram, peaks, the
+      # real kernel's inet_diag (backlog-1 listener that never accepts, IPv6,
+      # accept draining the queue, /proc/net/tcp cross-check), agent modes and
+      # controller aggregation. Same command locally: ./scripts/ci-listenq-unit.sh
+      run: ./scripts/ci-listenq-unit.sh
     - name: OIDC login + RBAC + metrics-token unit + race (scripted)
       # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
       # the role table over the real route set, spoof-proof audit actor and
@@ -202,6 +208,10 @@ jobs:
         awk '/name: NETRA_DROP_INFO$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-sensors-off.yaml
         # The plain manifest mounts it too.
         grep -q 'mountPath: /sys/kernel/tracing' deploy/agent.yaml
+        # Listen-queue sampling is a plain env knob (no BPF).
+        awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.listenQueues=off | awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"off"/) exit 1}'
     - name: Controller memory limit leaves room for the flow history (OOM regression)
       # 0.27.102 shipped 256Mi and the controller was OOM-killed every ~12
       # minutes on a real cluster. netrad now derives Go's soft limit from the

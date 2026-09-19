@@ -194,6 +194,7 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	metricGauge(w, "netra_flowlog_records", "In-memory flow-history records on this controller. No pod or destination labels.", float64(s.store.FlowCount()))
 	writeTCPEventMetrics(w, agents)
 	writeDropInfoMetrics(w, agents)
+	writeListenQueueMetrics(w, agents)
 	s.writeWorkloadMetrics(w)
 }
 

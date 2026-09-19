@@ -81,6 +81,18 @@ NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
   "$BIN" -test.v
 
+# Listen queues (no BPF): half-open connections need the handshake's last ACK to
+# go missing, which needs root and nft. Everything else in internal/listenq runs
+# unprivileged in the `go` job (scripts/ci-listenq-unit.sh).
+echo "==> listen queues: half-open (SYN_RECV) connections attributed to their listener"
+lq_log="${OUT}/listenq-halfopen.log"
+go test -count=1 -v -run 'TestDumpCountsHalfOpenConnections' ./internal/listenq >"$lq_log" 2>&1 || { cat "$lq_log"; exit 1; }
+if grep -q -- '--- PASS: TestDumpCountsHalfOpenConnections' "$lq_log"; then
+  echo "    passed"
+else
+  echo "    skipped: $(grep -m1 'diag_linux_test.go' "$lq_log" | sed 's/^ *//')"
+fi
+
 # Mutation guard. netra_dropinfo.c must never invent a tuple for a packet that
 # is not IP; TestDropInfoNonIPFrame* proves that. This proves the test still
 # *bites*: the same program with the safety check removed (family guessed from

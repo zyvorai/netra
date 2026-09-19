@@ -1132,8 +1132,11 @@ type AgentReport struct {
 	TCPEvents *TCPEventsSummary `json:"tcpEvents,omitempty"`
 	// DropInfo is nil when drop attribution is off; when it tried and could not
 	// load, it carries Unavailable with the reason.
-	DropInfo   *DropInfoSummary `json:"dropInfo,omitempty"`
-	CapChanges []CapChangeEvent `json:"capChanges,omitempty"`
+	DropInfo *DropInfoSummary `json:"dropInfo,omitempty"`
+	// ListenQueues is nil when listen-queue sampling is off; when it tried and
+	// could not read the sockets it carries Unavailable with the reason.
+	ListenQueues *ListenQueueSummary `json:"listenQueues,omitempty"`
+	CapChanges   []CapChangeEvent    `json:"capChanges,omitempty"`
 	// NamespaceChanges mirrors CapChanges' blind-spot caveat below — its
 	// diffing state (watchNamespaceChanges' prevNetNS) resets on restart
 	// the same way.
@@ -1428,6 +1431,35 @@ type LockdownRequest struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Selector  map[string]string `json:"selector"`
+}
+
+// ListenQueueSummary is one node's accept-queue depth per TCP listener, sampled
+// from inet_diag (internal/listenq, docs/listen-queues.md). Top is the listeners
+// under pressure, not every listener.
+type ListenQueueSummary struct {
+	// Unavailable is why sampling failed (empty when it works).
+	Unavailable string `json:"unavailable,omitempty"`
+	Listeners   int    `json:"listeners"`
+	Full        int    `json:"full"`
+	Saturated   int    `json:"saturated"`
+	SynRecv     uint64 `json:"synRecv"`
+	Samples     uint64 `json:"samples"`
+	// Buckets is a cumulative fill-level histogram: (listener, sample) pairs per
+	// bin (empty, le_25, le_50, le_75, lt_100, full).
+	Buckets map[string]uint64  `json:"buckets,omitempty"`
+	Top     []ListenQueueEntry `json:"top,omitempty"`
+}
+
+// ListenQueueEntry is one listener that is, or has been, under pressure.
+type ListenQueueEntry struct {
+	Family  string `json:"family"`
+	Addr    string `json:"addr"`
+	Port    uint16 `json:"port"`
+	Queue   uint32 `json:"queue"`
+	Max     uint32 `json:"max"`
+	SynRecv uint32 `json:"synRecv,omitempty"`
+	Peak    uint32 `json:"peak"`
+	PeakPct int    `json:"peakPct"`
 }
 
 // DropInfoSummary is one node's cumulative kernel packet-drop attribution from

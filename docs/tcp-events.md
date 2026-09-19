@@ -18,6 +18,14 @@ record is counted, not fatal.
 
 ## Why the agent reads `format` files
 
+This is not hypothetical: the record for `tcp_send_reset` **changed shape between the two
+kernels this was run on.** On Linux 6.8 it carries `sport`/`dport`/`family`/`saddr`/`daddr`.
+On 6.17 (a GitHub Actions runner) those are gone, replaced by two 28-byte
+`struct sockaddr_in6`-sized blobs. The agent handles both: it recognises the blob shape only
+when `saddr` is exactly 28 bytes and there is no `sport`, reads the family, the big-endian
+port and the address out of each blob, and refuses (with the reason) anything it cannot
+place. The other three tracepoints kept the classic record on both kernels.
+
 A classic tracepoint hands a BPF program a raw record whose layout is fixed by the kernel
 that built it. It differs between versions and even between sibling tracepoints of one
 kernel: on Linux 6.8 the source port is at offset 28 in `tcp_send_reset` but offset 16 in
@@ -116,5 +124,8 @@ API's flow list.
   above, with a minimum test count per step. `./scripts/ci-agent-image.sh` (CI job
   `agent-image`) builds the agent image and checks `netra_tcpevents.o` shipped in it.
 
-Kernel-level behaviour was run on Ubuntu 24.04 (Linux 6.8, aarch64) with clang 18. Other
-kernels are covered by the layout parser rather than by a run; the CI runner adds one more.
+Kernel-level behaviour was run on Ubuntu 24.04 (Linux 6.8, aarch64, clang 18) and on the
+GitHub Actions runner (Linux 6.17, x86_64). The layout parser is also unit-tested against the
+real format files captured from both kernels (`internal/tpformat/testdata`). The `ebpf` job
+prints the runner's kernel and format files, so a runner image update that changes a layout
+shows up as a labelled failure with the new layout next to it.

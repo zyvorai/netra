@@ -196,3 +196,68 @@ func TestMalformedSymbolTableIsIgnoredNotFatal(t *testing.T) {
 		t.Error("a malformed table should yield no names")
 	}
 }
+
+// Linux 6.17, captured from a GitHub Actions runner. tcp_send_reset changed
+// shape between 6.8 and 6.17, which is the reason layouts are read from the
+// running kernel rather than assumed.
+func TestLinux617FormatsParseAndTcpSendResetChangedShape(t *testing.T) {
+	for _, n := range []string{"tcp_retransmit_skb", "tcp_send_reset", "tcp_receive_reset", "inet_sock_set_state", "kfree_skb"} {
+		load(t, "linux-6.17-"+n+".format")
+	}
+	f := load(t, "linux-6.17-tcp_send_reset.format")
+	if f.Has("sport") || f.Has("family") {
+		t.Error("6.17 tcp_send_reset should have no classic sport/family fields")
+	}
+	for _, name := range []string{"saddr", "daddr"} {
+		if fld := f.Fields[name]; fld.Size != 28 || fld.ArrayLen != 28 {
+			t.Errorf("%s = %+v, want a 28-byte array", name, fld)
+		}
+	}
+	if o, _ := f.Offset("saddr", 28); o != 32 {
+		t.Errorf("saddr offset = %d, want 32", o)
+	}
+	if o, _ := f.Offset("daddr", 28); o != 60 {
+		t.Errorf("daddr offset = %d, want 60", o)
+	}
+	old := load(t, "linux-6.8-tcp_send_reset.format")
+	if !old.Has("sport") {
+		t.Error("6.8 tcp_send_reset should still have the classic fields")
+	}
+}
+
+func TestLinux617KfreeSkbReasonNamesAndLayout(t *testing.T) {
+	f := load(t, "linux-6.17-kfree_skb.format")
+	if got := off(t, f, "skbaddr", 8); got != 8 {
+		t.Errorf("skbaddr = %d", got)
+	}
+	sym := f.Symbols("reason")
+	if sym[12] != "NETFILTER_DROP" || sym[3] != "NO_SOCKET" || sym[45] != "TCP_RESET" || sym[74] != "UNHANDLED_PROTO" {
+		t.Errorf("reason names on 6.17: 12=%q 3=%q 45=%q 74=%q", sym[12], sym[3], sym[45], sym[74])
+	}
+	if len(sym) < 100 {
+		t.Errorf("only %d reasons on 6.17; the table only grows", len(sym))
+	}
+}
+
+// The drop-reason numbering is not stable across kernels: NETFILTER_DROP is 8 on
+// 6.8 and 12 on 6.17, TCP_RESET 35 and 45, UNHANDLED_PROTO 56 and 74. A table of
+// names baked into the agent would mislabel every drop on one of them; reading
+// the running kernel's own table is what keeps the labels right. Both real
+// tables are checked against the other's numbering here so that a "simplification"
+// to a fixed table fails.
+func TestDropReasonNumberingDiffersBetweenKernelsAndNamesFollowTheKernel(t *testing.T) {
+	k68 := load(t, "linux-6.8-kfree_skb.format").Symbols("reason")
+	k617 := load(t, "linux-6.17-kfree_skb.format").Symbols("reason")
+	for name, nums := range map[string][2]int{"NETFILTER_DROP": {8, 12}, "TCP_RESET": {35, 45}, "UNHANDLED_PROTO": {56, 74}} {
+		if k68[nums[0]] != name || k617[nums[1]] != name {
+			t.Errorf("%s: 6.8[%d]=%q 6.17[%d]=%q", name, nums[0], k68[nums[0]], nums[1], k617[nums[1]])
+		}
+		if k68[nums[1]] == name || k617[nums[0]] == name {
+			t.Errorf("%s resolves under the other kernel's number: the tables must not be interchangeable", name)
+		}
+	}
+	// Stable across both, and so a safe anchor.
+	if k68[3] != "NO_SOCKET" || k617[3] != "NO_SOCKET" {
+		t.Error("NO_SOCKET is 3 on both")
+	}
+}

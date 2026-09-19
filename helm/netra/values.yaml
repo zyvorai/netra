@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.105"
+  tag: "0.27.106"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.105"
+  tag: "0.27.106"
 replicaCount: 1
 ha:
   enabled: false
@@ -289,6 +289,9 @@ agent:
   # Needs kernel BTF (/sys/kernel/btf/vmlinux); "auto" reports it unavailable
   # with the reason when the node lacks it.
   dropInfo: auto
+  # TCP accept-queue depth per listener, from inet_diag (docs/listen-queues.md).
+  # No BPF and no extra privilege. auto|off.
+  listenQueues: auto
   # Mount the host's tracefs (/sys/kernel/tracing) read-only into the agent.
   # A container's own /sys is a bare sysfs with no tracefs, so without this the
   # agent cannot read tracepoint record layouts: the TCP event sensors and the

@@ -36,6 +36,7 @@ import (
 	"github.com/zyvorai/netra/internal/dropreason"
 	"github.com/zyvorai/netra/internal/histograms"
 	"github.com/zyvorai/netra/internal/kerneldiag"
+	"github.com/zyvorai/netra/internal/listenq"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
@@ -105,8 +106,13 @@ type Agent struct {
 	dropInfoObject string
 	dropInfo       *dropinfo.Sensor
 	dropInfoWhy    string
-	activeCapture  *models.CaptureSpec
-	captureCancel  context.CancelFunc
+	// listenQ samples TCP accept-queue depth through inet_diag (no BPF); nil
+	// when NETRA_LISTEN_QUEUES=off. listenQWarned limits a persistent failure
+	// to one log line rather than one per report.
+	listenQ       *listenq.Sampler
+	listenQWarned bool
+	activeCapture *models.CaptureSpec
+	captureCancel context.CancelFunc
 	// captureBackendErr records why the most recent applyCapture failed to
 	// start the requested backend (e.g. "afpacket:CAP_NET_RAW", "ebpf:
 	// capture_spec map unavailable"), or "" when the active/most recent
@@ -487,6 +493,7 @@ func (a *Agent) loadAndAttach() error {
 	if err := a.attachDropInfo(); err != nil {
 		return err
 	}
+	a.attachListenQueues()
 	xifs, err := a.resolveInterfaces(a.xdpInterfaces)
 	if err != nil {
 		return err
@@ -1103,6 +1110,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	}
 	tcpEvents := a.readTCPEvents()
 	dropInfo := a.readDropInfo()
+	listenQueues := a.readListenQueues()
 	return a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1110,7 +1118,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
@@ -3971,6 +3979,52 @@ func (a *Agent) attachDropInfo() error {
 	a.markAttached("netra_drop_info")
 	a.log.Info("drop attribution attached", "tracepoint", dropinfo.TPGroup+":"+dropinfo.TPEvent)
 	return nil
+}
+
+// attachListenQueues enables accept-queue sampling. NETRA_LISTEN_QUEUES=auto
+// (default) or off. It needs no BPF and no privilege beyond the host network
+// namespace, so there is no "required": a read failure is reported per sample.
+func (a *Agent) attachListenQueues() {
+	if strings.ToLower(env("NETRA_LISTEN_QUEUES", "auto")) == "off" {
+		a.log.Info("listen queue sampling skipped by NETRA_LISTEN_QUEUES=off")
+		return
+	}
+	a.listenQ = &listenq.Sampler{}
+}
+
+// listenQueueTop bounds the listener list in each report.
+const listenQueueTop = 20
+
+// readListenQueues samples once. nil means off; a failed read is reported as
+// Unavailable so the controller can tell "off" from "cannot read the sockets".
+func (a *Agent) readListenQueues() *models.ListenQueueSummary {
+	if a.listenQ == nil {
+		return nil
+	}
+	sn, err := a.listenQ.Sample(listenQueueTop)
+	if err != nil {
+		if !a.listenQWarned {
+			a.listenQWarned = true
+			a.log.Warn("listen queue sampling failed", "error", err)
+		}
+		why := err.Error()
+		if len(why) > maxWhy {
+			why = why[:maxWhy]
+		}
+		return &models.ListenQueueSummary{Unavailable: why}
+	}
+	a.listenQWarned = false
+	out := &models.ListenQueueSummary{
+		Listeners: sn.Listeners, Full: sn.Full, Saturated: sn.Saturated, SynRecv: sn.SynRecv,
+		Samples: sn.Samples, Buckets: sn.Buckets,
+	}
+	for _, e := range sn.Top {
+		out.Top = append(out.Top, models.ListenQueueEntry{
+			Family: e.Family, Addr: e.Addr, Port: e.Port, Queue: e.Queue, Max: e.Max,
+			SynRecv: e.SynRecv, Peak: e.Peak, PeakPct: e.PeakPct,
+		})
+	}
+	return out
 }
 
 // Bounds on the drop lists in each report.

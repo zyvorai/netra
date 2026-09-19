@@ -20,15 +20,25 @@ import (
 const Absent = 0xFFFF
 
 // Layout mirrors struct tp_layout in bpf/netra_tcpevents.c byte for byte
-// (ten uint16 offsets, then valid and a pad byte: 22 bytes, no padding).
+// (twelve uint16 offsets, then valid and a pad byte: 26 bytes, no padding).
+//
+// A flow tracepoint uses one of two record shapes. Classic (Linux 6.8): Sport,
+// Dport, Family, Saddr, Daddr, Saddr6, Daddr6, with SaSrc/SaDst Absent. Sockaddr
+// (tcp_send_reset on newer kernels, seen on 6.17): SaSrc/SaDst locate a pair of
+// 28-byte struct sockaddr_in6-sized blobs and every classic field is Absent.
 type Layout struct {
 	Sport, Dport, Family uint16
 	Saddr, Daddr         uint16
 	Saddr6, Daddr6       uint16
 	OldState, NewState   uint16
 	Protocol             uint16
+	SaSrc, SaDst         uint16
 	Valid, Pad           uint8
 }
+
+// sockaddrSize is sizeof(struct sockaddr_in6), the size of the address blobs a
+// sockaddr-style record carries.
+const sockaddrSize = 28
 
 // Tracepoint identifies one of the four sensors.
 type Tracepoint struct {
@@ -52,13 +62,15 @@ var Tracepoints = []Tracepoint{
 // rather than guess, when a field the program must read is missing or has an
 // unexpected size: a wrong offset would produce plausible-looking garbage.
 //
-// IPv4 fields are required. IPv6 arrays, and the protocol field of
+// IPv4 fields are required (classic shape), or a matching pair of 28-byte
+// sockaddr blobs (sockaddr shape). IPv6 arrays, and the protocol field of
 // inet_sock_set_state, are optional and marked Absent when the kernel lacks
 // them (the program then counts such events as unreadable instead of misreading).
 func LayoutFor(tp Tracepoint, f *tpformat.Format) (Layout, error) {
 	l := Layout{
 		Sport: Absent, Dport: Absent, Family: Absent, Saddr: Absent, Daddr: Absent,
 		Saddr6: Absent, Daddr6: Absent, OldState: Absent, NewState: Absent, Protocol: Absent,
+		SaSrc: Absent, SaDst: Absent,
 	}
 	set := func(dst *uint16, name string, size int, required bool) error {
 		off, err := f.Offset(name, size)
@@ -83,6 +95,12 @@ func LayoutFor(tp Tracepoint, f *tpformat.Format) (Layout, error) {
 			set(&l.OldState, "oldstate", 4, true),
 			set(&l.NewState, "newstate", 4, true),
 			set(&l.Protocol, "protocol", 2, false),
+		)
+	} else if sa, ok := f.Fields["saddr"]; ok && sa.Size == sockaddrSize && !f.Has("sport") {
+		// Sockaddr-style record: the blobs carry family, port and address.
+		errs = append(errs,
+			set(&l.SaSrc, "saddr", sockaddrSize, true),
+			set(&l.SaDst, "daddr", sockaddrSize, true),
 		)
 	} else {
 		errs = append(errs,

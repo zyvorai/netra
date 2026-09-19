@@ -47,6 +47,12 @@ static __u64 (*bpf_ktime_get_ns)(void) = (void *)BPF_FUNC_ktime_get_ns;
 // Where the fields of one tracepoint record live. Filled by the agent from the
 // kernel's format file. valid == 0 means the layout could not be established,
 // and the program then does nothing.
+//
+// Two record shapes exist for the flow tracepoints. The classic one has
+// separate sport/dport/family/saddr/daddr fields (Linux 6.8). Newer kernels
+// (seen on 6.17) give tcp_send_reset a pair of 28-byte struct sockaddr_in6-sized
+// blobs instead: sa_src / sa_dst are then the offsets of those blobs and the
+// classic fields are absent. The agent sets exactly one of the two.
 struct tp_layout {
     __u16 sport;
     __u16 dport;
@@ -58,6 +64,8 @@ struct tp_layout {
     __u16 oldstate;
     __u16 newstate;
     __u16 protocol;
+    __u16 sa_src; // sockaddr-style source blob, or TPL_ABSENT
+    __u16 sa_dst; // sockaddr-style destination blob, or TPL_ABSENT
     __u8 valid;
     __u8 pad;
 };
@@ -132,9 +140,44 @@ static __always_inline int rd(const void *ctx, __u16 off, void *dst, __u32 len)
     return bpf_probe_read_kernel(dst, len, (const char *)ctx + off);
 }
 
+// Builds the flow key from sockaddr-style blobs: a struct sockaddr_in (family @0,
+// port @2 big endian, address @4) or sockaddr_in6 (port @2, flowinfo @4, address
+// @8). Returns 0 on success.
+static __always_inline int read_flow_sockaddr(const void *ctx, const volatile struct tp_layout *l, struct tcpev_flow_key *k)
+{
+    __u16 family = 0, sp = 0, dp = 0;
+    __u16 src = l->sa_src, dst = l->sa_dst;
+    if (rd(ctx, src, &family, sizeof(family)) || rd(ctx, (__u16)(src + 2), &sp, sizeof(sp)) ||
+        rd(ctx, (__u16)(dst + 2), &dp, sizeof(dp))) {
+        stat_inc(TCPEV_STAT_READ_ERR);
+        return -1;
+    }
+    k->sport = __builtin_bswap16(sp);
+    k->dport = __builtin_bswap16(dp);
+    if (family == TCPEV_AF_INET) {
+        k->family = 4;
+        if (rd(ctx, (__u16)(src + 4), k->saddr, 4) || rd(ctx, (__u16)(dst + 4), k->daddr, 4)) {
+            stat_inc(TCPEV_STAT_READ_ERR);
+            return -1;
+        }
+    } else if (family == TCPEV_AF_INET6) {
+        k->family = 6;
+        if (rd(ctx, (__u16)(src + 8), k->saddr, 16) || rd(ctx, (__u16)(dst + 8), k->daddr, 16)) {
+            stat_inc(TCPEV_STAT_READ_ERR);
+            return -1;
+        }
+    } else {
+        stat_inc(TCPEV_STAT_BAD_FAMILY);
+        return -1;
+    }
+    return 0;
+}
+
 // Builds the flow key from a tracepoint record. Returns 0 on success.
 static __always_inline int read_flow(const void *ctx, const volatile struct tp_layout *l, struct tcpev_flow_key *k)
 {
+    if (l->sa_src != TPL_ABSENT && l->sa_dst != TPL_ABSENT)
+        return read_flow_sockaddr(ctx, l, k);
     __u16 family = 0;
     if (rd(ctx, l->family, &family, sizeof(family))) {
         stat_inc(TCPEV_STAT_READ_ERR);

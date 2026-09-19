@@ -112,6 +112,13 @@ updates per packet, not a ring buffer's worth of events.
 - Layout, reason-name and kallsyms parsing are unit-tested against a real Linux 6.8 format
   file and kallsyms shapes; aggregation, staleness and metric bounds in `internal/api`.
 
-Run on Ubuntu 24.04 (Linux 6.8, aarch64, clang 18). Not yet run in a Kubernetes pod or on a
-live cluster node, so whether `/proc/kallsyms` shows real addresses to the agent container
-there is unconfirmed.
+Run on Ubuntu 24.04 (Linux 6.8, aarch64, clang 18) and on the GitHub Actions runner (Linux
+6.17, x86_64): all of the `TestDropInfo*` cases pass on both, so the CO-RE relocation works
+across those kernels and both architectures. Not yet run in a Kubernetes pod or on a live
+cluster node, so whether `/proc/kallsyms` shows real addresses to the agent container there
+is unconfirmed.
+
+**Reason numbers are not portable, which is why names come from the kernel.** `NETFILTER_DROP`
+is 8 on 6.8 and 12 on 6.17; `TCP_RESET` is 35 and 45; `UNHANDLED_PROTO` is 56 and 74; the table
+grew from 94 to 124 entries. A table baked into Netra would have mislabelled every drop on one
+of them. `internal/tpformat` tests both real tables against each other's numbering.
