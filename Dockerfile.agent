@@ -7,7 +7,7 @@ RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/net
 
 # Clang 14 (Debian bookworm) fails on large CT/policy helpers. Ubuntu 24.04 Clang 18
 # matches CI; raise compile-time stack estimate so always_inline helpers can optimize.
-FROM ubuntu:24.04 AS bpf
+FROM ubuntu:25.10 AS bpf
 RUN apt-get update && apt-get install -y --no-install-recommends clang llvm linux-libc-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY bpf/ ./
