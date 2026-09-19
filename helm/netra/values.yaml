@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.27.102"
+  tag: "0.27.103"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.27.102"
+  tag: "0.27.103"
 replicaCount: 1
 ha:
   enabled: false
@@ -252,9 +252,12 @@ metrics:
 slo:
   interval: 60s
   definitions: []
+# The controller holds a 100k-record flow history and decodes multi-MB agent
+# reports every few seconds; 256Mi OOM-killed it in a loop on a real cluster.
+# netrad also sets Go's soft memory limit to 85% of this at startup.
 resources:
-  requests: {cpu: 50m, memory: 64Mi}
-  limits: {cpu: 500m, memory: 256Mi}
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 512Mi}
 agent:
   # Privileged node DaemonSet — on by default (like a CNI agent): one pod per
   # node with tolerations Exists so it lands on every schedulable node.
