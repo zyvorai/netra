@@ -81,6 +81,26 @@ NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
   "$BIN" -test.v
 
+# Agent map reads. The agent reads several 131 072-entry LRU hash maps every few
+# seconds; it used to walk each entry with two syscalls, decode and format all of
+# them, sort all of them, and keep 1 000, which cost about two cores on a busy
+# node. It now scans in batches and ranks raw bytes (internal/mapscan). These run
+# against REAL BPF maps as root and must (a) pass, (b) not skip (a skip here means
+# maps could not be created, i.e. the check silently did not happen), and (c) the
+# new readers must return exactly what the legacy loops (kept as the reference in
+# internal/agent/legacy_readers_test.go) returned.
+echo "==> agent map reads: batched scan + top-N equal the legacy loops on real BPF maps"
+mr_log="${OUT}/mapread.log"
+go test -count=1 -race -v ./internal/mapscan >"$mr_log" 2>&1 || { cat "$mr_log"; exit 1; }
+go test -count=1 -race -v -run 'TestNewReaders|TestReadersBelow|TestReadersFail|TestCountEntries' ./internal/agent >>"$mr_log" 2>&1 || { cat "$mr_log"; exit 1; }
+mr_pass="$(grep -c -- '^--- PASS' "$mr_log" || true)"
+if grep -q -- '--- SKIP' "$mr_log" || (( mr_pass < 15 )); then
+  cat "$mr_log"
+  echo "map read tests: ${mr_pass} passed (want at least 15) or some skipped" >&2
+  exit 1
+fi
+echo "    ${mr_pass} passed"
+
 # Listen queues (no BPF): half-open connections need the handshake's last ACK to
 # go missing, which needs root and nft. Everything else in internal/listenq runs
 # unprivileged in the `go` job (scripts/ci-listenq-unit.sh).

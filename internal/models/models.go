@@ -1133,6 +1133,8 @@ type AgentReport struct {
 	// DropInfo is nil when drop attribution is off; when it tried and could not
 	// load, it carries Unavailable with the reason.
 	DropInfo *DropInfoSummary `json:"dropInfo,omitempty"`
+	// MapScans is the cost of the agent's latest read of each big BPF map.
+	MapScans []MapScanStat `json:"mapScans,omitempty"`
 	// ListenQueues is nil when listen-queue sampling is off; when it tried and
 	// could not read the sockets it carries Unavailable with the reason.
 	ListenQueues *ListenQueueSummary `json:"listenQueues,omitempty"`
@@ -1431,6 +1433,16 @@ type LockdownRequest struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Selector  map[string]string `json:"selector"`
+}
+
+// MapScanStat is what the agent's latest read of one BPF map cost, so a node whose
+// collection is expensive shows it in its own report instead of needing strace.
+type MapScanStat struct {
+	Map      string  `json:"map"`
+	Entries  int     `json:"entries"`  // entries the read visited
+	Syscalls int     `json:"syscalls"` // bpf() calls it made
+	Batched  bool    `json:"batched"`  // false: the kernel refused batch lookup and it iterated
+	Millis   float64 `json:"millis"`   // wall time of the read
 }
 
 // ListenQueueSummary is one node's accept-queue depth per TCP listener, sampled
