@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -166,9 +167,9 @@ func TestSamplerOnTheRealKernel(t *testing.T) {
 	}
 }
 
-func TestDumpFindsEveryListenerTheKernelHas(t *testing.T) {
-	// Cross-check against /proc/net/tcp: same set of listening ports.
-	want := map[int]bool{}
+// procListeners reads the listening ports from /proc/net/tcp{,6}.
+func procListeners() map[int]bool {
+	out := map[int]bool{}
 	for _, f := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -181,22 +182,46 @@ func TestDumpFindsEveryListenerTheKernelHas(t *testing.T) {
 			}
 			var port int
 			if _, err := fmt.Sscanf(fields[1][strings.LastIndex(fields[1], ":")+1:], "%X", &port); err == nil {
-				want[port] = true
+				out[port] = true
 			}
 		}
 	}
+	return out
+}
+
+// The dump and /proc/net/tcp are two non-atomic reads of a table that other
+// processes (and, under `go test ./...`, other packages' tests) change at will, so
+// "every port in /proc is in the dump" is a race: a listener can close between the
+// reads. What must hold is narrower and exact: a listener that existed for the
+// whole window, seen in /proc both before and after the dump, must be in the dump.
+func TestDumpFindsEveryListenerTheKernelHas(t *testing.T) {
+	// Hold a listener open ourselves so the intersection is never empty.
+	held := rawListener(t, false, 8)
+	before := procListeners()
 	ls, err := Dump()
 	if err != nil {
 		t.Fatal(err)
 	}
+	after := procListeners()
 	got := map[int]bool{}
 	for _, l := range ls {
 		got[int(l.Port)] = true
 	}
-	for p := range want {
-		if !got[p] {
-			t.Errorf("port %d is listening per /proc/net/tcp but missing from the dump", p)
+	if !got[held] {
+		t.Fatalf("the listener this test holds open (port %d) is missing from the dump", held)
+	}
+	stable := 0
+	for p := range before {
+		if !after[p] {
+			continue // it came and went during the window: not required
 		}
+		stable++
+		if !got[p] {
+			t.Errorf("port %d was listening throughout (in /proc before and after) but is missing from the dump", p)
+		}
+	}
+	if stable == 0 {
+		t.Fatal("no listener was stable across the window, so nothing was checked")
 	}
 }
 
@@ -228,5 +253,55 @@ func TestDumpCountsHalfOpenConnections(t *testing.T) {
 	got := find(t, port)
 	if got.SynRecv != 3 || got.Queue != 0 {
 		t.Fatalf("listener = %+v, want 3 half-open and an empty accept queue", got)
+	}
+}
+
+// Recreates the race that made the cross-check flaky: other listeners opening and
+// closing continuously while the dump is compared against /proc. A listener that
+// was present for the whole window must always be in the dump, however much churn
+// there is around it; the previous form of the check failed under `go test ./...`
+// when neighbouring packages' tests happened to open and close listeners.
+func TestDumpIsCorrectWhileOtherListenersChurn(t *testing.T) {
+	held := rawListener(t, false, 8)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for g := 0; g < 4; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if ln, err := net.Listen("tcp4", "127.0.0.1:0"); err == nil {
+					_ = ln.Close()
+				}
+			}
+		}()
+	}
+	defer func() { close(stop); wg.Wait() }()
+
+	for round := 0; round < 200; round++ {
+		before := procListeners()
+		ls, err := Dump()
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		after := procListeners()
+		got := map[int]bool{}
+		for _, l := range ls {
+			got[int(l.Port)] = true
+		}
+		if !got[held] {
+			t.Fatalf("round %d: the long-lived listener (port %d) is missing from the dump", round, held)
+		}
+		for p := range before {
+			if after[p] && !got[p] {
+				t.Fatalf("round %d: port %d was listening throughout but is missing from the dump", round, p)
+			}
+		}
 	}
 }

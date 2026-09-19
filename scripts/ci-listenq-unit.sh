@@ -25,7 +25,7 @@ COUNT="${COUNT:-1}"
 
 # The real-kernel tests exist only on Linux; elsewhere just the portable logic runs.
 if [[ "$(go env GOOS)" == "linux" ]]; then
-  LISTENQ_MIN=12
+  LISTENQ_MIN=13
 else
   LISTENQ_MIN=7
 fi
