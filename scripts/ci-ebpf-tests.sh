@@ -93,6 +93,16 @@ else
   echo "    skipped: $(grep -m1 'diag_linux_test.go' "$lq_log" | sed 's/^ *//')"
 fi
 
+# The agent reads /dev/kmsg on every report. That read once blocked forever at
+# the end of the kernel ring buffer on any quiet host (a fresh node, a CI runner),
+# so the agent never reported and could not be stopped. Run the real-device case
+# as root, where /dev/kmsg is readable.
+echo "==> kmsg: reading the real kernel log must return, not block"
+km_log="${OUT}/kmsg.log"
+go test -count=1 -v -run 'TestSnapshotOfTheRealKernelLogReturns' ./internal/kmsg >"$km_log" 2>&1 || { cat "$km_log"; exit 1; }
+grep -q -- '--- PASS: TestSnapshotOfTheRealKernelLogReturns' "$km_log" || { cat "$km_log"; echo "the real /dev/kmsg test did not run" >&2; exit 1; }
+echo "    passed"
+
 # Mutation guard. netra_dropinfo.c must never invent a tuple for a packet that
 # is not IP; TestDropInfoNonIPFrame* proves that. This proves the test still
 # *bites*: the same program with the safety check removed (family guessed from

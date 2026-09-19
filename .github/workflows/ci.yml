@@ -9,6 +9,7 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -112,6 +113,7 @@ jobs:
     - run: go build ./cmd/netrad ./cmd/netractl ./cmd/netra-agent ./cmd/netra-doctor ./cmd/netra-mcp
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
@@ -123,6 +125,7 @@ jobs:
     - run: npm --prefix web run build
   website:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
@@ -131,6 +134,7 @@ jobs:
     - run: npm --prefix website run build
   helm:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: azure/setup-helm@v4
@@ -458,6 +462,7 @@ jobs:
         grep -q 'path: /readyz' /tmp/netra-ha.yaml
   ebpf:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
     - run: sudo apt-get update && sudo apt-get install -y clang llvm linux-libc-dev nftables
@@ -491,6 +496,7 @@ jobs:
     # iperf3 pid/comm). Softnet trigger is synthetic (≥1000) so CI does not
     # depend on flaky real softnet counters under GitHub-hosted load.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -505,6 +511,7 @@ jobs:
     # contract, and the unlabeled flowlog gauge. iperf3 TCP on a veth;
     # reports carry that interface's RX counters. No eBPF agent.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -518,6 +525,7 @@ jobs:
     # programs may fail the verifier; the status programs must still attach
     # and count an HTTP/1.1 503 whose status line starts the packet.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -531,6 +539,7 @@ jobs:
     # BPF_PROG_TEST_RUN sampler tests, then live agent + openssl ClientHello
     # (+ iperf3 TCP background) → uniqueJa3 > 0 on the controller API.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -545,6 +554,7 @@ jobs:
     # sensor added under bpf/ but not to the Dockerfile builds, passes every
     # unit test, and ships an agent that quietly never loads it.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - name: Build the agent image and verify its BPF objects (scripted)
@@ -556,6 +566,7 @@ jobs:
     # agent is off here because it needs privileged BPF; the veth jobs above
     # cover the datapath.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
     - uses: azure/setup-helm@v4
@@ -604,6 +615,7 @@ jobs:
     # No root, cluster, or real IdP. Same command locally:
     # ./scripts/ci-oidc-live.sh
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -617,6 +629,7 @@ jobs:
     # throughout. No root, cluster or agent. Same command locally:
     # ./scripts/ci-workload-obs-live.sh
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
@@ -629,6 +642,7 @@ jobs:
     # alert does and does not fire. Same command locally (promtool on PATH):
     # ./scripts/ci-prometheus-rules.sh
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     - uses: azure/setup-helm@v4
@@ -650,6 +664,7 @@ jobs:
     # and events made during a Loki outage arriving after it returns.
     # Same command locally: LOKI_BIN=/path/to/loki ./scripts/ci-loki-live.sh
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5

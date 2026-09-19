@@ -47,7 +47,7 @@ spec:
         volumeMounts: [{name: tls-certs, mountPath: /certs}]
       containers:
       - name: netra
-        image: ghcr.io/zyvorai/netra:0.27.106
+        image: ghcr.io/zyvorai/netra:0.27.107
         imagePullPolicy: IfNotPresent
         ports: [{name: https, containerPort: 30870}]
         env:

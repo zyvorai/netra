@@ -62,7 +62,15 @@ cleanup() {
   [[ -n "${AGENT_PID:-}" ]] && kill "$AGENT_PID" 2>/dev/null
   [[ -n "${NETRAD_PID:-}" ]] && kill "$NETRAD_PID" 2>/dev/null
   [[ -n "${IPERF_PID:-}" ]] && kill "$IPERF_PID" 2>/dev/null
-  wait "${AGENT_PID:-}" "${NETRAD_PID:-}" "${IPERF_PID:-}" 2>/dev/null
+  # Bounded: a process that ignores SIGTERM must not hang the job in `wait`
+  # (a hung agent kept a CI job running for six hours). Give each a moment,
+  # then SIGKILL, then reap.
+  for _p in "${AGENT_PID:-}" "${NETRAD_PID:-}" "${IPERF_PID:-}"; do
+    [[ -n "$_p" ]] || continue
+    for _ in $(seq 1 20); do kill -0 "$_p" 2>/dev/null || break; sleep 0.25; done
+    kill -9 "$_p" 2>/dev/null
+    wait "$_p" 2>/dev/null
+  done
   ip link del "$IFACE0" 2>/dev/null
   ip netns del "$PEER_NS" 2>/dev/null
   rm -rf "$PIN_PATH" 2>/dev/null
