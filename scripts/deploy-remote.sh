@@ -28,6 +28,7 @@ PROFILE="k3s"
 DRY_RUN=false
 VERIFY_ONLY=false
 TARGET=""
+# shellcheck disable=SC2034 # assigned for callers that source this file; not read here
 TARGET_USER=""
 POSITIONAL=()
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)

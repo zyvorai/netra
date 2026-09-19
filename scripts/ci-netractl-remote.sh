@@ -136,7 +136,7 @@ while IFS= read -r line; do
       continue
       ;;
   esac
-  IFS='|' read -r name mutating local streaming optional filekind argstr <<<"$payload"
+  IFS='|' read -r name mutating _is_local streaming optional filekind argstr <<<"$payload"
   if [[ "$mutating" == "1" && "$ALLOW_MUTATE" != "1" ]]; then
     echo "SKIP  $name  (mutating; set NETRA_CLI_ALLOW_MUTATE=1)"
     skip=$((skip + 1))

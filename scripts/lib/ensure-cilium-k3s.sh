@@ -13,6 +13,7 @@ fi
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 if [[ ! -r "$KUBECONFIG" ]]; then
   mkdir -p "$HOME/.kube"
+  # shellcheck disable=SC2024 # only the read needs root; the copy belongs in the caller's own $HOME
   sudo cat /etc/rancher/k3s/k3s.yaml > "$HOME/.kube/netra-k3s.yaml"
   chmod 600 "$HOME/.kube/netra-k3s.yaml"
   export KUBECONFIG="$HOME/.kube/netra-k3s.yaml"

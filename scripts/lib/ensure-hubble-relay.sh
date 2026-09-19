@@ -14,6 +14,7 @@ kubectl_cmd() {
       else
         mkdir -p "$HOME/.kube"
         local kcfg="$HOME/.kube/netra-k3s.yaml"
+        # shellcheck disable=SC2024 # only the read needs root; the copy belongs in the caller's own $HOME
         sudo cat "$sys_k3s" > "$kcfg"
         chmod 600 "$kcfg"
         export KUBECONFIG="$kcfg"

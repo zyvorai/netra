@@ -26,7 +26,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 PORT="${CONTROLLER_PORT:-30877}"
-URL="https://127.0.0.1:${PORT}"
 API_KEY="ci-api-key-mtls"
 AGENT_KEY="ci-agent-key-mtls"
 D="$(mktemp -d "${TMPDIR:-/tmp}/netra-mtls.XXXXXX")"
@@ -143,9 +142,7 @@ BPF_DIR="$D/bpf"; mkdir -p "$BPF_DIR"
 PIN_PATH="/sys/fs/bpf/netra-ci-mtls"
 echo "==> compile the BPF objects and build netra-agent"
 ARCH="$(uname -m)"; INC="/usr/include/${ARCH}-linux-gnu"
-for src in bpf/netra_tc.c; do
-  clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" -mllvm -bpf-stack-size=1024 -c "$src" -o "$BPF_DIR/$(basename "$src" .c).o"
-done
+clang -target bpfel -O2 -g -Wall -Wextra -Werror -I"$INC" -mllvm -bpf-stack-size=1024 -c bpf/netra_tc.c -o "$BPF_DIR/netra_tc.o"
 go build -o "$BIN/netra-agent" ./cmd/netra-agent
 
 start_agent() { # start_agent <node> <log> <env...>
