@@ -1,7 +1,7 @@
 # Netra
 
 [![CI](https://github.com/zyvorai/netra/actions/workflows/ci.yml/badge.svg)](https://github.com/zyvorai/netra/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License: Zyvor Production v1.0](https://img.shields.io/badge/License-Zyvor%20Production%20v1.0-orange.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/zyvorai/netra?label=version&color=informational)](CHANGELOG.md)
 
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
@@ -382,7 +382,7 @@ docs/tutorials/drop-incident-context.md  walkthrough: enable drop context, read 
 docs/tls-fingerprints.md  JA3/JA4 datapath + encrypted DNS; openssl+iperf3 CI smoke
 docs/p0-p5-surfaces.md    P0–P5 observe surface catalog (what / how / UX / APIs)
 docs/p5-surfaces.md       P5 residual boards (JA3 risk, ECH, exfil, lateral, …)
-docs/sales/               buyer guide + PDFs/PPTX/DOCX — also on GitHub Pages /resources
+docs/sales/               buyer guide + PDFs/PPTX + the brochure source (`brochure/`) — also on GitHub Pages /resources
 docs/sales/buyers-guide.md evaluation narrative for buyers (P0–P5 + checklist)
 docs/flow-log.md              queryable 7-day flow history, RED, inferred traces, stacks, kernel notes, pod warnings
 docs/agent-map-reads.md           How the agent reads its BPF maps
@@ -430,7 +430,7 @@ docs/ci.md                     every CI job, the use case it proves, its script 
 
 - Buyers guide (markdown): [`docs/sales/buyers-guide.md`](docs/sales/buyers-guide.md)
 - Feature catalog: [`docs/p0-p5-surfaces.md`](docs/p0-p5-surfaces.md)
-- Product Perspective / Brochure (PDF, PPTX, DOCX): [`docs/sales/`](docs/sales/)
+- Product Perspective (PDF, PPTX) and Brochure (PDF): [`docs/sales/`](docs/sales/)
 - GitHub Pages: https://zyvorai.github.io/netra/resources
 
 ## Prerequisites

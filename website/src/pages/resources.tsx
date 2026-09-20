@@ -49,11 +49,10 @@ const ASSETS: Asset[] = [
   {
     title: 'Netra Product Brochure',
     blurb:
-      'Longer brochure covering every major capability, P0–P5 feature map, lab UI examples, and Zyvor suite placement next to PacketWolf.',
-    pages: 'DOCX + PDF',
+      'How eBPF does it, a step-by-step traffic-drop scenario with diagrams (detect, capture the node\'s packets, contain), the newest kernel sensors, privacy boundaries, access and export, how it is tested, and Zyvor suite placement next to PacketWolf.',
+    pages: '17 pages, PDF',
     files: [
       {label: 'Download PDF', href: '/sales/Zyvor-Netra-Product-Brochure.pdf'},
-      {label: 'Download DOCX', href: '/sales/Zyvor-Netra-Product-Brochure.docx'},
     ],
   },
 ];
