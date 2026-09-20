@@ -58,7 +58,7 @@ Official framing ([zyvor.dev/docs/netra](https://zyvor.dev/docs/netra), [Introdu
 
 ## Practical co-existence rules
 
-1. **Different default markets** — Netra for mixed/non-Cilium and OSS entry; PacketWolf for Cilium-standardized fleets.
+1. **Different default markets** — Netra for mixed/non-Cilium clusters and as the easy entry point; PacketWolf for Cilium-standardized fleets.
 2. **Same cluster is allowed but not required** — Netra’s maps are isolated; enable Hubble/CNP only if you want enrichment, not as PacketWolf’s datapath.
 3. **Do not dual-own long-lived deny** — PacketWolf containment / Cilium NetworkPolicy for durable posture; Netra leases for incident kill-switch that auto-reverts.
 4. **Export sideways, not into each other** — both can feed SIEM/Prometheus/webhooks independently if a third plane (Axiom, Forge, SOC) needs a unified view.

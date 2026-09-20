@@ -147,7 +147,7 @@ Peer eBPF observability gaps, which do name those products:
 
 | | **Netra** | **PacketWolf** |
 |---|---|---|
-| Default market | Mixed / non-Cilium; OSS entry | Cilium-standardized fleets |
+| Default market | Mixed / non-Cilium; easy entry point | Cilium-standardized fleets |
 | Core job | Observe + diagnostics + leased emergency | Observe + AutoPolicy + healer depth |
 | Policy | Review-only drafts; enforce time-leased | Durable Cilium policy |
 
