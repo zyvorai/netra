@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -101,7 +102,10 @@ func parseSymbols(line string, into map[string]map[int]string) {
 		}
 		for _, e := range symbolicEntry.FindAllStringSubmatch(m[2], -1) {
 			v, err := strconv.ParseInt(e[1], 0, 64)
-			if err != nil || v < 0 || v > 1<<31 {
+			if err != nil || v < 0 {
+				continue
+			}
+			if v > math.MaxInt32 {
 				continue
 			}
 			tbl[int(v)] = e[2]

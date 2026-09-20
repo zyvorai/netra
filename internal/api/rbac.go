@@ -143,6 +143,9 @@ const (
 // sent to the OIDC verifier.
 func (s *Server) authenticate(r *http.Request) (principal, authResult) {
 	tok := bearer(r)
+	if tok == "" && s.sessionValid(r) {
+		tok = s.apiKey
+	}
 	if s.apiKey != "" && secureEq(tok, s.apiKey) {
 		return principal{kind: "apikey", role: oidcauth.RoleAdmin}, authOK
 	}

@@ -496,3 +496,37 @@ func grep(s, sub string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+func TestSessionCookieAuthenticatesWithoutStoringTheAPIKey(t *testing.T) {
+	e := newAuthEnv(t, false)
+	bad := e.do("POST", "/api/v1/session", "", `{"token":"nope"}`, nil)
+	if bad.Code != http.StatusUnauthorized {
+		t.Fatalf("bad token: %d", bad.Code)
+	}
+	rec := e.do("POST", "/api/v1/session", "", `{"token":"`+testAPIKey+`"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", rec.Code, rec.Body.String())
+	}
+	var sess *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie {
+			sess = c
+		}
+	}
+	if sess == nil || !sess.HttpOnly || sess.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("session cookie = %#v", sess)
+	}
+	if strings.Contains(sess.Value, testAPIKey) {
+		t.Fatal("session cookie contains the API key")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami", nil)
+	req.AddCookie(sess)
+	got := httptest.NewRecorder()
+	e.h.ServeHTTP(got, req)
+	if got.Code != http.StatusOK {
+		t.Fatalf("whoami with cookie: %d %s", got.Code, got.Body.String())
+	}
+	if !strings.Contains(got.Body.String(), `"kind":"apikey"`) {
+		t.Fatalf("whoami body = %s", got.Body.String())
+	}
+}

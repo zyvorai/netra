@@ -4,7 +4,7 @@
 // bearer the server accepts. Deploy/Helm often mint a random NETRA_API_KEY;
 // operators can sign in as admin with that key as the password. The demo
 // pair admin / Admin@321 still maps to the baked-in demo token.
-import { setToken } from './api';
+import { clearSession } from './api';
 
 const USERNAME = 'admin';
 const PASSWORD = 'Admin@321';
@@ -30,5 +30,5 @@ export function checkCredentials(username: string, password: string): string | n
 }
 
 export function logout(): void {
-  setToken('');
+  clearSession();
 }

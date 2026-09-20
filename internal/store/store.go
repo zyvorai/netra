@@ -389,6 +389,15 @@ func (s *Store) CaptureHistory(limit int) []models.CaptureHistoryEntry {
 	if limit <= 0 {
 		limit = 100
 	}
+	// Rebind on both branches so the size passed to make is capped at a
+	// constant, not the caller's raw limit.
+	const maxCaptureHistoryLimit = 500
+	if limit > maxCaptureHistoryLimit {
+		limit = maxCaptureHistoryLimit
+	} else {
+		bounded := limit
+		limit = bounded
+	}
 	if limit > len(s.captureHistory) {
 		limit = len(s.captureHistory)
 	}

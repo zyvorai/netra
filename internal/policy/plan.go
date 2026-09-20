@@ -147,7 +147,7 @@ func AnalyzeChange(current, candidate []byte) (ChangePlan, error) {
 }
 
 func rules(doc policyDoc) []policyRule {
-	out := make([]policyRule, 0, 1+len(doc.Specs))
+	out := make([]policyRule, 0, len(doc.Specs))
 	if doc.Spec != nil {
 		out = append(out, *doc.Spec)
 	}

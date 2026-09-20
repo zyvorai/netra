@@ -16,8 +16,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -34,19 +39,42 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// apiPath is the only shape Client.Do will request. Chat commands and
+// confirmation buttons contribute the path, so it has to stay on the
+// configured controller host and under /api/v1/.
+var apiPath = regexp.MustCompile(`^/api/v1/[A-Za-z0-9._/-]+(?:\?[A-Za-z0-9._=&-]+)?$`)
+
 // NewClient builds a Client pointed at targetURL (typically the loopback
 // address netrad itself listens on) using apiKey for outbound auth.
+// HTTPS uses the system trust store plus NETRA_TLS_CERT when that file is
+// set, so the chart's self-signed listener verifies without disabling
+// certificate checks.
 func NewClient(targetURL, apiKey string) *Client {
 	return &Client{
-		base:   strings.TrimRight(targetURL, "/"),
-		apiKey: apiKey,
-		// This is always a same-pod loopback call to netrad's own listener,
-		// typically serving the chart's self-signed cert (docs/https-default.md)
-		// — unlike cmd/netractl's NETRA_TLS_INSECURE, which is a deliberate
-		// user opt-in for a client talking to a possibly-remote controller,
-		// skipping verification here is just "trust the process I'm part of."
-		httpClient: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}}},
+		base:       strings.TrimRight(targetURL, "/"),
+		apiKey:     apiKey,
+		httpClient: &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: chatopsTLSConfig()}},
 	}
+}
+
+func chatopsTLSConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	certFile := strings.TrimSpace(os.Getenv("NETRA_TLS_CERT"))
+	if certFile == "" {
+		return cfg
+	}
+	pemBytes, err := os.ReadFile(certFile)
+	if err != nil {
+		return cfg
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if pool.AppendCertsFromPEM(pemBytes) {
+		cfg.RootCAs = pool
+	}
+	return cfg
 }
 
 // Do performs one call against netrad's own API, setting X-Netra-Actor to
@@ -54,7 +82,11 @@ func NewClient(targetURL, apiKey string) *Client {
 // so it lands in the exact same audit trail every other mutation already
 // does, with no new audit mechanism needed here at all.
 func (c *Client) Do(ctx context.Context, method, path string, body []byte, actor string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
+	endpoint, err := c.endpoint(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -77,4 +109,32 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte, actor
 		return nil, resp.StatusCode, err
 	}
 	return out, resp.StatusCode, nil
+}
+
+// endpoint pins the request to the configured controller. path may come from
+// a chat command (a node name, a lease, or a confirmation payload) and must
+// not be able to change the host.
+func (c *Client) endpoint(path string) (string, error) {
+	if !apiPath.MatchString(path) {
+		return "", fmt.Errorf("chatops: refusing path %q", path)
+	}
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("chatops: refusing path %q", path)
+	}
+	base, err := url.Parse(c.base)
+	if err != nil || base.Hostname() == "" || base.User != nil {
+		return "", fmt.Errorf("chatops: invalid target URL")
+	}
+	rel, err := url.Parse(path)
+	if err != nil || rel.IsAbs() || rel.Host != "" || rel.User != nil {
+		return "", fmt.Errorf("chatops: refusing non-relative path %q", path)
+	}
+	if !strings.HasPrefix(rel.Path, "/api/v1/") {
+		return "", fmt.Errorf("chatops: refusing path %q", path)
+	}
+	base.Path = rel.Path
+	base.RawPath = ""
+	base.RawQuery = rel.RawQuery
+	base.Fragment = ""
+	return base.String(), nil
 }

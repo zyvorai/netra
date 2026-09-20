@@ -199,6 +199,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.27.111"})
 	})
+	mux.HandleFunc("POST /api/v1/session", s.sessionCreate)
+	mux.HandleFunc("DELETE /api/v1/session", s.sessionDelete)
 	mux.Handle("GET /metrics", s.metricsAuth(http.HandlerFunc(s.metrics)))
 	if s.chatopsHandler != nil {
 		// Outside s.auth(...) — Slack can't send our bearer token, it signs
@@ -2822,15 +2824,17 @@ func (s *Server) serveWeb(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	clean := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
-	if clean == "." {
+	// Clean an absolute path so ".." cannot escape the web root, then require
+	// the remainder to be a local relative path before touching the filesystem.
+	clean := strings.TrimPrefix(filepath.Clean("/"+strings.TrimPrefix(r.URL.Path, "/")), "/")
+	if clean == "" {
 		clean = "index.html"
 	}
-	p := filepath.Join(s.webDir, clean)
-	if !strings.HasPrefix(p, filepath.Clean(s.webDir)+string(os.PathSeparator)) && p != filepath.Join(s.webDir, "index.html") {
+	if !filepath.IsLocal(clean) {
 		http.NotFound(w, r)
 		return
 	}
+	p := filepath.Join(s.webDir, clean)
 	if st, err := os.Stat(p); err != nil || st.IsDir() {
 		p = filepath.Join(s.webDir, "index.html")
 	}

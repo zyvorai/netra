@@ -30,7 +30,7 @@ import NodeResources from './pages/NodeResources';
 import Workloads from './pages/Workloads';
 import PageHero, { type HeroTint } from './components/PageHero';
 import Login from './components/Login';
-import { token } from './api';
+import { sessionAlive } from './api';
 import { logout } from './auth';
 import { applyTheme, readStoredTheme, toggleTheme, type Theme } from './theme';
 
@@ -197,13 +197,23 @@ export default function App() {
   // there's no hash — only differs when the URL already carries a shared
   // investigation link (#page=...), so a pasted link opens directly to it.
   const [page, setPage] = useState<Page>(() => readRoute(window.location.hash).page as Page);
-  const [loggedIn, setLoggedIn] = useState(() => Boolean(token()));
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState('');
   const [theme, setTheme] = useState<Theme>(() => {
     const t = readStoredTheme();
     applyTheme(t);
     return t;
   });
+
+  useEffect(() => {
+    let cancel = false;
+    sessionAlive().then((ok) => {
+      if (!cancel) setLoggedIn(ok);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
   useEffect(() => {
     const onExpired = () => {
@@ -225,6 +235,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  if (loggedIn === null) return null;
   if (!loggedIn) {
     return (
       <Login

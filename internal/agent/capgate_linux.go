@@ -4,6 +4,7 @@ package agent
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/procmeta"
@@ -53,8 +54,10 @@ func (a *Agent) applyCapabilityGate(cfg models.EBPFFastPathConfig) error {
 			continue
 		}
 		if meta.Caps.HasAny(cfg.DeniedCapabilities...) {
-			if err := m.Put(uint32(pid), uint8(1)); err != nil {
-				return err
+			if pid > 0 && pid <= math.MaxInt32 {
+				if err := m.Put(uint32(pid), uint8(1)); err != nil {
+					return err
+				}
 			}
 		}
 	}

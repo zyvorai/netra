@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { bearerCandidates } from '../auth';
-import { setToken } from '../api';
+import { openSession } from '../api';
 
 const WRONG = 'Wrong username or password.';
 
@@ -52,18 +52,19 @@ export default function Login({
     let sawUnauthorized = false;
     try {
       for (const bearer of candidates) {
-        setToken(bearer);
         const result = await probeBearer(bearer);
         if (result === 'ok') {
+          if (!(await openSession(bearer))) {
+            setError('Could not start a session. Check the URL and try again.');
+            return;
+          }
           onLogin();
           return;
         }
         if (result === 'unauthorized') sawUnauthorized = true;
       }
-      setToken('');
       setError(sawUnauthorized ? WRONG : 'Could not reach the controller. Check the URL and try again.');
     } catch {
-      setToken('');
       setError('Could not reach the controller. Check the URL and try again.');
     } finally {
       setBusy(false);

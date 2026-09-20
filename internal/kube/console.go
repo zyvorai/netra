@@ -122,8 +122,5 @@ func (c *Client) DialVMIVnc(ctx context.Context, ns, name string) (*websocket.Co
 // EncodeExecResize builds a Kubernetes channel-4 terminal resize frame.
 func EncodeExecResize(cols, rows uint16) []byte {
 	payload, _ := json.Marshal(map[string]uint16{"Width": cols, "Height": rows})
-	out := make([]byte, 1+len(payload))
-	out[0] = 4
-	copy(out[1:], payload)
-	return out
+	return append([]byte{4}, payload...)
 }

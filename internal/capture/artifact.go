@@ -142,6 +142,9 @@ func (s *ArtifactStore) Begin(node, triggerSource, triggerKind, triggerSubject s
 	if err != nil {
 		return "", err
 	}
+	if !filepath.IsLocal(id) {
+		return "", fmt.Errorf("refusing artifact id %q", id)
+	}
 	path := filepath.Join(s.Dir, id+artifactFileSuffix)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
 	if err != nil {

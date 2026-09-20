@@ -660,7 +660,7 @@ func newAlertPoller(log *slog.Logger, st *store.Store, dispatcher *notify.Dispat
 		Cooldown:      envDuration("NETRA_AUTO_CAPTURE_COOLDOWN", 10*time.Minute),
 		Protocol:      env("NETRA_AUTO_CAPTURE_PROTOCOL", "tcp"),
 		Backend:       env("NETRA_AUTO_CAPTURE_BACKEND", models.CaptureBackendEBPF),
-		MaxPPS:        uint32(envInt("NETRA_AUTO_CAPTURE_MAX_PPS", 1000)),
+		MaxPPS:        envUint32("NETRA_AUTO_CAPTURE_MAX_PPS", 1000),
 		MaxConcurrent: envInt("NETRA_AUTO_CAPTURE_MAX_CONCURRENT", 5),
 	}
 	auto := alert.NewAutoCapture(log, cfg,

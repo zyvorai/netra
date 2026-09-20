@@ -189,8 +189,17 @@ func windowBetween(node string, start, end kernelNetworkSample) models.KernelNet
 // already keeps and by maxPoints, capped at 60 (~the last 20 minutes at
 // the store's 10s minimum sample interval).
 func (s *Store) KernelNetworkSparkline(node string, maxPoints int) []models.KernelNetworkWindow {
-	if maxPoints <= 0 || maxPoints > 60 {
-		maxPoints = 60
+	const maxSparklinePoints = 60
+	if maxPoints <= 0 {
+		maxPoints = maxSparklinePoints
+	}
+	// Both branches rebind maxPoints so the make below is capped at
+	// maxSparklinePoints instead of the caller-supplied size.
+	if maxPoints > maxSparklinePoints {
+		maxPoints = maxSparklinePoints
+	} else {
+		bounded := maxPoints
+		maxPoints = bounded
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()

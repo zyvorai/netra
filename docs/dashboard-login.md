@@ -37,17 +37,19 @@ Netra's controller has one shared bearer secret (`NETRA_API_KEY`, see
 [Safety and persistence](../README.md#safety-and-persistence)) — there is no
 per-user account system in `netrad` today. The login screen is a **frontend
 convenience gate**: entering `admin` / `Admin@321` maps to that one bearer
-token client-side and stores it the same way the old token field did
-(`localStorage`), then every dashboard API call authenticates with it as
-before. It does not add a new server-side access-control layer — anyone who
+token client-side. The browser sends the bearer once to `POST /api/v1/session`,
+and the controller answers with an HttpOnly session cookie (an expiry and an
+HMAC, not the token itself). Later dashboard calls authenticate with that
+cookie. The bearer is not stored in `localStorage` or `sessionStorage`. It
+does not add a new server-side access-control layer — anyone who
 can reach the controller's port can already load the unauthenticated static
 UI shell (only the `/api/v1/*` calls require the bearer token) — it only
 removes the friction of copy-pasting the token into the UI by hand.
 
-Logging out (the exit-arrow icon button next to the theme toggle in the top nav) clears the stored token
+Logging out (the exit-arrow icon button next to the theme toggle in the top nav) clears the session cookie
 and returns you to the login screen. If the controller ever rejects a request
 with `401` (e.g. the API key was rotated on the controller since you signed
-in), the dashboard automatically clears its stale token and returns you to
+in), the dashboard automatically clears the cookie and returns you to
 the login screen instead of showing a dead page.
 
 ## Changing the password
