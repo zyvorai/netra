@@ -1,7 +1,7 @@
 # Netra Enterprise pricing
 
 Packaging, feature boundary, and recommended pricing. September 2026.
-Orange, white, and black sheets for GitHub — open dataplane, enterprise operations.
+Orange, white, and black sheets for GitHub — source-available dataplane, enterprise operations.
 
 Non-production use is free under the Zyvor Production License. Production use requires a commercial license. Enterprise subscriptions are by nodes and clusters, not by user, packet, flow, or seat.
 
