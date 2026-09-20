@@ -1890,6 +1890,9 @@ code {
   .mega-grid { grid-template-columns: 1fr; }
   .brand small { display: none; }
   .hero { display: block; padding-top: 24px; }
+  /* The decorative glow reaches 8% past the hero box; on a phone that is scrollable overflow. */
+  .hero::before,
+  .page-hero::before { inset: -20px 0 auto; }
   .tokenbox { display: block; margin-top: 20px; }
   .grid { grid-template-columns: 1fr; }
   .span2,

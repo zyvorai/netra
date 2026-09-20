@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Nav, { Page } from './components/Nav';
 import Overview from './pages/Overview';
 import Connections from './pages/Connections';
 import ObservedWorkloads from './pages/ObservedWorkloads';
 import Explain from './pages/Explain';
-import { readRoute } from './lib/investigation';
+import { readRoute, routeHash } from './lib/investigation';
 import Path from './pages/Path';
 import Drops from './pages/Drops';
 import Insights from './pages/Insights';
@@ -224,11 +224,19 @@ export default function App() {
     return () => window.removeEventListener('netra-auth-expired', onExpired);
   }, []);
 
-  // Regular Nav clicks call setPage(id) directly and never touch the hash,
-  // so existing navigation keeps its exact current behavior (no URL change,
-  // no history entry). This listener only exists so the investigation
-  // feature's own navigate() calls (which do set the hash, for shareable
-  // links) can switch the visible page too.
+  // A Nav click shows the page and keeps the hash in step with it, via
+  // replaceState: no history entry and no hashchange event, so the click
+  // behaves as before. The hash must name the page because the investigation
+  // filters and "Copy link" derive the page from it: with an empty hash they
+  // read 'overview', so typing in a filter opened from the menu jumped the
+  // user back to the Overview. The filter scope in the hash is carried over.
+  const goPage = useCallback((next: Page) => {
+    setPage(next);
+    window.history.replaceState(null, '', routeHash(next, readRoute(window.location.hash).scope));
+  }, []);
+
+  // This listener lets the investigation feature's own navigate() calls
+  // (which set the hash, for shareable links) switch the visible page too.
   useEffect(() => {
     const onHashChange = () => setPage(readRoute(window.location.hash).page as Page);
     window.addEventListener('hashchange', onHashChange);
@@ -285,7 +293,7 @@ export default function App() {
     <>
       <Nav
         page={page}
-        setPage={setPage}
+        setPage={goPage}
         theme={theme}
         onToggleTheme={() => setTheme((t) => toggleTheme(t))}
         onLogout={() => {
