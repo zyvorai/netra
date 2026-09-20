@@ -29,7 +29,10 @@ func report(packets uint64, pid uint32, comm string) models.AgentReport {
 
 func TestIngestDeltasProcessAndClass(t *testing.T) {
 	l := NewLimited(48*time.Hour, 100)
-	base := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	// Relative to now, not a fixed date: Query prunes records older than the retention window against
+	// the wall clock, so a hard-coded date turns this test red once it is more than 48 hours old
+	// (it did, on 2026-09-20 at 12:00 UTC, and failed every CI run after that).
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
 	l.Ingest(base, report(100, 42, "mysqld"))
 	if l.Len() != 0 {
 		t.Fatalf("baseline emitted %d records", l.Len())
