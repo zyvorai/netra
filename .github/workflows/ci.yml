@@ -769,7 +769,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang
@@ -783,7 +783,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
     - name: Install clang and tcpdump
@@ -798,9 +798,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with: {fetch-depth: 0}
-    - uses: azure/setup-helm@v4
+    - uses: azure/setup-helm@v5
     - uses: helm/kind-action@v1
       with: {cluster_name: netra-ci}
     - name: Install, upgrade, restart and roll back on a real cluster (scripted)
@@ -812,7 +812,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: helm/kind-action@v1
       with: {cluster_name: netra-ci}
     - name: The plain manifests on a real cluster (scripted)
@@ -825,10 +825,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with: {go-version: '1.27.1', cache: true}
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
     - run: npm --prefix web ci
     - run: npm --prefix web run build
@@ -836,7 +836,7 @@ jobs:
     - name: The UI against a real controller (scripted)
       # Same command locally: ./scripts/ci-web-e2e.sh (needs Playwright's chromium)
       run: OUT_DIR=/tmp/netra-web-e2e ./scripts/ci-web-e2e.sh
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: always()
       with:
         name: web-e2e-evidence
