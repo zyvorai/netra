@@ -11,6 +11,9 @@ updates:
   directory: /web
   schedule: {interval: weekly}
   open-pull-requests-limit: 5
+  groups:
+    # react and react-dom must be the same version; a split bump blanks the dashboard (React #527).
+    react: {patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]}
 - package-ecosystem: npm
   directory: /website
   schedule: {interval: weekly}
