@@ -112,6 +112,8 @@ helm upgrade netra ./helm/netra -n "$NS" --reset-then-reuse-values \
 rolled; api_up
 [[ "$(ver)" == "$HEAD_VERSION" ]] || fail "after the upgrade the controller reports $(ver), want ${HEAD_VERSION}"
 state_intact "after the upgrade"
+echo "==> the upgraded controller serves the whole UI (scripts, styles, logo, favicon)"
+"$ROOT/scripts/check-served-ui.sh" https://127.0.0.1:30870 -k || fail "the upgraded controller serves an incomplete UI"
 echo "    ${OLD_VER} -> ${HEAD_VERSION}: state and API key survived"
 
 echo "==> the node agent starts, reports, and receives its configuration"

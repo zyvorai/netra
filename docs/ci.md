@@ -59,6 +59,7 @@ shared group even with `cancel-in-progress: false`.
 | Two-replica HA, leader election, failover | `ha-kind` (nightly) | `ci-ha-kind.sh` | real cluster (kind) |
 | Images build and the agent image ships every BPF object | `agent-image`, `release-dryrun` | `ci-agent-image.sh` | container build |
 | A release would succeed (version gates, both images, the thin runtime image boots) | `release-dryrun.yml` | inline | container build and boot |
+| The UI a controller serves is complete: every file in `web/public` and every asset the page references, byte for byte (an unknown path answers 200 with the HTML fallback, so a missing logo passes every health probe) | `release-dryrun.yml`, `kind-lifecycle` | `check-served-ui.sh` | the built images, running |
 
 Not covered by CI: a real Cilium/Hubble (the chart's Cilium mode is checked by `helm template`
 only), and the shared lab host (never a CI target).

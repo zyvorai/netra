@@ -68,6 +68,9 @@ jobs:
         curl -sf http://127.0.0.1:30870/livez | grep -q '"service":"netrad"'
         # The UI ships in the image: the root page is HTML, not a 404.
         curl -sf http://127.0.0.1:30870/ | grep -qi '<html'
+        # ...and so do its static files. An unknown path answers 200 with the HTML fallback, so only
+        # fetching the logo and favicon and comparing them with web/public proves they are there.
+        ./scripts/check-served-ui.sh http://127.0.0.1:30870
   runtime-image:
     # Dockerfile.runtime is the thin image the remote deploy path uses; nothing built it.
     runs-on: ubuntu-latest
@@ -92,4 +95,5 @@ jobs:
         for _ in $(seq 1 40); do curl -sf http://127.0.0.1:30871/healthz >/dev/null && break; sleep 0.5; done
         curl -sf http://127.0.0.1:30871/livez | grep -q '"service":"netrad"'
         curl -sf http://127.0.0.1:30871/ | grep -qi '<html'
+        ./scripts/check-served-ui.sh http://127.0.0.1:30871
         docker run --rm --entrypoint /usr/local/bin/netractl netra-dryrun/runtime:ci --help >/dev/null

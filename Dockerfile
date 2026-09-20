@@ -5,6 +5,9 @@ WORKDIR /src
 # package "exports" breaks vite's resolver, and the image stops building.
 COPY web/package.json web/package-lock.json web/tsconfig.json web/vite.config.ts web/index.html ./web/
 COPY web/src ./web/src
+# Static files served as-is (the logo, the favicon). Vite copies web/public into dist, but only if it
+# is in the build context: leaving it out ships a controller whose UI shows a broken-image logo.
+COPY web/public ./web/public
 RUN cd web && npm ci && npm run build
 
 FROM golang:1.27-bookworm AS go
