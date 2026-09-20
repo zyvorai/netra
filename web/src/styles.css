@@ -571,6 +571,10 @@ main {
   max-width: 1800px;
   margin: auto;
   padding: 28px clamp(20px, 3.5vw, 64px) 96px;
+  /* The hero glow is inset -8% past the hero box, so it ends beyond main's edge
+     (about 57px at 1440px wide) and would give the page a sideways scrollbar.
+     clip, unlike hidden, makes no scroll container, so sticky children still work. */
+  overflow-x: clip;
 }
 
 /* Full marketing hero (Overview) */
@@ -1890,9 +1894,6 @@ code {
   .mega-grid { grid-template-columns: 1fr; }
   .brand small { display: none; }
   .hero { display: block; padding-top: 24px; }
-  /* The decorative glow reaches 8% past the hero box; on a phone that is scrollable overflow. */
-  .hero::before,
-  .page-hero::before { inset: -20px 0 auto; }
   .tokenbox { display: block; margin-top: 20px; }
   .grid { grid-template-columns: 1fr; }
   .span2,

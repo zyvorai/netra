@@ -27,6 +27,7 @@ const assert = require('node:assert/strict');
   await page.getByRole('heading', { name: 'See the network. Diagnose it. Contain it.' }).waitFor();
   await page.getByText('One or more agents are stale.', { exact: false }).waitFor();
   await nodeAgents(2).waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the Overview scrolls sideways at desktop width');
   await page.screenshot({ path: '/tmp/netra-overview.png', fullPage: true });
   await page.getByRole('button', { name: 'Investigate', exact: true }).click();
   await page.getByRole('region', { name: 'Investigate' }).getByRole('button', { name: /^Connections/ }).click();
