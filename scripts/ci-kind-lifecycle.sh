@@ -26,10 +26,13 @@ CLUSTER="${CLUSTER:-netra-ci}"
 NS=netra-system
 API_KEY="ci-kind-api-key"
 AGENT_KEY="ci-kind-agent-key"
-PREVIOUS_TAG="${PREVIOUS_TAG:-$(git tag --list 'v[0-9]*' --sort=-v:refname | while read -r t; do [[ "$(git rev-list -n1 "$t")" != "$(git rev-parse HEAD)" ]] && { echo "$t"; break; }; done)}"
+HEAD_VERSION="$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/netrad/main.go)"
+# The newest release tag with a DIFFERENT version than this checkout: commits on top of a fresh tag
+# still carry that tag's version, and upgrading a release to itself proves nothing (and trips the
+# "nothing is being upgraded" assertion below).
+PREVIOUS_TAG="${PREVIOUS_TAG:-$(git tag --list 'v[0-9]*' --sort=-v:refname | while read -r t; do [[ "${t#v}" != "$HEAD_VERSION" ]] && { echo "$t"; break; }; done)}"
 [[ -n "$PREVIOUS_TAG" ]] || { echo "no previous release tag to upgrade from (fetch tags: git fetch --tags)" >&2; exit 1; }
 for c in docker helm kubectl kind curl python3 git; do command -v "$c" >/dev/null || { echo "missing required command: $c" >&2; exit 1; }; done
-HEAD_VERSION="$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/netrad/main.go)"
 W="$(mktemp -d "${TMPDIR:-/tmp}/netra-kind.XXXXXX")"
 PF=""
 cleanup() { set +e; [[ -n "$PF" ]] && kill "$PF" 2>/dev/null; [[ "${KEEP:-}" == 1 ]] || rm -rf "$W"; }
