@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Verified: 0.28.1 installs and runs on a real node, and its UI is complete.** The two released images were pulled from `ghcr.io` onto the K3s lab host with the chart from the `v0.28.1` tag (`--reset-then-reuse-values`); both running pods reported the exact release digests, the controller and agent reported 0.28.1, the cookie session, 12 read endpoints and `/metrics` passed, and `scripts/check-served-ui.sh` confirmed the logo and favicon are served and identical to the repository files. The install script's own digest and agent checks were fixed first: the previous run had silently skipped its digest check.
+- **Docs quote the 0.28.1 digests and signing identity** (`deploy/README.md`, the website quickstart) and say to use 0.28.1 or later.
+
 ## 0.28.1 — 2026-09-20
 
 - **Fix: the 0.28.0 images shipped without the logo and the favicon.** The Dockerfile's web stage copied `web/src` but not `web/public`, where `zyvor-logomark.svg` and `zyvor-mark.svg` live, so every image built from it served the app's HTML fallback (HTTP 200) for those two paths: the nav logo was a broken image and the browser tab had no icon. The health probes, the release dry run and the lifecycle test all passed, because an unknown path answers 200. `web/public` is now copied, and `scripts/check-served-ui.sh` fetches every file in `web/public` and every asset the served page references from a running controller, failing on a non-200, on the HTML fallback, or on any byte that differs from the repository file. It runs in the release dry run against both the controller image and the thin runtime image, and in `kind-lifecycle` against the upgraded controller. Use 0.28.1; the 0.28.0 images have the defect (the controller itself is unaffected).

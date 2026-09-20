@@ -35,28 +35,29 @@ The plain deployment includes a PVC and remains a simple single-controller insta
 
 ## Install from a release
 
-Only **tagged** releases have images in `ghcr.io`, and `0.28.0` is the first: the release workflow was
-added after `v0.27.97` was tagged, so no earlier version has a published image. Each release is tagged
+Only **tagged** releases have images in `ghcr.io`, and `0.28.0` was the first: the release workflow was
+added after `v0.27.97` was tagged, so no earlier version has a published image. **Use `0.28.1` or later:**
+the `0.28.0` images were built without the logo and favicon (the controller itself is unaffected). Each release is tagged
 `X.Y.Z`, `sha-<commit>` and `latest`; pin `X.Y.Z`. The manifests here and the Helm chart pin the image tag
 to the version of the checkout, so from `main` between releases they can name an image that does not exist
 yet. Install from the tag, not from `main`:
 
 ```bash
-git clone --branch v0.28.0 https://github.com/zyvorai/netra && cd netra
+git clone --branch v0.28.1 https://github.com/zyvorai/netra && cd netra
 ```
 
 **Verify what you pull.** Both images are signed by the release workflow (keyless cosign), and the
 signature names the workflow, the tag and the commit that built them:
 
 ```bash
-cosign verify ghcr.io/zyvorai/netra:0.28.0 \
-  --certificate-identity https://github.com/zyvorai/netra/.github/workflows/release.yml@refs/tags/v0.28.0 \
+cosign verify ghcr.io/zyvorai/netra:0.28.1 \
+  --certificate-identity https://github.com/zyvorai/netra/.github/workflows/release.yml@refs/tags/v0.28.1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The same command works for `netra-agent`. The digests of `0.28.0` are
-`netra` `sha256:70e030a6acd0920e321c633bfc4a7a0ad37e3fc4cdbd746407a8b92fcf930c35` and `netra-agent`
-`sha256:7f1cf0636a9b18d36d7afb8e86b3069d9798ac139090bb394298703e1ffc7556`; compare them with the
+The same command works for `netra-agent`. The digests of `0.28.1` are
+`netra` `sha256:2914dd5f1c2fbba658ca75b29d797ad3e11ead2ec06b26237477e5de674a925c` and `netra-agent`
+`sha256:6830514c656f906281263d7728e9d1f5bc6b8baf76353d7a6a2b2f6f33d2b7fe`; compare them with the
 `imageID` of the running pods (`kubectl -n netra-system get pods -o jsonpath='{..imageID}'`).
 
 **Plain manifests:** `kubectl apply -k deploy/` from the tag pulls the released images as written.
@@ -66,7 +67,7 @@ losing its settings or keys, keep the values and change only the tags:
 
 ```bash
 helm upgrade netra ./helm/netra -n netra-system --reset-then-reuse-values \
-  --set image.tag=0.28.0 --set agentImage.tag=0.28.0
+  --set image.tag=0.28.1 --set agentImage.tag=0.28.1
 ```
 
 `--reset-then-reuse-values` (Helm 3.14+) takes the new chart's defaults for values you never set, which a
