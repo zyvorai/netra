@@ -381,3 +381,13 @@ Every eBPF mutating tool returns the full updated `EBPFFastPathConfig` on succes
 - **No per-tool credential scoping.** See [Security considerations](#security-considerations) — one API key covers everything `netra-mcp` is allowed to do; the mutation gate is process-wide, not per-tool.
 - **No credential management.** `netra-mcp` reads `NETRA_API_KEY` from its own process environment; it does not fetch, rotate, or store credentials itself.
 - **No batching or transactions.** Each tool call is one independent HTTP request; there is no way to apply several eBPF rule changes atomically.
+
+## Verification in CI
+
+`scripts/ci-mcp-live.sh` (job `mcp-live`) runs the real `netra-mcp` over stdio JSON-RPC against a real
+`netrad`. Read-only by default: the read tools, prompts and resources are listed, a read tool returns
+the controller's real answer, none of the mutating tools (names read from `cmd/netra-mcp/tools_mutate.go`)
+is listed and calling one is refused as unknown, a wrong API key is a tool error not a crash, and
+malformed input gets a parse error while the server keeps serving. With `NETRA_MCP_ALLOW_MUTATIONS=true`
+exactly the source-defined mutating set is added, a deny rule added through MCP reaches the controller
+and the audit log names the MCP actor (`NETRA_MCP_ACTOR`), and bad arguments change nothing.

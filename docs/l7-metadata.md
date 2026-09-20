@@ -72,6 +72,11 @@ Gated by `NETRA_L7=auto|off|required` (default `auto`), mirroring `NETRA_TCX`'s 
 
 ### Known verifier rejection: SNI/Host-header scan loops
 
+> **Current CI datapoint.** The nightly workflow runs the privileged suite on the `ubuntu-22.04` runner image, whose
+> kernel is `6.8.0-1064-azure`, with clang 18: the core object loads and the enforcement, capture and eBPF suites pass. The rejection below is specific to the 6.8.0-139 build it was seen on; a different
+> 6.8 build is not evidence about it either way, so this stays a documented limit, and the status program is
+> separate from the scan loops so the rest of the L7 view survives it.
+
 On at least one real kernel (Ubuntu 6.8.0-139-generic), `netra_l7_cgroup_egress` is rejected at load time with `bad address` / "the sequence of 8193 jumps is too complex" — a fixed kernel verifier jump-history limit, not a proportional complexity budget. This was investigated in depth: reducing the SNI/Host-value scan loops' trip count (down to 32-40 iterations from 95), fully isolating them as independent BPF-to-BPF subprograms (`netra_l7_tls_sni_value`/`netra_l7_http_host_value`, and `netra_l7_tls_sni`/`netra_l7_http_host` themselves), and testing against clang 18, 20 and 22 all made no difference — every variant hit the identical fixed threshold. Forcing a full compile-time loop unroll (`#pragma unroll`, which works for `netra_l7_dns_qname`'s comparable loop) turned out to be blocked by a separate, narrower LLVM limitation: passing any pointer to a `noinline` function other than that function's own bare parameter — even a constant offset like `p+9` — defeats the unroll legality check, and both SNI/Host parsers inherently need an offset (scan position varies), so this path isn't viable regardless of compiler version.
 
 `netra_l7_tls_sni`/`netra_l7_http_host` are `noinline` (unlike almost everything else in this file) purely to isolate their own verifier budget from the CT/policy/DNS logic inlined ahead of them — a real, if partial, improvement (roughly 19% fewer processed instructions), but it does not clear the fixed threshold above on affected kernels. Until then, `NETRA_L7=auto`'s graceful degradation is the practical behavior on affected kernels.

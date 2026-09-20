@@ -98,3 +98,12 @@ When `--root` is not `/`, checks that require the running process rather than fi
 ## Safety boundary
 
 A successful doctor report means the visible host prerequisites look compatible. It is **not** proof that every BPF program will attach: vendor kernels, LSM policy, container runtime restrictions, interface/driver XDP capabilities, and local security policy can still reject an operation. Netra should continue to fail open and report hook-level attachment state at runtime.
+
+## Verification in CI
+
+`scripts/ci-doctor-live.sh` (job `doctor-live`, and every nightly kernel leg) builds the real binary and
+checks it against an empty filesystem root (must fail loudly: exit 2, every failing check carries
+remediation, the JSON and human summaries agree) and, on Linux as root, against the runner itself
+(kernel, TCX, cgroup v2, bpffs, BTF, tracefs and drop-reason support all present; `-strict` exits
+non-zero exactly when there are warnings). Root matters: tracefs and the BPF filesystem are not
+readable without it, and the agent runs privileged.

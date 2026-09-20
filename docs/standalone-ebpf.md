@@ -77,3 +77,14 @@ The configured deny/rate rule set can remain persisted while enforcement is disa
 ## Kernel/runtime notes
 
 Use modern kernels and test the actual BPF verifier on every supported kernel family. Ring buffers imply a practical Linux 5.8+ baseline. TCX is treated as a Linux 6.6+ feature baseline by this repository. XDP behavior depends on driver/generic support. bpffs must be mounted at `/sys/fs/bpf`, and the agent is privileged because it loads programs and accesses host cgroup/bpffs state.
+
+## Enforcement verification in CI
+
+`scripts/ci-enforce-veth.sh` (job `enforce-veth`; also on arm64 and on a 6.8 kernel in the nightly kernel legs)
+runs the real agent on a veth into a namespace with HTTP servers on both sides and proves, with traffic:
+a deny rule never blocks in observe mode; in enforce mode exact-IP, CIDR and port rules drop exactly what they
+name (a second port on the same host keeps working), for IPv4 and IPv6; an allow rule overrides a deny rule;
+**an egress rule guards connections this host starts and an ingress rule guards connections the peer starts**
+(replies to a connection this host started are exempt through connection tracking, so an ingress rule never
+cuts your own outbound traffic); the drop is recorded in the block export; a lease expires on its own with the
+rule still listed; and the agent fails open to observe when the controller dies (`NETRA_FAILSAFE_AFTER`).

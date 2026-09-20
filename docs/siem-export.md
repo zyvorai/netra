@@ -209,3 +209,9 @@ the audit events for a pull export.
 - Export is a point-in-time pull against the in-memory/persisted store
   cap (audit 1000 events). It is not a durable shipping buffer; if you
   need at-least-once push, keep using webhooks.
+
+## Verification in CI
+
+`ci-netractl-live.sh` runs `examples/siem-export.sh` in every format (json, jsonl, CEF, RFC 5424 syslog,
+OTLP) against a real controller and checks each output's shape. `ci-sinks-live.sh` checks the push path:
+audit events arrive as RFC 5424 over both UDP and TCP (`NETRA_SYSLOG_*`) and an audit line is never sent twice.

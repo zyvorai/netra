@@ -29,6 +29,10 @@ shared group even with `cancel-in-progress: false`.
   introduces** (`only-new-issues`), so the existing backlog does not block unrelated work.
 - `govulncheck` (pinned version): a known-vulnerable dependency the code can reach fails the job.
 - The LangGraph companion's tests (`make test-python`, minimum test count).
+- Dependabot opens weekly update PRs (Go, npm for `web/` and `website/`, Actions, Docker, pip). Actions
+  arrive as one grouped PR and the `ubuntu` base of the agent image is ignored: a base-image change decides
+  glibc, clang and the kernel-facing tooling, so it is a deliberate migration. Every update PR runs the full
+  CI; read `main` after merging a major bump.
 
 ## Use cases and the job that proves each
 
@@ -54,6 +58,7 @@ shared group even with `cancel-in-progress: false`.
 | The plain manifests (`kubectl apply -k deploy/`) | `manifests-kind` | `ci-manifests-kind.sh` | real cluster (kind) |
 | Two-replica HA, leader election, failover | `ha-kind` (nightly) | `ci-ha-kind.sh` | real cluster (kind) |
 | Images build and the agent image ships every BPF object | `agent-image`, `release-dryrun` | `ci-agent-image.sh` | container build |
+| A release would succeed (version gates, both images, the thin runtime image boots) | `release-dryrun.yml` | inline | container build and boot |
 
 Not covered by CI: a real Cilium/Hubble (the chart's Cilium mode is checked by `helm template`
 only), and the shared lab host (never a CI target).

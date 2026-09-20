@@ -144,8 +144,9 @@ is exercised against an httptest mock in CI:
 ./scripts/ci-netractl-commands.sh   # or: make test-netractl-commands
 ```
 
-GitHub CI also boots a local `netrad` and runs the full detailed board
-(not a short smoke):
+GitHub CI also boots a local, throwaway `netrad` and runs the full detailed board
+(not a short smoke), **including the mutating commands** (146 pass, 1 streaming command skipped),
+then `hack/smoke.sh` and `examples/siem-export.sh` in every format:
 
 ```bash
 ./scripts/ci-netractl-live.sh       # or: make test-netractl-live

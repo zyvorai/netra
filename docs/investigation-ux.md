@@ -36,3 +36,14 @@ For browser checks, install Chromium with `cd web && npx playwright install chro
 The Investigation UI workflow builds production assets and runs the same test using intercepted API fixtures. It checks scoped reload, navigation/history, the evidence dialog and focus restoration, workload drill-down, pause, failed refresh retention, empty reports, mobile width, dark theme, and browser errors. Screenshots are uploaded as CI artifacts.
 
 This is the first investigation UX release. Guided policy authoring, effective-policy evaluation, durable incidents, a column-store flow warehouse, SSO/RBAC, and multi-site management remain separate roadmap work. The 7-day flow sidecar is [`flow-log.md`](flow-log.md).
+
+### Against a real controller
+
+`scripts/ci-web-e2e.sh` (job `web-e2e`) builds the UI, runs a real `netrad` serving it, seeds an agent report
+and drives it with Chromium with **nothing intercepted**: sign-in is refused for a wrong key or username and
+accepted for the right one, all 28 pages load without an uncaught error, a 401 or a request to a missing API path
+(the only failures allowed are the documented 502/409s of a controller with no Kubernetes, Hubble or Cilium),
+the seeded agent's node and traffic appear on the pages that show them, a deny rule and the enforcement lease
+work through the Firewall page, the Audit page shows them, and signing out clears the token. It found and fixed
+a real bug: a page that loaded its feeds with `Promise.all` showed nothing when one feed failed (see the
+CHANGELOG). Screenshots of every page are uploaded as the `web-e2e-evidence` artifact.

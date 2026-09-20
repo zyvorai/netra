@@ -34,6 +34,7 @@ Netra is observe-first. All custom enforcement is protected by a time-limited le
 - [Suite placement (PacketWolf)](#suite-placement-packetwolf)
 - [Architecture](#architecture)
 - [Repository](#repository)
+- [Continuous integration](docs/ci.md)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Standalone Helm install](#standalone-helm-install)
@@ -94,11 +95,14 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Importable Grafana dashboard over the existing `/metrics` gauges (`deploy/grafana/netra-dashboard.json`).
 - Review-only operator playbooks (`GET /api/v1/playbooks`), threat-intel preview plus live feed/hits/leased-apply (`POST /api/v1/intel/preview`, `PUT/GET /api/v1/intel/feed`, `GET /api/v1/intel/hits`, `POST /api/v1/intel/apply` — see `docs/threat-intel.md`), GenAI/MCP destination observe (`GET /api/v1/ebpf/ai-destinations`, `docs/ai-destinations.md`), optional volumetric auto-mitigation (`NETRA_AUTOMITIGATE_ENABLED`, `docs/auto-mitigate.md`), destination-flow SIEM export (`GET /api/v1/export/flows`), an actor/action/hour audit rollup (`GET /api/v1/audit/summary`), a per-node hook/program coverage matrix (`GET /api/v1/ebpf/coverage`, `netractl ebpf coverage`) — attached vs detached programs, missing maps, stale agents — and a read-only datapath map inventory (`GET /api/v1/ebpf/maps`, `netractl ebpf maps`, `docs/ebpf-maps.md`) — plus optional best-effort push sinks — syslog (`NETRA_SYSLOG_ADDR`) and Snowflake (`NETRA_SNOWFLAKE_ACCOUNT`, audit events only) — both off by default and leader-only in HA, alongside the pull-based SIEM export above. Dashboard **Report** page. See `docs/siem-export.md`. Perimeter NGFW fit gaps: `docs/competitive-quantum.md`.
 - Optional `/proc`-derived process metadata (capabilities, seccomp, cgroup/pod attribution, kernel-thread/host/container/VM classification) for PIDs already attributed by the eBPF datapath. Off by default (`agent.procMetaEnabled`); resolved agent-side, never on the controller; never collects argv/cmdline content. See `docs/process-metadata.md`.
-- `netra-mcp`, a Model Context Protocol server exposing the controller API as **159** stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. **107** read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics including map inventory, insights including shadow-SaaS/experience/destination-risk, AI brief/ask/agent/draft/digest/suggestions/explain, SIEM export, operator report, threat-intel, compliance, fleet clusters, policy list/history/build/lockdown-preview) are always available; **52** mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, intel apply, AI destination deny, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Also advertises six MCP prompt templates and six read-only resources (`prompts/list`/`get`, `resources/list`/`read`) for canned triage/drops/rule-draft/on-call-digest/policy-review/incident-timeline workflows. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`. Map inventory: `docs/ebpf-maps.md`.
+- `netra-mcp`, a Model Context Protocol server exposing the controller API as **180** stdio tools for AI agents (e.g. Hermes Agent) and other MCP clients. **120** read/generator tools (status, agents, pods/vms, flows, drops, eBPF diagnostics including map inventory, insights including shadow-SaaS/experience/destination-risk, AI brief/ask/agent/draft/digest/suggestions/explain, SIEM export, operator report, threat-intel, compliance, fleet clusters, policy list/history/build/lockdown-preview) are always available; **60** mutating tools (policy plan/apply/rollback/delete, eBPF rule add/delete, mode toggle, intel apply, AI destination deny, baseline capture/clear) require explicit opt-in (`NETRA_MCP_ALLOW_MUTATIONS`, off by default) and reuse Netra's existing bearer-token auth, single-use preflight tokens, self-reverting enforce-mode leases, and audit log unchanged — agent-driven mutations are tagged under a distinct actor label so they're distinguishable from human `netractl` use. Also advertises six MCP prompt templates and six read-only resources (`prompts/list`/`get`, `resources/list`/`read`) for canned triage/drops/rule-draft/on-call-digest/policy-review/incident-timeline workflows. Implemented stdlib-only (`internal/mcpserver`), no MCP SDK dependency. See `docs/mcp-integration.md`. Map inventory: `docs/ebpf-maps.md`.
 - Built-in AI briefs: `GET /api/v1/ai/brief`, `POST /api/v1/ai/ask` (with optional short-lived, bounded multi-turn `conversationId` memory on web/ChatOps, cleared via `POST /api/v1/ai/forget`), `POST /api/v1/ai/agent` (in-process NL graph: classify → optional draft preview → synthesize; optional Python LangGraph companion in `python/netra_langgraph/`, see `docs/langgraph.md`), an on-call `GET /api/v1/ai/digest` (severity, incident fingerprint, copy-paste card, and — when the fingerprint changed — a deterministic `whyChanged` breakdown of exactly what moved plus an optional one-sentence LLM `whyChangedProse`), live `GET /api/v1/ai/suggestions`, a natural-language `POST /api/v1/ai/draft` rule previewer (never applies), and `POST /api/v1/ai/explain` for narrating one page finding — all turning live agent/health/insights aggregates into operator-facing text, heuristic by default (no vendor SDK, no extra process) with an optional OpenAI-compatible rewrite when `NETRA_AI_API_KEY` is set on the controller. Read-only — never flips enforce mode or applies policy; the snapshot it can see contains only aggregates and short findings, never payloads, argv, or secrets. The Overview dashboard page hosts a read-only **Ask Netra** card (now a real multi-turn thread) wired to all of this, the nav bar carries a live severity/fingerprint digest chip, and the Health/Drops/Path/Insights/Explain pages each get a per-finding **Explain** button (with an optional "draft a rule from this" preview when the finding names an IP/CIDR/DNS name) that narrates that one finding via `/api/v1/ai/explain`. See `docs/ai.md`.
 - Optional ChatOps integration for Slack (slash commands + interactive confirmation buttons) and Microsoft Teams (bot messages): `/netra status|health|audit|ask|forget|mode`. Read commands reply immediately; the one mutating command (`mode`) always requires a second confirmation step, mirroring the web UI's own confirm dialogs. `/netra ask` shares the same AI layer as the web Ask Netra card, including per-channel-per-user conversation memory. Off by default; each provider needs its own signing secret/App ID to register its route at all. See `docs/chatops.md` and `docs/chatops-teams.md`.
 - Cgroup-side TLS SNI / cleartext HTTP / DNS query-name observability runs in its own dedicated eBPF program (`NETRA_L7=auto|off|required`, attach-with-fallback), isolated from the conntrack/NetworkPolicy-deny program's verifier budget so the two can evolve independently. See `docs/l7-metadata.md`.
 - IPv6 extension-header and fragmentation diagnostics (`docs/ipv6-diagnostics.md`), per-interface flow attribution for TC/TCX-attached NICs (`docs/interface-flow-attribution.md`), and XDP Shield per-class/per-source breakdowns (`docs/tcx-and-shield.md`) — all additive counters over data the eBPF datapath already computed internally.
+- Kernel drop attribution: which connection's packets the kernel dropped, why (reason names come from the running kernel, whose numbering changes between versions) and which kernel function dropped them (`docs/drop-info.md`, needs BTF); TCP retransmit / reset / state-change events per flow (`docs/tcp-events.md`); TCP accept-queue depth per listener (`docs/listen-queues.md`). Each is its own optional sensor: a node that cannot run one reports why instead of failing.
+- Opt-in sampled application-protocol observation (Redis commands, SQL verbs, Kafka APIs, HTTP/2 and gRPC methods, HTTP status; counts only, never payload, `docs/l7-sampling.md`) and, separately and more sensitive, opt-in TLS plaintext sampling for HTTPS through OpenSSL uprobes limited by process name (`docs/tls-plaintext.md`). Both are off by default.
+- Export and access: OTLP push (`docs/otlp-push.md`), Loki push (`docs/loki-push.md`), per-workload metrics with a hard cardinality cap plus a `ServiceMonitor`, `PrometheusRule` and SLOs (`docs/workload-metrics-slo.md`), OIDC login with viewer/operator/admin roles and an optional token-gated `/metrics` (`docs/auth-oidc-rbac.md`), and optional mutual TLS between agents and the controller (`docs/agent-mtls.md`, off by default).
 
 ### Emergency enforcement
 
@@ -297,6 +301,7 @@ cmd/netractl/           operator CLI
 cmd/netra-agent/        standalone privileged node agent
 cmd/netra-doctor/       read-only host readiness preflight
 cmd/netra-mcp/          MCP server: controller API as stdio tools + prompts for AI agents
+cmd/netra-ci-*/         CI helpers: capture client (the browser's side of a capture), synthetic feeder, fake OIDC provider
 internal/ai/             heuristic briefs + optional OpenAI-compatible rewrite
 internal/agent/          BPF loading, hook attachment and reporting
 internal/doctor/         host readiness checks used by netra-doctor
@@ -322,7 +327,26 @@ internal/ha/             active/passive controller leader election
 internal/kube/           direct Kubernetes REST client
 internal/hubble/         optional native Hubble gRPC client
 internal/policy/         optional CiliumNetworkPolicy planning
-bpf/netra_tc.c          standalone eBPF programs/maps
+internal/tcpevents/      TCP retransmit / reset / state-change tracepoints (bpf/netra_tcpevents.c), layouts read from the kernel
+internal/dropinfo/       per-connection kernel drop attribution: tuple, reason, dropping function (bpf/netra_dropinfo.c, needs BTF)
+internal/tpformat/       tracepoint `format` parser (record layouts and reason tables are read from the running kernel)
+internal/ksym/           kernel address to symbol through /proc/kallsyms
+internal/kmsg/           bounded, scrubbed view of kernel log lines
+internal/listenq/        TCP accept-queue depth per listener through inet_diag
+internal/mapscan/        cheap full scans of BPF hash maps (batched reads, bounded top-N)
+internal/l7sample/       sampled protocol observation: Redis, Postgres, MySQL, Kafka, HTTP/1, HTTP/2, gRPC (bpf/netra_l7sample.c)
+internal/sslprobe/       opt-in TLS plaintext sampling through OpenSSL uprobes (bpf/netra_ssl.c)
+internal/mtls/           optional mutual TLS between agent and controller
+internal/oidcauth/       OIDC/JWT verification and role mapping (viewer/operator/admin)
+internal/otlppush/       OTLP/HTTP push of metrics, logs and spans
+internal/lokipush/       Loki push of audit and block events
+internal/pushfeed/       delivery logic shared by the push sinks (watermarks, bounded batches)
+internal/slo/            network SLOs and burn rates
+internal/workloadobs/    per-workload counters with a hard cardinality cap
+bpf/netra_tc.c          standalone eBPF programs/maps (the core datapath)
+bpf/netra_*.c           optional sensors, each its own object: edge_intel, capture, tlsfp, tcpevents, dropinfo, l7sample, ssl
+scripts/ci-*.sh         one script per CI job (real controller, agent, kernel, cluster or browser); docs/ci.md maps them
+scripts/lib/veth-lab.sh shared controller + agent + veth setup for the real-agent CI scripts
 web/                     React/Vite dashboard
 helm/netra/             Helm chart
 deploy/                  plain manifests
@@ -361,13 +385,45 @@ docs/p5-surfaces.md       P5 residual boards (JA3 risk, ECH, exfil, lateral, …
 docs/sales/               buyer guide + PDFs/PPTX/DOCX — also on GitHub Pages /resources
 docs/sales/buyers-guide.md evaluation narrative for buyers (P0–P5 + checklist)
 docs/flow-log.md              queryable 7-day flow history, RED, inferred traces, stacks, kernel notes, pod warnings
-scripts/ci-flow-observe-veth.sh  Linux root smoke for that history (GitHub job `flow-observe-veth`)
+docs/agent-map-reads.md           How the agent reads its BPF maps
+docs/agent-mtls.md                Agent ↔ controller mutual TLS
+docs/app-categories.md            App / category catalog
+docs/auth-oidc-rbac.md            OIDC login, roles, and a locked-down `/metrics`
+docs/blast-radius.md              Multi-hop blast radius (`internal/insights.BlastRadius`)
+docs/capability-gated-deny.md     Capability-gated socket deny
+docs/competitive-sse.md           Cloud SSE / Zero Trust → Netra feature gaps
+docs/compliance.md                Compliance packs
+docs/destination-risk.md          Destination risk scoring
+docs/drop-explain.md              Unified Drop Explain
+docs/drop-info.md                 Kernel drop attribution
+docs/experience.md                Workload digital experience
+docs/exporter-tetragon-borrow-backlog.md Patterns borrowed from Cloudflare ebpf_exporter and Cilium Tetragon
+docs/fleet-clusters.md            Multi-cluster fleet (read-only)
+docs/fleet-tenants.md             Fleet tenants (partner / MSSP read views)
+docs/gitops.md                    Policy-as-code / GitOps reconciliation (`internal/gitops`)
+docs/identity-drafts.md           Identity drafts (ServiceAccount join)
+docs/investigation-ux.md          Native investigation UX
+docs/l7-sampling.md               Sampled L7 protocol observation
+docs/listen-queues.md             TCP listen-queue pressure
+docs/loki-push.md                 Loki push export
+docs/microseg.md                  East-west microsegmentation guidance
+docs/network-health.md            Netra Network Health — v0.10
+docs/node-resources.md            Node Resources
+docs/otlp-push.md                 OTLP push export
+docs/policy-packs.md              Sanctioned-app policy packs
+docs/prevention-report.md         Prevention coverage report
+docs/protocol-downgrade.md        TLS→cleartext protocol-downgrade correlation
+docs/quic-observed.md             QUIC-observed traffic counter
+docs/shadow-saas.md               Shadow SaaS (CASB-lite)
+docs/snowflake-export.md          Snowflake export
+docs/sysctl-audit.md              Netra Sysctl Audit
+docs/tcp-events.md                TCP event tracepoints
+docs/tls-plaintext.md             TLS plaintext sampling (OpenSSL uprobes)
+docs/udp-flow-health.md           UDP flow health beyond DNS
+docs/workload-metrics-slo.md      Per-workload metrics, SLOs, and Prometheus Operator objects
+docs/zero-trust.md                Zero Trust suggestions (review-only)
 docs/competitive-observability.md  shipped observe versus Hubble-class and eBPF APM peers
-scripts/ci-auto-capture-veth.sh  Linux root smoke for auto-capture (GitHub job `auto-capture-veth`)
-scripts/ci-tlsfp-smoke.sh        Linux root smoke for always-on JA3 (GitHub job `tlsfp-smoke`)
-scripts/ci-tlsfp-unit.sh         tlsfp + API JA3 unit/race (GitHub `go` job)
-scripts/ci-p1-p5-unit.sh         P1–P5 surface package unit/race (GitHub `go` job)
-scripts/ci-ebpf-tests.sh         BPF C helpers + clang + PROG_TEST_RUN (GitHub `ebpf` job)
+docs/ci.md                     every CI job, the use case it proves, its script and how to run it locally
 ```
 
 ## Buyer resources
@@ -454,6 +510,11 @@ XDP is deliberately explicit:
 ```
 
 Do not enable XDP blindly across interfaces; validate driver/kernel compatibility and desired policy scope first.
+
+**Upgrades are tested.** CI (`scripts/ci-kind-lifecycle.sh`) installs the previous release, writes rules and a
+baseline, runs `helm upgrade --reset-then-reuse-values` to the checkout, and asserts the state, the API key and
+the mode (`observe`) survive, the agent DaemonSet starts and reports, a controller pod restart keeps the state, and
+`helm rollback` returns to the previous release with its state still readable.
 
 ### Optional Cilium + Hubble
 

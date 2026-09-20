@@ -91,3 +91,14 @@ kubectl -n netra-system get endpoints netra
 Exactly one controller Pod should be Ready. The Service endpoints should contain only that Pod. To test graceful failover, delete the Ready Pod and watch the Lease holder and endpoint move. To test abrupt failover, terminate the leader node or force-delete the leader Pod and verify takeover after Lease expiry.
 
 After every leadership change, confirm `/api/v1/status` reports the new `controllerIdentity` and the Netra eBPF `fastPath.mode` is `observe` before re-enabling emergency enforcement.
+
+### Tested in CI
+
+`scripts/ci-ha-kind.sh` (nightly job `ha-kind`) installs the chart with two replicas on a real
+kind cluster with a shared ReadWriteMany volume and asserts: exactly one replica is Ready and
+holds the Lease; the standby is alive (`/healthz` 200) but refuses API calls (503); there is never
+a sample with two Ready replicas; killing the leader without warning and deleting it gracefully
+both promote the standby (within 60 s and 45 s respectively); rules written before the failover are
+served by the new leader; an enforcement lease is not carried across the change (mode `observe`);
+and the replaced pod returns as the standby. It runs on a one-node cluster, so it proves the election
+and the shared-state lock, not a cross-node RWX filesystem.

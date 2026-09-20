@@ -160,3 +160,15 @@ directory sits on shared RWX storage alongside the state file.
 - AF_PACKET capture spans every interface the agent is configured for (`NETRA_AGENT_INTERFACES`), merged into one stream — not just a single interface.
 
 See `docs/standalone-ebpf.md` for the broader eBPF hook/map reference this feature sits alongside.
+
+## Verification in CI
+
+`scripts/ci-capture-live.sh` (job `capture-live`) runs a real agent and controller on a veth and,
+for **both** backends, starts a filtered capture through the API and plays the browser's part
+(`cmd/netra-ci-capture-client`: WebSocket in, `.pcap` out). It asserts: every captured frame matches
+the filter and traffic to a second port on the same host is not captured; both directions are seen;
+the frames parse as Ethernet/IP/TCP; the `.pcap` is a valid classic file holding exactly the streamed
+frames and is readable by `tcpdump`; an unfiltered request and an unknown backend are refused (400);
+stopping works once and a second stop is 404; the session is in the history with its backend,
+requestor, filter and stop reason; a capture with a duration ends on its own (`expired`).
+`ci-auto-capture-veth.sh` covers the automatic (alert-triggered) path.

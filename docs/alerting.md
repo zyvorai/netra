@@ -155,3 +155,13 @@ sibling context JSON: `docs/tutorials/drop-incident-context.md`.
 - No dedup-state persistence across restarts or HA failover.
 - Delivery is at-least-once best-effort; a full queue drops events.
 - ChatOps credentials are never used for outbound delivery.
+
+## Verification in CI
+
+`scripts/ci-sinks-live.sh` (job `sinks-live`) delivers real alerts from a real controller to loopback
+receivers for webhook, Slack, Teams, HTTP bridge and SMTP. One synthetic bad TCP flow produces four
+events (the critical `tcp-latency`, the warning `tcp-rto`, their `correlated-degradation`, and the AI
+`digest` card); the test asserts each channel gets exactly its severity-filtered set, once each, in its own
+format; the webhook and bridge HMAC signatures verify against the body; a channel whose first attempt
+fails receives the retry; and no channel secret appears in any delivered body, controller log line or API
+response.

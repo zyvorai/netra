@@ -108,7 +108,12 @@ the Secret, never in values.
 
 Covered by unit tests (conversion, watermarks, retry, batching, redirect,
 header redaction, HA lifecycle under `-race`), including a run of the **real**
-API `/metrics` output through the converter. Not yet exercised against a real
+API `/metrics` output through the converter, and end to end in CI
+(`scripts/ci-sinks-live.sh`): a real controller pushes to a loopback OTLP/HTTP
+receiver, all three signals arrive with the configured auth header and the
+expected top-level shape (`resourceMetrics`, `resourceLogs`, `resourceSpans`;
+the span carries the blocked packet's destination), and the token never appears
+in the controller's log or any API response. Not yet exercised against a real
 OpenTelemetry Collector or a vendor backend; do that once before relying on it:
 
 ```sh
