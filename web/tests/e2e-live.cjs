@@ -122,12 +122,17 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
     if (id === 'overview') {
       // Regression: one failing feed (insights/summary answers 502 without Kubernetes) used to zero every
       // board here. The seeded agent is live, so the "node agents" board must read 1, not 0.
-      const board = await page.evaluate(() => {
+      // Poll, do not read once: the tile shows 0 until its /status fetch lands and then counts up over 600 ms,
+      // and on a loaded runner a single read at a fixed delay caught it at "0" (a flake on main). A board
+      // that STAYS at 0 for 15 s is still the regression this check exists for.
+      const readBoard = () => page.evaluate(() => {
         const el = [...document.querySelectorAll('*')].find((n) => n.children.length === 0 && /^node agents$/i.test((n.textContent || '').trim()));
         return el && el.parentElement ? (el.parentElement.innerText || '').replace(/\s+/g, ' ').trim() : '';
       });
-      const m = /(\d+)\s*node agents/i.exec(board);
-      check(m && Number(m[1]) >= 1, `overview: the node-agents board reads "${board}" although one agent is reporting`, failures);
+      const agentsOn = (b) => { const x = /(\d+)\s*node agents/i.exec(b); return x ? Number(x[1]) : 0; };
+      let board = await readBoard();
+      for (let i = 0; i < 30 && agentsOn(board) < 1; i++) { await page.waitForTimeout(500); board = await readBoard(); }
+      check(agentsOn(board) >= 1, `overview: the node-agents board reads "${board}" although one agent is reporting`, failures);
     }
     await page.screenshot({ path: path.join(OUT, `page-${id}.png`), fullPage: true });
   }
