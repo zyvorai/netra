@@ -2,8 +2,9 @@
 // built UI and seeded agent data). Unlike investigation-smoke.cjs, nothing is
 // intercepted: this proves the built UI, the API and the auth model work together.
 //
-//   login      wrong username / wrong key are refused with an alert and store no token;
-//              the right key signs in; signing out returns to the login form
+//   login      wrong username / wrong key are refused with an alert and open no session;
+//              the right key signs in with an HttpOnly session cookie (the bearer is in no
+//              browser storage and not in the cookie); signing out ends the session
 //   pages      every page in the navigation loads with the real API behind it: no uncaught
 //              exception, no error boundary, non-empty content, no 401 after sign-in, and
 //              no request to an API path that does not exist (404); every /api/ failure is
@@ -67,8 +68,12 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
   console.log('==> login');
   await page.goto(BASE + '/');
   await page.getByRole('heading', { name: 'Sign in.' }).waitFor({ timeout: 15000 });
-  const token = () => page.evaluate(() => localStorage.getItem('netra-token') || '');
-  check((await token()) === '', 'a token exists before anyone signed in', failures);
+  // The dashboard session is an HttpOnly cookie; the bearer must be in no browser storage.
+  const session = async () => (await context.cookies(BASE)).find((c) => c.name === 'netra_session');
+  const stored = () => page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]));
+  const whoami = () => page.evaluate(() => fetch('/api/v1/whoami').then((r) => r.status));
+  check((await session()) === undefined, 'a session cookie exists before anyone signed in', failures);
+  check((await whoami()) === 401, 'the API answered without a session or bearer', failures);
 
   for (const [user, pass, label] of [['admin', 'not-the-key', 'a wrong key'], ['root', KEY, 'a wrong username']]) {
     await page.getByLabel('Username').fill(user);
@@ -76,7 +81,8 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('alert').waitFor({ timeout: 15000 });
     check(/Wrong username or password/.test(await page.getByRole('alert').innerText()), `${label}: no "Wrong username or password" alert`, failures);
-    check((await token()) === '', `${label}: a token was stored after a refused sign-in`, failures);
+    check((await session()) === undefined, `${label}: a session was opened after a refused sign-in`, failures);
+    check(!(await stored()).includes(KEY), `${label}: the key was written to browser storage`, failures);
   }
   await page.screenshot({ path: path.join(OUT, 'login-refused.png') });
 
@@ -84,7 +90,16 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
   await page.getByLabel('Password').fill(KEY);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.getByRole('heading', { name: 'Sign in.' }).waitFor({ state: 'detached', timeout: 15000 });
-  check((await token()) === KEY, 'the token was not stored after a successful sign-in', failures);
+  const sess = await session();
+  check(sess !== undefined, 'no session cookie after a successful sign-in', failures);
+  if (sess) {
+    check(sess.httpOnly === true, 'the session cookie is readable by page scripts (not HttpOnly)', failures);
+    check(sess.sameSite === 'Strict', `the session cookie SameSite is ${sess.sameSite}, want Strict`, failures);
+    check(!sess.value.includes(KEY), 'the session cookie contains the API key', failures);
+  }
+  check(!(await stored()).includes(KEY), 'the key was written to browser storage after sign-in', failures);
+  check(!(await page.evaluate(() => document.cookie)).includes('netra_session'), 'page scripts can read the session cookie', failures);
+  check((await whoami()) === 200, 'the session cookie does not authenticate the API', failures);
   console.log('    refused twice, then signed in');
 
   // ---- every page, against the real API -----------------------------------------
@@ -185,8 +200,9 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
   if (await out.count()) {
     await out.first().click();
     await page.getByRole('heading', { name: 'Sign in.' }).waitFor({ timeout: 15000 });
-    check((await token()) === '', 'the token survived signing out', failures);
-    console.log('    signed out: the login form is back and the token is gone');
+    check((await session()) === undefined, 'the session cookie survived signing out', failures);
+    check((await whoami()) === 401, 'the API still answers after signing out', failures);
+    console.log('    signed out: the login form is back and the session is gone');
   } else {
     check(false, 'there is no sign-out button in the navigation', failures);
   }
