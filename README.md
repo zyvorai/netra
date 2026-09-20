@@ -459,9 +459,13 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.27.71 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.27.71 .
+docker build -t ghcr.io/zyvorai/netra:0.28.0 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.28.0 .
 ```
+
+Tagged releases publish both images (`linux/amd64` and `linux/arm64`) to `ghcr.io/zyvorai/netra` and
+`ghcr.io/zyvorai/netra-agent`, signed with keyless cosign. To install a release rather than build one, see
+[Install from a release](deploy/README.md#install-from-a-release).
 
 ## Standalone Helm install
 

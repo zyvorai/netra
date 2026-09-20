@@ -52,6 +52,19 @@ with `401` (e.g. the API key was rotated on the controller since you signed
 in), the dashboard automatically clears the cookie and returns you to
 the login screen instead of showing a dead page.
 
+## Session details
+
+- The cookie is `netra_session`: `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` whenever the
+  request arrived over TLS or with `X-Forwarded-Proto: https`. Its value is an expiry time plus an HMAC
+  keyed by the controller's API key, never the key itself.
+- A session lasts 12 hours. **Rotating `NETRA_API_KEY` invalidates every open session**, because the HMAC
+  no longer verifies; the dashboard then returns to the login screen.
+- The dashboard's WebSocket connections are same-origin and rely on the cookie sent with the handshake;
+  the token is no longer put in the URL.
+- A browser that still holds a `netra-token` from an older dashboard is migrated once: the token is
+  exchanged for a session and removed from `localStorage`.
+- Scripts and `netractl` keep using `Authorization: Bearer <key>`; only the browser flow changed.
+
 ## Changing the password
 
 Because the login is a client-side mapping rather than a server-side account,
