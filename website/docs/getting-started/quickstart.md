@@ -109,3 +109,6 @@ netractl ai brief                      # heuristic by default, no config needed 
 - [netractl CLI](./netractl) — PATH install, TLS/`~/.netra`, status and features.
 - [Architecture](../core-concepts/architecture) — how the controller, agent, and eBPF datapath fit together.
 - [Security](../security) — the threat model, fail-open guarantees, and what to review before production.
+- [Optional kernel sensors](../core-concepts/sensors) — drop attribution, TCP events, listen queues, and the opt-in sampled-protocol and TLS sensors.
+- [Access control and export](../core-concepts/access-and-export) — OIDC roles, mutual TLS, Prometheus objects, and OTLP/Loki/syslog push.
+- [How Netra is tested](../core-concepts/verification) — what CI proves, including install, upgrade and rollback on a real cluster.

@@ -16,7 +16,7 @@ XDP and TCX attachment are opt-in. The standalone default is root-cgroup v2 atta
 
 For workload attribution, only the controller receives read-only `get/list` RBAC for Pods and Services. The privileged agent scans cgroup-v2 locally and requests node-filtered workload inventory through the authenticated Netra control channel. It never receives a Kubernetes API token.
 
-The default DaemonSet uses one shared agent credential, so the controller filters inventory by the requested node but does not cryptographically bind that credential to a particular node identity. Treat possession of the agent key as cluster-agent trust and rotate it after any node compromise. Pod metadata is the only Kubernetes inventory delivered on the agent config path; Secrets and ServiceAccount tokens are not exposed by this mechanism.
+The default DaemonSet uses one shared agent credential, so the controller filters inventory by the requested node but does not cryptographically bind that credential to a particular node identity. Optional mutual TLS (see [Agent to controller mutual TLS](#agent-to-controller-mutual-tls)) adds a client certificate as a second factor, but the certificate is also shared by all agents, so it still does not bind an agent to a node. Treat possession of the agent key as cluster-agent trust and rotate it after any node compromise. Pod metadata is the only Kubernetes inventory delivered on the agent config path; Secrets and ServiceAccount tokens are not exposed by this mechanism.
 
 `scopeMode=selected` is the preferred production containment mode. It gates cgroup packet/socket enforcement through the resolved `enforced_cgroups` map. If Pod metadata or local cgroup identity cannot be resolved, that traffic fails open. TCX/XDP remain observe-only in selected mode because Netra does not claim trustworthy workload identity at those hooks. Preview is advisory Pod metadata; confirm each agent's `selectedCgroups` coverage before enabling a lease.
 
@@ -36,7 +36,7 @@ DNS-name blocking is limited to exact cleartext UDP/53 qnames. It does not inspe
 
 TLS SNI enforcement is best-effort. It applies only when Netra parses an exact ordinary ClientHello SNI in the current cgroup egress skb. Fragmented handshakes, TCP segmentation that splits the SNI, ECH, QUIC/HTTP3 and unrecognized layouts are not blocked by an SNI rule. Treat SNI deny as an emergency supplemental control, not a substitute for a proxy/firewall with stream-aware TLS policy.
 
-HTTP metadata is observation-only and limited to cleartext HTTP/1 method + `Host` seen in a single skb. Netra does not export request paths or bodies and does not decode HTTPS, HTTP/2 or HTTP/3 application data.
+The always-on HTTP metadata is observation-only and limited to cleartext HTTP/1 method + `Host` seen in a single skb. Netra does not export request paths or bodies. Two **opt-in, off-by-default** sensors go further and are described in [Sampled protocols and TLS plaintext](#sampled-protocols-and-tls-plaintext) below; the always-on path still does not decode HTTPS, HTTP/2 or HTTP/3.
 
 ## Kernel drop-diagnostics safety
 
@@ -84,17 +84,52 @@ Two AI-adjacent features never apply anything on their own: `POST /api/v1/ai/dra
 
 The digest's incident fingerprint (a 12-hex hash over mode/health-bucket/stale-flag/finding-kinds, deliberately not raw packet counters) is in-process, unpersisted, and shared: the webhook poller, the dashboard's nav chip (polling every 30s while any page is open), and any interactive `GET /api/v1/ai/digest` caller all read and write one "last seen" slot, not one per caller. This is a UX convenience trade-off, not a security boundary — treat it as informational only.
 
+## Kernel sensors safety
+
+The optional sensors (drop attribution, TCP events, listen queues) are separate eBPF objects or netlink queries, each with its own `auto | off | required` mode. A sensor that cannot load reports the reason and the agent keeps running; one that is `required` stops the agent instead. They read kernel metadata about connections (addresses, ports, the reason and the kernel function of a drop); none reads packet payload. Drop attribution needs kernel BTF and, for real function names, permission to read `/proc/kallsyms`; the chart mounts the host's tracefs read-only for the tracepoint layouts. Treat the connection tuples they expose like flow data: sensitive operational telemetry.
+
+## Sampled protocols and TLS plaintext
+
+Both sensors are **off by default**. Turn them on only where you have decided you want the counts.
+
+**Sampled L7** copies the first bytes of packets on ports you configure into a per-CPU ring buffer at a bounded rate, and the agent parses them to count Redis commands, SQL verbs, Kafka APIs, HTTP methods and statuses and gRPC methods. The parsers can only return an allowlisted operation name, a coarse outcome or a validated pattern; keys, SQL text, paths, query strings, headers and bodies are never returned, exported or logged. The property is enforced by the shape of the output and tested by planting secrets in real requests and asserting they appear nowhere the agent or controller exposes: not in the API, the agent's own report, `/metrics`, or either process's log.
+
+**TLS plaintext sampling** is a deliberate, opt-in exception to "Netra does not decrypt". It attaches uprobes to OpenSSL's `SSL_write` and `SSL_read` in the libraries your processes load, so the agent sees a sample of plaintext at the point the application hands it over or receives it. Limits that matter:
+
+- The plaintext is parsed in the agent's memory and **never exported**; only allowlisted counts leave it.
+- Restrict it with `agent.tlsUprobesComms` (process names such as `nginx,envoy`). The allowlist is enforced in the kernel **before any byte is copied**, so processes off the list are never read. With no list it observes every process that uses libssl, on the whole node.
+- It needs a host-PID view of the node to find each process's libssl, which the chart requests only when this or process metadata is enabled. That is a real widening of what the already-privileged agent can see.
+- It covers OpenSSL only. Go's `crypto/tls`, statically linked BoringSSL and applications with their own TLS are not observed.
+
+Both sensors are rate-limited and the kernel counts what it skipped, so a busy node cannot be made to spend unbounded CPU or memory on them.
+
+## Agent to controller mutual TLS
+
+`NETRA_AGENT_MTLS=optional|required` (Helm `mtls.mode`) makes the controller verify a client certificate from the agent. In `required` mode agent-only requests need the agent key **and** a certificate signed by your CA with the client-auth key usage, so a leaked agent key alone no longer works. People are never asked for a certificate.
+
+It fails closed. The controller refuses to start on an invalid mode, a missing or empty CA file, or mutual TLS over plain HTTP, and a bad mode that reaches the request path is treated as `required`, never `off`. A certificate that is offered but wrong (another CA, expired, or without the client-auth usage) fails the handshake even in `optional` mode. Whether each agent's report arrived over a verified certificate is recorded by the controller from the handshake; an agent cannot claim it. An agent given an unusable certificate refuses to run rather than reporting into a wall.
+
+What it does not do: the certificate is shared by all agents, so it proves "an agent", not which node. The controller reads its CA at startup, so rotating the CA needs a controller restart.
+
+## Roles and login
+
+With `NETRA_OIDC_ISSUER` set, people sign in through your identity provider and get one of three roles (`viewer`, `operator`, `admin`); the audit trail names the person. Static keys keep working as full admin. Roles are decided in one place on the matched route, a newly added mutating route is gated at operator by default, and tests fail the build if any mutating route resolves lower. A valid token that maps to no Netra role is a 403, and an unreachable identity provider is a 503, not a 401, so clients do not treat a provider outage as a logout.
+
+## Push sinks
+
+OTLP, Loki, syslog, Snowflake and the alert channels send data **out** of the controller, so review what leaves before enabling them. They are opt-in, best-effort and leader-only in HA. Their credentials (headers, secrets, passwords, tokens) are never logged and never appear in an API response, which CI checks by planting them and scanning every request body, log line and response. Webhook and bridge deliveries can be HMAC-signed. Loki and syslog carry audit and block events (addresses and actor names); treat the destination as sensitive.
+
 ## Authentication defaults
 
 The controller refuses startup when either `NETRA_API_KEY` or `NETRA_AGENT_KEY` is missing. `NETRA_ALLOW_UNAUTHENTICATED=true` is an explicit local-development escape hatch and should not be used on shared networks. Helm enforces the same default and supports `auth.existingSecret`.
 
-Use independent API and agent secrets. Rotate them through your normal Secret-management process. Restrict access to the controller Service with NetworkPolicy/firewall controls appropriate to your environment.
+Netra can also authenticate people through OIDC with three roles (see [Roles and login](#roles-and-login)); the static keys remain full admin, so store them like root credentials. Use independent API and agent secrets. Rotate them through your normal Secret-management process. Restrict access to the controller Service with NetworkPolicy/firewall controls appropriate to your environment.
 
-`/metrics` is intentionally unauthenticated for in-cluster Prometheus scraping but contains aggregate, low-cardinality operational data only. It does not export packet payloads, API keys or policy bodies.
+`/metrics` is unauthenticated by default for in-cluster Prometheus scraping but contains aggregate, low-cardinality operational data only. It does not export packet payloads, API keys or policy bodies. Set `NETRA_METRICS_TOKEN` to require a bearer token (the token is accepted in the `Authorization` header only, never in the URL). The opt-in per-workload counters add `namespace` and `workload` labels, bounded by a hard cap with an `other` bucket, so cardinality cannot grow without limit.
 
 ## Packet/process data
 
-The ring buffer exports selected packet-header metadata and process context. Netra does not copy arbitrary packet payload bytes to userspace. Cleartext DNS qnames are intentionally extracted and may be sensitive; apply retention/access controls to any external logs or metrics pipeline that consumes Netra events.
+By default the ring buffer exports selected packet-header metadata and process context, and Netra does not copy packet payload bytes to userspace. The exception is the two opt-in sampling sensors below, which copy the first bytes of selected payloads to the agent to count operations; that data is parsed in the agent and never exported. Cleartext DNS qnames are intentionally extracted and may be sensitive; apply retention/access controls to any external logs or metrics pipeline that consumes Netra events.
 
 Process events can include PID, UID, cgroup ID and `comm`. Treat them as operational telemetry.
 
