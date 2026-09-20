@@ -805,6 +805,8 @@ jobs:
       with: {cluster_name: netra-ci}
     - name: Install, upgrade, restart and roll back on a real cluster (scripted)
       # Same command locally: ./scripts/ci-kind-lifecycle.sh (a running kind cluster)
+      # With no release tag there is nothing to upgrade from: skip with a warning annotation, do not fail.
+      env: {ALLOW_NO_PREVIOUS_TAG: '1'}
       run: ./scripts/ci-kind-lifecycle.sh
   manifests-kind:
     # The plain manifests an operator applies with kubectl (no Helm): controller, state volume,

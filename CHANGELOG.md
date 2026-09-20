@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`kind-lifecycle` no longer fails when the repository has no release tag.** It skips with a warning annotation (CI sets `ALLOW_NO_PREVIOUS_TAG=1`); a local run stays strict. The install, upgrade and rollback test does not run until a tag exists.
 - **Verified: 0.28.1 installs and runs on a real node, and its UI is complete.** The two released images were pulled from `ghcr.io` onto the K3s lab host with the chart from the `v0.28.1` tag (`--reset-then-reuse-values`); both running pods reported the exact release digests, the controller and agent reported 0.28.1, the cookie session, 12 read endpoints and `/metrics` passed, and `scripts/check-served-ui.sh` confirmed the logo and favicon are served and identical to the repository files. The install script's own digest and agent checks were fixed first: the previous run had silently skipped its digest check.
 - **Docs quote the 0.28.1 digests and signing identity** (`deploy/README.md`, the website quickstart) and say to use 0.28.1 or later.
 

@@ -31,7 +31,16 @@ HEAD_VERSION="$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/netrad/main.go)"
 # still carry that tag's version, and upgrading a release to itself proves nothing (and trips the
 # "nothing is being upgraded" assertion below).
 PREVIOUS_TAG="${PREVIOUS_TAG:-$(git tag --list 'v[0-9]*' --sort=-v:refname | while read -r t; do [[ "${t#v}" != "$HEAD_VERSION" ]] && { echo "$t"; break; }; done)}"
-[[ -n "$PREVIOUS_TAG" ]] || { echo "no previous release tag to upgrade from (fetch tags: git fetch --tags)" >&2; exit 1; }
+if [[ -z "$PREVIOUS_TAG" ]]; then
+  # No release tag means no upgrade to test. CI opts in to a loud skip (a warning annotation on the run);
+  # a local run stays strict so the gap is not hidden from whoever is checking an upgrade.
+  if [[ "${ALLOW_NO_PREVIOUS_TAG:-}" == 1 ]]; then
+    echo "::warning title=kind-lifecycle skipped::no release tag exists to upgrade from, so the install, upgrade and rollback test did not run"
+    echo "SKIPPED kind lifecycle: no previous release tag (push a vX.Y.Z tag to enable it)"
+    exit 0
+  fi
+  echo "no previous release tag to upgrade from (fetch tags: git fetch --tags)" >&2; exit 1
+fi
 for c in docker helm kubectl kind curl python3 git; do command -v "$c" >/dev/null || { echo "missing required command: $c" >&2; exit 1; }; done
 W="$(mktemp -d "${TMPDIR:-/tmp}/netra-kind.XXXXXX")"
 PF=""

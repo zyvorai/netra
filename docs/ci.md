@@ -76,7 +76,10 @@ only), and the shared lab host (never a CI target).
 - `kind-lifecycle` needs a previous release tag (`git fetch --tags`); it builds that release from
   source with the current Dockerfile, so an old Dockerfile that no longer builds cannot hide an
   upgrade problem. "Previous" means the newest tag with a **different version** than the checkout, so
-  commits on top of a fresh tag (same version) still upgrade from the release before it.
+  commits on top of a fresh tag (same version) still upgrade from the release before it. With no release
+  tag at all there is nothing to upgrade from: CI sets `ALLOW_NO_PREVIOUS_TAG=1`, so the job ends with a
+  warning annotation ("kind-lifecycle skipped") instead of failing, and the install, upgrade and rollback
+  test does not run until a `vX.Y.Z` tag exists. A local run without that variable still fails.
 
 ## Running a job locally
 
