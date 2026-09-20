@@ -15,6 +15,14 @@ agent against any Kubernetes cluster; if Cilium and Hubble Relay are already
 running, Netra will also offer optional Cilium policy management and Hubble
 flow viewing, but nothing here depends on it.
 
+:::tip Installing a release
+The chart pins its image tags to the version of the checkout, and only tagged releases have published
+images (`0.28.0` is the first). Clone a tag rather than `main`:
+`git clone --branch v0.28.0 https://github.com/zyvorai/netra`. The images are signed; see
+[Install from a release](https://github.com/zyvorai/netra/blob/main/deploy/README.md#install-from-a-release)
+for the digests and the `cosign verify` command.
+:::
+
 ```bash
 make install   # netractl → /usr/local/bin (or PREFIX=$HOME/.local)
 
