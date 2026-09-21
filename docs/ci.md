@@ -43,6 +43,8 @@ shared group even with `cancel-in-progress: false`.
 | Datapath sensors (HTTP status, TLS fingerprints, sampled L7, TLS plaintext) | `http-status-smoke`, `tlsfp-smoke`, `l7sample-smoke`, `tlssample-smoke` | `ci-*-smoke.sh` | real agent, real kernel |
 | eBPF programs and verifier, x86_64 and arm64 | `ebpf`, `ebpf-arm64` | `ci-ebpf-tests.sh` | real kernel |
 | Flow observability and auto-capture | `flow-observe-veth`, `auto-capture-veth` | `ci-flow-observe-veth.sh`, `ci-auto-capture-veth.sh` | veth |
+| Netlink change recorder: ring and delivery cursor, resubscribe after ENOBUFS, controller history | `go` job | `ci-netlink-unit.sh` | unit + race |
+| Netlink change recorder against a real kernel: veth address/route/neighbor/MTU changes, forced overrun | `netlink-veth-smoke` | `ci-netlink-veth.sh` | real kernel, throwaway netns |
 | Agent to controller mutual TLS | `mtls-smoke` | `ci-mtls-smoke.sh` | real controller and agent |
 | OIDC login and RBAC | `oidc-live` | `ci-oidc-live.sh` | real controller |
 | MCP server (tools, gating, audit actor) | `mcp-live` | `ci-mcp-live.sh` | real controller and MCP server |

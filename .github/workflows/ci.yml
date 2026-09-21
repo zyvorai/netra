@@ -94,6 +94,13 @@ jobs:
       # accept draining the queue, /proc/net/tcp cross-check), agent modes and
       # controller aggregation. Same command locally: ./scripts/ci-listenq-unit.sh
       run: ./scripts/ci-listenq-unit.sh
+    - name: Netlink change recorder unit + race (scripted)
+      # Read-only RTNL recorder: bounded ring and delivery cursor (a failed POST
+      # resends), resubscribe after ENOBUFS, neighbor-churn suppression, snapshot
+      # generation and caps, controller history dedupe across agent restarts, API
+      # views and metric bounds. The real-kernel half runs in `netlink-veth-smoke`.
+      # Same command locally: ./scripts/ci-netlink-unit.sh
+      run: ./scripts/ci-netlink-unit.sh
     - name: OIDC login + RBAC + metrics-token unit + race (scripted)
       # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
       # the role table over the real route set, spoof-proof audit actor and
@@ -277,6 +284,14 @@ jobs:
         awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
           --set agent.listenQueues=off | awk '/name: NETRA_LISTEN_QUEUES$/{getline; if ($0 !~ /"off"/) exit 1}'
+        # The netlink change recorder is a plain env knob too (read-only RTNL).
+        grep -q 'name: NETRA_NETLINK$' /tmp/netra.yaml
+        awk '/name: NETRA_NETLINK$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        awk '/name: NETRA_NETLINK_EVENT_BUFFER$/{getline; if ($0 !~ /"4096"/) exit 1}' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.netlink=off --set agent.netlinkEventBuffer=8192 >/tmp/netra-netlink.yaml
+        awk '/name: NETRA_NETLINK$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-netlink.yaml
+        awk '/name: NETRA_NETLINK_EVENT_BUFFER$/{getline; if ($0 !~ /"8192"/) exit 1}' /tmp/netra-netlink.yaml
     - name: Controller memory limit leaves room for the flow history (OOM regression)
       # 0.27.102 shipped 256Mi and the controller was OOM-killed every ~12
       # minutes on a real cluster. netrad now derives Go's soft limit from the
@@ -608,6 +623,22 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y iperf3 iproute2
     - name: Flow observe veth + iperf3 smoke
       run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-flow-observe-veth.sh
+  netlink-veth-smoke:
+    # Privileged Linux smoke for the read-only RTNL change recorder. Runs the
+    # real recorder against a real kernel inside a throwaway network namespace:
+    # veth address/route/neighbor/MTU/carrier changes are recorded, and a route
+    # storm that overflows the kernel receive buffer (ENOBUFS) is counted, the
+    # subscription is re-established and later changes are seen. No eBPF.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with: {go-version: '1.27.1', cache: true}
+    - name: Install iproute2
+      run: sudo apt-get update && sudo apt-get install -y iproute2
+    - name: Netlink recorder veth smoke
+      run: sudo -E env "PATH=$PATH" "HOME=$HOME" "GOPATH=${GOPATH:-$HOME/go}" "GOMODCACHE=${GOMODCACHE:-}" "GOCACHE=${GOCACHE:-}" ./scripts/ci-netlink-veth.sh
   http-status-smoke:
     # Privileged Linux smoke for cleartext HTTP/1 status. The SNI/Host scan
     # programs may fail the verifier; the status programs must still attach

@@ -23,6 +23,9 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
 - Policy apply stays plan-token + risk confirm. Enforce stays leased.
 - Do not wire a PacketWolf↔Netra control-plane sync unless product work
   explicitly requests it (today they export sideways only).
+- The netlink recorder (`internal/netlinkwatch`, `GET /api/v1/netlink`) is
+  read-only RTNL observation. Never add a route/link/address/neighbor/rule
+  mutation to it or wire it to one. Details: `docs/netlink-recorder.md`.
 - New source files need the `LicenseRef-Zyvor-Production-1.0` SPDX header used everywhere else.
 - P0–P5 observe surfaces catalog: `docs/p0-p5-surfaces.md`. Buyer narrative:
   `docs/sales/buyers-guide.md`.
@@ -50,6 +53,7 @@ make fmt
 go test ./...
 ./scripts/ci-tlsfp-unit.sh
 ./scripts/ci-p1-p5-unit.sh
+./scripts/ci-netlink-unit.sh
 make test-features
 make test-netractl-commands
 make test-netractl-live
@@ -61,12 +65,13 @@ npm --prefix web run test
 #   sudo ./scripts/ci-tlsfp-smoke.sh
 #   sudo ./scripts/ci-auto-capture-veth.sh
 #   sudo ./scripts/ci-flow-observe-veth.sh
+#   sudo ./scripts/ci-netlink-veth.sh
 # Live lab full netractl command board (not smoke):
 #   ./scripts/ci-netractl-remote.sh
 ```
 
 CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
-`auto-capture-veth`, `flow-observe-veth`, `tlsfp-smoke`). Scripted gates:
+`auto-capture-veth`, `flow-observe-veth`, `netlink-veth-smoke`, `tlsfp-smoke`). Scripted gates:
 
 | Script | Job / step |
 |---|---|
@@ -76,6 +81,8 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-tlsfp-smoke.sh` | `tlsfp-smoke` — agent + openssl + iperf3 |
 | `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
 | `scripts/ci-flow-observe-veth.sh` | `flow-observe-veth` — veth + iperf3 flow history, RED, traces, stacks |
+| `scripts/ci-netlink-unit.sh` | `go` — netlink recorder ring/cursor, resubscribe, controller history, API, metrics |
+| `scripts/ci-netlink-veth.sh` | `netlink-veth-smoke` — real RTNL in a throwaway netns, forced ENOBUFS overrun |
 | `scripts/ci-http-status-smoke.sh` | `http-status-smoke` — agent + cleartext HTTP/1 503 |
 
 The auto-capture smoke needs Linux root + iperf3; run locally with

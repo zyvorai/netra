@@ -53,6 +53,8 @@ func allCLICommands() []cliCommand {
 		{Name: "fleet-tenants", Args: []string{"fleet-tenants"}},
 		{Name: "compliance", Args: []string{"compliance"}},
 		{Name: "node-resources", Args: []string{"node-resources"}},
+		{Name: "netlink-state", Args: []string{"netlink", "state"}},
+		{Name: "netlink-events", Args: []string{"netlink", "events", "--since", "30m", "--limit", "20"}},
 		{Name: "scorecard", Args: []string{"scorecard"}},
 		{Name: "talkers", Args: []string{"talkers"}},
 		{Name: "namespaces", Args: []string{"namespaces"}},

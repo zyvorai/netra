@@ -100,7 +100,7 @@ Live UI captures from a lab deployment (HTTPS `:30870`). Overview and Pods lockd
 - Optional ChatOps integration for Slack (slash commands + interactive confirmation buttons) and Microsoft Teams (bot messages): `/netra status|health|audit|ask|forget|mode`. Read commands reply immediately; the one mutating command (`mode`) always requires a second confirmation step, mirroring the web UI's own confirm dialogs. `/netra ask` shares the same AI layer as the web Ask Netra card, including per-channel-per-user conversation memory. Off by default; each provider needs its own signing secret/App ID to register its route at all. See `docs/chatops.md` and `docs/chatops-teams.md`.
 - Cgroup-side TLS SNI / cleartext HTTP / DNS query-name observability runs in its own dedicated eBPF program (`NETRA_L7=auto|off|required`, attach-with-fallback), isolated from the conntrack/NetworkPolicy-deny program's verifier budget so the two can evolve independently. See `docs/l7-metadata.md`.
 - IPv6 extension-header and fragmentation diagnostics (`docs/ipv6-diagnostics.md`), per-interface flow attribution for TC/TCX-attached NICs (`docs/interface-flow-attribution.md`), and XDP Shield per-class/per-source breakdowns (`docs/tcx-and-shield.md`) — all additive counters over data the eBPF datapath already computed internally.
-- Kernel drop attribution: which connection's packets the kernel dropped, why (reason names come from the running kernel, whose numbering changes between versions) and which kernel function dropped them (`docs/drop-info.md`, needs BTF); TCP retransmit / reset / state-change events per flow (`docs/tcp-events.md`); TCP accept-queue depth per listener (`docs/listen-queues.md`). Each is its own optional sensor: a node that cannot run one reports why instead of failing.
+- Kernel drop attribution: which connection's packets the kernel dropped, why (reason names come from the running kernel, whose numbering changes between versions) and which kernel function dropped them (`docs/drop-info.md`, needs BTF); TCP retransmit / reset / state-change events per flow (`docs/tcp-events.md`); TCP accept-queue depth per listener (`docs/listen-queues.md`); and a read-only record of host link, address, route and neighbor changes over netlink, with overflow counted rather than hidden (`docs/netlink-recorder.md`). Each is its own optional sensor: a node that cannot run one reports why instead of failing.
 - Opt-in sampled application-protocol observation (Redis commands, SQL verbs, Kafka APIs, HTTP/2 and gRPC methods, HTTP status; counts only, never payload, `docs/l7-sampling.md`) and, separately and more sensitive, opt-in TLS plaintext sampling for HTTPS through OpenSSL uprobes limited by process name (`docs/tls-plaintext.md`). Both are off by default.
 - Export and access: OTLP push (`docs/otlp-push.md`), Loki push (`docs/loki-push.md`), per-workload metrics with a hard cardinality cap plus a `ServiceMonitor`, `PrometheusRule` and SLOs (`docs/workload-metrics-slo.md`), OIDC login with viewer/operator/admin roles and an optional token-gated `/metrics` (`docs/auth-oidc-rbac.md`), and optional mutual TLS between agents and the controller (`docs/agent-mtls.md`, off by default).
 
@@ -405,6 +405,7 @@ docs/identity-drafts.md           Identity drafts (ServiceAccount join)
 docs/investigation-ux.md          Native investigation UX
 docs/l7-sampling.md               Sampled L7 protocol observation
 docs/listen-queues.md             TCP listen-queue pressure
+docs/netlink-recorder.md          Route / link / address / neighbor change recorder (read-only)
 docs/loki-push.md                 Loki push export
 docs/microseg.md                  East-west microsegmentation guidance
 docs/network-health.md            Netra Network Health — v0.10
@@ -459,8 +460,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.28.1 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.28.1 .
+docker build -t ghcr.io/zyvorai/netra:0.28.2 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.28.2 .
 ```
 
 Tagged releases publish both images (`linux/amd64` and `linux/arm64`) to `ghcr.io/zyvorai/netra` and

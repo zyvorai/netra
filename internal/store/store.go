@@ -1659,6 +1659,11 @@ func (s *Store) Report(r models.AgentReport) {
 			r.Events = append([]models.FastPathEvent(nil), r.Events[len(r.Events)-500:]...)
 		}
 	}
+	if prev, ok := s.agents[r.Node]; ok {
+		r.Netlink = mergeNetlink(prev.Netlink, r.Netlink)
+	} else {
+		r.Netlink = mergeNetlink(nil, r.Netlink)
+	}
 	s.appendRateSampleLocked(r)
 	s.appendKernelNetworkSampleLocked(r)
 	s.agents[r.Node] = r
@@ -1702,6 +1707,7 @@ func (s *Store) Agents() []models.AgentReport {
 		r.HTTPStatus = append([]models.HTTPStatusStat(nil), r.HTTPStatus...)
 		r.ConnectionAttempts = append([]models.ConnectionAttemptStat(nil), r.ConnectionAttempts...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
+		r.Netlink = cloneNetlink(r.Netlink)
 		r.Workloads = cloneWorkloads(r.Workloads)
 		out = append(out, r)
 	}
@@ -1723,6 +1729,7 @@ func (s *Store) AgentStatuses(now time.Time, staleAfter time.Duration) []models.
 		r.HTTPStatus = append([]models.HTTPStatusStat(nil), r.HTTPStatus...)
 		r.ConnectionAttempts = append([]models.ConnectionAttemptStat(nil), r.ConnectionAttempts...)
 		r.Events = append([]models.FastPathEvent(nil), r.Events...)
+		r.Netlink = cloneNetlink(r.Netlink)
 		r.Workloads = cloneWorkloads(r.Workloads)
 		age := now.Sub(r.ObservedAt)
 		if r.ObservedAt.IsZero() || age < 0 {

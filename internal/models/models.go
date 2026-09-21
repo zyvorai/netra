@@ -1169,6 +1169,11 @@ type AgentReport struct {
 	ScopeMode       string             `json:"scopeMode,omitempty"`
 	SelectedCgroups int                `json:"selectedCgroups,omitempty"`
 	QdiscStats      []QdiscStat        `json:"qdiscStats,omitempty"`
+	// Netlink is the read-only host-network control-plane snapshot and bounded
+	// RTNL change timeline. nil when NETRA_NETLINK=off; Unavailable when the
+	// recorder could not start. It never represents desired state or authorizes
+	// a route/link/neighbor mutation.
+	Netlink *NetlinkReport `json:"netlink,omitempty"`
 	// KernelNetwork is an observe-only snapshot of networking sysctls and
 	// cumulative /proc/net counters. Netra never applies these values.
 	KernelNetwork KernelNetworkSnapshot `json:"kernelNetwork,omitempty"`

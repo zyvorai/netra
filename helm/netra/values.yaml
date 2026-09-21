@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.28.1"
+  tag: "0.28.2"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.28.1"
+  tag: "0.28.2"
 replicaCount: 1
 ha:
   enabled: false
@@ -316,6 +316,13 @@ agent:
   # TCP accept-queue depth per listener, from inet_diag (docs/listen-queues.md).
   # No BPF and no extra privilege. auto|off.
   listenQueues: auto
+  # Read-only RTNL recorder: link, address, route and neighbor changes plus a
+  # periodic full snapshot (docs/netlink-recorder.md). Uses the agent's host
+  # network namespace; no BPF, no extra privilege, and nothing here can change a
+  # route, link, address or neighbor. auto|off.
+  netlink: auto
+  # Agent-side ring of recorded changes. Overflow is counted, not silent.
+  netlinkEventBuffer: 4096
   # Sampled application-protocol observation (bpf/netra_l7sample.c,
   # docs/l7-sampling.md): which Redis commands, SQL verbs, Kafka APIs and gRPC
   # methods workloads use and how often they fail. It reads application payload

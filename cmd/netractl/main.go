@@ -189,6 +189,8 @@ func run(args []string) error {
 		return request("GET", "/api/v1/compliance", nil)
 	case "node-resources":
 		return request("GET", "/api/v1/node-resources", nil)
+	case "netlink":
+		return netlinkCmd(args[1:])
 	case "handoff":
 		return handoffCmd(args[1:])
 	case "scorecard":

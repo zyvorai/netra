@@ -71,6 +71,10 @@ spec:
           value: {{ .Values.agent.dropInfo | default "auto" | quote }}
         - name: NETRA_LISTEN_QUEUES
           value: {{ .Values.agent.listenQueues | default "auto" | quote }}
+        - name: NETRA_NETLINK
+          value: {{ .Values.agent.netlink | default "auto" | quote }}
+        - name: NETRA_NETLINK_EVENT_BUFFER
+          value: {{ .Values.agent.netlinkEventBuffer | default 4096 | quote }}
         - name: NETRA_TLS_UPROBES
           value: {{ .Values.agent.tlsUprobes | default "off" | quote }}
         {{- if .Values.agent.tlsUprobesComms }}

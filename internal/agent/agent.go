@@ -40,6 +40,7 @@ import (
 	"github.com/zyvorai/netra/internal/listenq"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/mtls"
+	"github.com/zyvorai/netra/internal/netlinkwatch"
 	"github.com/zyvorai/netra/internal/sslprobe"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
@@ -114,6 +115,11 @@ type Agent struct {
 	// to one log line rather than one per report.
 	listenQ       *listenq.Sampler
 	listenQWarned bool
+	// netlinkWatch records host link/address/route/neighbor changes over RTNL
+	// (docs/netlink-recorder.md); nil when NETRA_NETLINK=off or it could not
+	// start (netlinkWhy says why).
+	netlinkWatch *netlinkwatch.Watcher
+	netlinkWhy   string
 	// l7sample* are the sampled application-protocol observer (bpf/netra_l7sample.c,
 	// docs/l7-sampling.md). Off unless NETRA_L7_SAMPLE is set; the sampler is nil
 	// when it is off or could not start (l7SampleWhy says why).
@@ -257,6 +263,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.lastSync = time.Now()
 	go a.readEvents(ctx)
 	go a.readTLSHelloEvents(ctx)
+	a.startNetlink(ctx)
 	if a.l7Sampler != nil {
 		go a.l7Sampler.Run(ctx, a.l7Counters.Observe)
 	}
@@ -995,6 +1002,8 @@ func (a *Agent) Close() {
 		_ = a.sslProber.Close()
 		a.sslProber = nil
 	}
+	a.netlinkWatch.Close()
+	a.netlinkWatch = nil
 }
 
 func (a *Agent) syncAndReport(ctx context.Context) error {
@@ -1173,7 +1182,8 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	listenQueues := a.readListenQueues()
 	l7 := a.readL7Sample()
 	tlsSample := a.readTLSSample()
-	return a.report(ctx, models.AgentReport{
+	netlinkReport, commitNetlink := a.readNetlink()
+	if err := a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
 		Stats: stats, TCPHealth: tcpHealth, TCPPressure: tcpPressure, ConnectLatency: connectLatency,
@@ -1184,13 +1194,18 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
+		Netlink:            netlinkReport,
 		KernelNetwork:      kernelNetwork,
 		SysctlNetworkAudit: sysctlAudit,
 		NodeResources:      nodeResources,
 		HostProcesses:      hostProcesses,
 		StackSamples:       stackSamplesFor(a.node, hostProcesses),
 		KernelNotes:        kernelNotes(a.node),
-	})
+	}); err != nil {
+		return err
+	}
+	commitNetlink()
+	return nil
 }
 
 func stackSamplesFor(node string, tops models.HostProcessTops) []models.StackSample {
