@@ -177,20 +177,22 @@ func (w *Watcher) recordNeighbor(e models.NetlinkEvent) {
 	w.append(e)
 }
 
-// recordOverrun notes that kernel messages or a whole subscription were lost.
-func (w *Watcher) recordOverrun(sensor, why string) {
-	overrun := strings.Contains(strings.ToLower(why), "no buffer space")
+// recordOverrun notes that kernel messages or a whole subscription were lost,
+// and reports whether the cause was a kernel receive-buffer overflow (ENOBUFS).
+func (w *Watcher) recordOverrun(sensor, why string) (overflow bool) {
+	overflow = strings.Contains(strings.ToLower(why), "no buffer space")
 	if len(why) > maxDetail {
 		why = why[:maxDetail]
 	}
 	w.mu.Lock()
 	w.resubscribes++
-	if overrun {
+	if overflow {
 		w.overruns++
 	}
 	w.mu.Unlock()
 	w.append(models.NetlinkEvent{Kind: models.NetlinkKindOverrun, Action: "lost", Detail: sensor + ": " + why})
 	w.requestResync()
+	return overflow
 }
 
 func (w *Watcher) requestResync() {
@@ -398,9 +400,15 @@ func (w *Watcher) supervise(ctx context.Context, sensor string, start startFunc)
 			if why == "" {
 				why = "subscription closed"
 			}
-			w.recordOverrun(sensor, why)
+			overflow := w.recordOverrun(sensor, why)
 			w.setError(sensor+"-subscribe", &lostError{why})
-			if time.Since(began) > stableAfter {
+			// A receive-buffer overflow means the socket worked and the reader was
+			// slow, not that subscribing is failing, so it reopens at once. Backing
+			// off there would blind the recorder for up to maxBackoff during a
+			// sustained storm, which is exactly when changes matter. Failed starts
+			// and other losses still back off, unless the subscription had been
+			// stable for a while.
+			if overflow || time.Since(began) > stableAfter {
 				delay = w.backoffBase
 			}
 		}

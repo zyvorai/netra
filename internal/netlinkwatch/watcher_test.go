@@ -262,6 +262,61 @@ func TestSuperviseReopensAfterOverrun(t *testing.T) {
 	}
 }
 
+// Sustained storms overflow repeatedly. Backing off after each one would leave
+// the recorder blind for up to maxBackoff exactly when changes matter, so an
+// overflow always reopens after the base delay.
+func TestSuperviseDoesNotBackOffOnRepeatedOverflow(t *testing.T) {
+	w := newWatcher(64)
+	w.backoffBase = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var starts atomic.Int32
+	start := func(context.Context) (<-chan struct{}, func() string, error) {
+		starts.Add(1)
+		closed := make(chan struct{})
+		close(closed)
+		return closed, func() string { return "Receive failed: no buffer space available" }, nil
+	}
+	go w.supervise(ctx, "route", start)
+	// Fixed delay: ~8 starts in ~160ms. Doubling delay: the 7th start alone is >1.2s away.
+	deadline := time.After(700 * time.Millisecond)
+	for starts.Load() < 8 {
+		select {
+		case <-deadline:
+			t.Fatalf("only %d reopens in 700ms: overflow is backing off", starts.Load())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if r := w.Report(1); r.Overruns < 7 {
+		t.Fatalf("overruns=%d, want each overflow counted", r.Overruns)
+	}
+}
+
+// Any other loss, or a start that keeps failing, is a faulty subscription and
+// must still back off rather than spin.
+func TestSuperviseStillBacksOffOnOtherLosses(t *testing.T) {
+	w := newWatcher(64)
+	w.backoffBase = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var starts atomic.Int32
+	start := func(context.Context) (<-chan struct{}, func() string, error) {
+		starts.Add(1)
+		closed := make(chan struct{})
+		close(closed)
+		return closed, func() string { return "connection reset" }, nil
+	}
+	go w.supervise(ctx, "route", start)
+	time.Sleep(300 * time.Millisecond)
+	// Doubling from 20ms: starts at ~0, 20, 60, 140, 300ms. A fixed delay would be ~15.
+	if n := starts.Load(); n > 8 {
+		t.Fatalf("%d starts in 300ms: a non-overflow loss is not backing off", n)
+	}
+	if r := w.Report(1); r.Overruns != 0 || r.Resubscribes == 0 {
+		t.Fatalf("overruns=%d resubscribes=%d: only ENOBUFS is an overrun", r.Overruns, r.Resubscribes)
+	}
+}
+
 func TestSuperviseRetriesAFailedStartAndStopsOnCancel(t *testing.T) {
 	w := newWatcher(4)
 	w.backoffBase = time.Millisecond

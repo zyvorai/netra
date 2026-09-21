@@ -55,8 +55,10 @@ stream missed, and it is what `netractl netlink state` shows.
 - **A dead subscription is reopened.** The netlink library ends a subscription on
   the first receive error, `ENOBUFS` included, and never reopens it. The recorder
   supervises each of the four subscriptions: it records an `overrun` event, asks
-  for a snapshot resync, and resubscribes with a capped backoff. `resubscribes`
-  counts these. Receive buffers are 1 MiB per subscription, not the ~208 KiB
+  for a snapshot resync, and resubscribes. A kernel buffer overflow reopens
+  after a fixed short delay (the socket worked; the reader was slow), so a
+  sustained storm never blinds the recorder for longer than that; a failing start
+  or any other loss backs off, capped at 30 s. `resubscribes` counts these. Receive buffers are 1 MiB per subscription, not the ~208 KiB
   default.
 - **History lives in controller memory.** The controller keeps the last 2000
   events per node and, like every agent report, does not persist them. A
