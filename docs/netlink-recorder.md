@@ -78,6 +78,64 @@ stream missed, and it is what `netractl netlink state` shows.
   outage. Nothing here correlates a change with drops or retransmits yet, and it
   raises no alerts on its own; see "Not in this release".
 
+## Findings: what is wrong now
+
+The recorder also derives a small set of findings from what it recorded
+(`internal/netlinkdiag`). They are **level-triggered**: a finding is reported only
+while the latest snapshot still shows the problem, so it clears itself when the
+network recovers, and a change is never a finding just because it happened.
+
+| Kind | Severity | When |
+|---|---|---|
+| `netlink-default-route-removed` | critical (IPv4), warning (IPv6) | The main-table default route was removed and none remains. A replace or a re-add clears it. |
+| `netlink-gateway-unreachable` | critical | The default gateway's neighbor entry is `FAILED`: it is not answering ARP/NDP. |
+| `netlink-neighbor-failed` | warning for 3 or more, else info | Other neighbors in `FAILED`. One is routine in Kubernetes (a pod died); several at once is a pattern. |
+| `netlink-link-down` | critical if it carried the default route, else warning | A **host uplink** went down (`down`, `lower-layer-down`, `not-present`) and is still down. |
+| `netlink-link-deleted` | warning | A host uplink was deleted and has not come back. |
+| `netlink-mtu-changed` | warning | A host uplink's MTU at the end of the window differs from before it. A change and a change back is no change. |
+| `netlink-overrun` | warning for `ENOBUFS`, else info | The recorder lost changes, so a quiet timeline in that period is not evidence that nothing happened. |
+
+Deliberate choices, each one a noise decision:
+
+- **Host uplinks only** (`device`, `bond`, `team`, `vlan`). Pod veths appear and
+  disappear with every pod; bridges such as libvirt's `virbr0` toggle carrier as
+  guests start and stop; tunnel endpoints are not uplinks. Alerting on those would
+  be alerting on normal operation.
+- **`INCOMPLETE` is not a failure.** It is ARP in flight, the state of every new
+  peer. Only `FAILED`, where the kernel gave up, counts.
+- **Confirmed before reported.** A fresh neighbor or link change waits up to 45 s
+  for a snapshot (taken every 30 s) to confirm it. A removed default route is
+  never made to wait: it is reported on the event unless a snapshot taken
+  afterwards shows a default route again.
+- **Subject is the node**, never an interface or address (interfaces churn per
+  pod, and the alert de-duplication key is built from the subject). Messages
+  carry interface names and IPs, never MAC addresses; the evidence, which does,
+  stays in the authenticated API.
+- Window: 15 minutes by default (`window=1m..24h`). A finding says what changed,
+  never why.
+
+Findings flow through `internal/health`, so they reach the **alert poller**
+(source `health`, so existing channels and min-severity filters apply), the
+**incident** clustering, the **AI brief** and the **SIEM export** with no extra
+wiring. They do not move the health score, which is counter-driven. Two netlink
+findings on one node, or one plus another node-level anomaly such as ICMP
+unreachables, also produce a `correlated-degradation` finding.
+
+```http
+GET /api/v1/netlink/findings
+GET /api/v1/netlink/findings?window=1h&node=worker-3
+```
+
+```bash
+netractl netlink findings
+netractl netlink findings --node worker-3 --window 1h
+```
+
+The response has `findings`, plus `evaluated` and `skipped`: skipped nodes are
+stale, have the recorder off, or could not start it, so "no findings" cannot be
+mistaken for "nothing was looked at". `/metrics` gains
+`netra_netlink_findings{severity="critical|warning|info"}`.
+
 ## Configuration
 
 ```yaml
@@ -155,7 +213,10 @@ netra_netlink_links / _addresses / _routes / _neighbors
   resubscribe supervisor, neighbor suppression, snapshot generation, caps and
   refresh, the controller's epoch-aware dedupe and snapshot carry-forward, the
   API filters and views, the metric bounds, and the `netractl` command, with the
-  race detector and arm64 / non-Linux builds.
+  race detector and arm64 / non-Linux builds. The findings are covered by tests of
+  every detector and its false-positive case, the health integration, and the
+  alert poller (a recorded change becomes one notification, is de-duplicated, and
+  stops when the route returns).
 - `scripts/ci-netlink-veth.sh` (CI job `netlink-veth-smoke`, needs Linux root):
   runs the real recorder against a real kernel inside a throwaway network
   namespace. It creates a veth, changes its address, route (via a gateway),
@@ -171,9 +232,9 @@ netra_netlink_links / _addresses / _routes / _neighbors
 sudo ./scripts/ci-netlink-veth.sh     # Linux root
 ```
 
-## Not in this release
+## Not built yet
 
-The recorder is the foundation. Not yet built, and not implied by anything above:
-findings and alerts (default route removed, neighbor failed, link down, MTU
-changed), correlation with drops and retransmits, attributing an interface to a
-pod, an MCP tool and a web page.
+Not implied by anything above: correlation with drops and retransmits,
+attributing an interface to a pod, who made a change (the recorder sees that it
+changed, not which process did it), watching BPF/TC/XDP attachments, an MCP tool
+and a web page.

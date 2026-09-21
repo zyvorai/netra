@@ -55,6 +55,7 @@ func allCLICommands() []cliCommand {
 		{Name: "node-resources", Args: []string{"node-resources"}},
 		{Name: "netlink-state", Args: []string{"netlink", "state"}},
 		{Name: "netlink-events", Args: []string{"netlink", "events", "--since", "30m", "--limit", "20"}},
+		{Name: "netlink-findings", Args: []string{"netlink", "findings"}},
 		{Name: "scorecard", Args: []string{"scorecard"}},
 		{Name: "talkers", Args: []string{"talkers"}},
 		{Name: "namespaces", Args: []string{"namespaces"}},

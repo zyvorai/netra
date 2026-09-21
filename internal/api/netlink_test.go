@@ -169,7 +169,7 @@ func TestNetlinkAggregateAndMetricsUseFreshReportingNodesOnly(t *testing.T) {
 	}
 	// Cardinality guard: no label other than the fixed kind set.
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "netra_netlink") && strings.Contains(line, "{") && !strings.Contains(line, "{kind=") {
+		if strings.HasPrefix(line, "netra_netlink") && strings.Contains(line, "{") && !strings.Contains(line, "{kind=") && !strings.Contains(line, "{severity=") {
 			t.Errorf("unexpected label on %q", line)
 		}
 	}
@@ -181,5 +181,87 @@ func TestNetlinkMetricsAreAbsentNotZeroWhenNothingReports(t *testing.T) {
 	out := rec.Body.String()
 	if !strings.Contains(out, "netra_netlink_nodes_not_reporting 1") || strings.Contains(out, "netra_netlink_overruns") {
 		t.Fatalf("metrics=%s", out)
+	}
+}
+
+func nlFindingsServer(now time.Time) *Server {
+	st := store.New()
+	gone := models.NetlinkEvent{Epoch: 1, Sequence: 1, Kind: "route", Action: "delete", Family: "ipv4", Destination: "default",
+		Gateway: "10.0.0.1", Interface: "eth0", Table: 254, ObservedAt: now.Add(-2 * time.Minute)}
+	st.Report(models.AgentReport{Node: "worker-1", ObservedAt: now, Netlink: &models.NetlinkReport{
+		Available: true, Epoch: 1, Sequence: 1, Cursor: 1, Events: []models.NetlinkEvent{gone}}})
+	st.Report(models.AgentReport{Node: "worker-2", ObservedAt: now, Netlink: &models.NetlinkReport{Available: true, Epoch: 2}})
+	st.Report(models.AgentReport{Node: "off-node", ObservedAt: now})
+	return &Server{store: st, agentStaleAfter: time.Minute}
+}
+
+func nlFindingsGet(t *testing.T, s *Server, query string) (int, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.netlinkFindings(rec, httptest.NewRequest("GET", "/api/v1/netlink/findings"+query, nil))
+	var body map[string]any
+	if rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("bad json: %v: %s", err, rec.Body.String())
+		}
+	}
+	return rec.Code, body
+}
+
+func TestNetlinkFindingsEndpointReportsWhatIsWrongAndWhatWasNotChecked(t *testing.T) {
+	s := nlFindingsServer(time.Now().UTC())
+	code, body := nlFindingsGet(t, s, "")
+	if code != 200 {
+		t.Fatalf("status=%d", code)
+	}
+	fs := body["findings"].([]any)
+	if len(fs) != 1 {
+		t.Fatalf("findings=%v", fs)
+	}
+	f := fs[0].(map[string]any)
+	if f["kind"] != "netlink-default-route-removed" || f["severity"] != "critical" || f["node"] != "worker-1" || f["subject"] != "worker-1" {
+		t.Fatalf("finding=%v", f)
+	}
+	if len(f["evidence"].([]any)) != 1 {
+		t.Fatalf("evidence=%v", f["evidence"])
+	}
+	// Two nodes recorded, one node has the recorder off: silence is not health.
+	if body["evaluated"].(float64) != 2 || body["skipped"].(float64) != 1 || body["window"] != "15m0s" {
+		t.Fatalf("evaluated=%v skipped=%v window=%v", body["evaluated"], body["skipped"], body["window"])
+	}
+}
+
+func TestNetlinkFindingsFiltersByNodeAndValidatesWindow(t *testing.T) {
+	s := nlFindingsServer(time.Now().UTC())
+	_, body := nlFindingsGet(t, s, "?node=worker-2")
+	if got := len(body["findings"].([]any)); got != 0 {
+		t.Fatalf("worker-2 has no findings, got %d", got)
+	}
+	// A window shorter than the change ends the finding.
+	_, body = nlFindingsGet(t, s, "?window=1m")
+	if got := len(body["findings"].([]any)); got != 0 {
+		t.Fatalf("a 1m window should not reach a change from 2m ago, got %d", got)
+	}
+	for _, q := range []string{"?window=30s", "?window=48h", "?window=soon"} {
+		if code, _ := nlFindingsGet(t, s, q); code != http.StatusBadRequest {
+			t.Errorf("%s: status=%d, want 400", q, code)
+		}
+	}
+}
+
+func TestNetlinkFindingsGaugeCountsBySeverityWithFixedLabels(t *testing.T) {
+	now := time.Now().UTC()
+	agents := nlFindingsServer(now).store.AgentStatuses(now, time.Minute)
+	rec := httptest.NewRecorder()
+	writeNetlinkMetrics(rec, agents)
+	out := rec.Body.String()
+	for _, want := range []string{
+		`netra_netlink_findings{severity="critical"} 1`,
+		`netra_netlink_findings{severity="warning"} 0`,
+		`netra_netlink_findings{severity="info"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

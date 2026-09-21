@@ -191,13 +191,13 @@ func (s *Server) WithArtifacts(a *capture.ArtifactStore) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.28.2"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.28.3"})
 	})
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.28.2"})
+		writeJSON(w, 200, map[string]any{"ok": true, "service": "netrad", "version": "0.28.3"})
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.28.2"})
+		writeJSON(w, 200, map[string]any{"ok": true, "leader": true, "version": "0.28.3"})
 	})
 	mux.HandleFunc("POST /api/v1/session", s.sessionCreate)
 	mux.HandleFunc("DELETE /api/v1/session", s.sessionDelete)
@@ -222,6 +222,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ebpf/drop-info", s.auth(http.HandlerFunc(s.ebpfDropInfo)))
 	mux.Handle("GET /api/v1/listen-queues", s.auth(http.HandlerFunc(s.listenQueues)))
 	mux.Handle("GET /api/v1/netlink", s.auth(http.HandlerFunc(s.netlinkChanges)))
+	mux.Handle("GET /api/v1/netlink/findings", s.auth(http.HandlerFunc(s.netlinkFindings)))
 	mux.Handle("GET /api/v1/l7/sampled", s.auth(http.HandlerFunc(s.l7Sampled)))
 	mux.Handle("GET /api/v1/l7/tls", s.auth(http.HandlerFunc(s.tlsSampled)))
 	mux.Handle("GET /api/v1/features", s.auth(http.HandlerFunc(s.listFeatures)))
@@ -540,7 +541,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	baseline := s.store.Baseline()
 	rateBaseline := s.store.RateBaseline()
 	rateWindow := s.store.RateWindow(5*time.Minute, time.Now())
-	out := map[string]any{"version": "0.28.2", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
+	out := map[string]any{"version": "0.28.3", "datapath": "standalone-ebpf", "ciliumRequired": false, "ciliumEnabled": s.ciliumEnabled, "consoleEnabled": s.consoleEnabled, "fastPath": s.store.Config(), "agents": len(statuses), "staleAgents": stale, "requirePreflight": s.requirePreflight, "persistentState": s.store.Persistent(), "haEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("NETRA_HA_ENABLED")), "true"), "controllerIdentity": strings.TrimSpace(os.Getenv("NETRA_POD_NAME")), "baselineEntries": len(baseline.Entries), "rateBaselineEntries": len(rateBaseline.Entries), "rateWindowWarming": rateWindow.Warming}
 	if !baseline.CapturedAt.IsZero() {
 		out["baselineCapturedAt"] = baseline.CapturedAt
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/netlinkdiag"
 )
 
 const (
@@ -109,6 +110,28 @@ func (s *Server) netlinkChanges(w http.ResponseWriter, r *http.Request) {
 		out["limit"] = limit
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// netlinkFindings serves GET /api/v1/netlink/findings?window=15m&node=NAME: the
+// evidence-backed findings derived from the recorded changes (internal/netlinkdiag).
+// They are level-triggered, so the list is what is wrong now, not everything that
+// ever changed; Skipped counts nodes that could not be evaluated.
+func (s *Server) netlinkFindings(w http.ResponseWriter, r *http.Request) {
+	window := netlinkdiag.DefaultWindow
+	if raw := strings.TrimSpace(r.URL.Query().Get("window")); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < time.Minute || d > 24*time.Hour {
+			errorJSON(w, http.StatusBadRequest, "window must be a duration between 1m and 24h, such as 15m")
+			return
+		}
+		window = d
+	}
+	now := time.Now()
+	agents := s.store.AgentStatuses(now, s.agentStaleAfter)
+	if node := strings.TrimSpace(r.URL.Query().Get("node")); node != "" {
+		agents = slices.DeleteFunc(agents, func(a models.AgentStatus) bool { return a.Node != node })
+	}
+	writeJSON(w, http.StatusOK, netlinkdiag.Build(agents, now, window))
 }
 
 func netlinkStates(agents []models.AgentStatus, withSnapshot bool) []netlinkNodeState {
@@ -243,4 +266,12 @@ func writeNetlinkMetrics(w http.ResponseWriter, agents []models.AgentStatus) {
 	metricGauge(w, "netra_netlink_addresses", "Interface addresses on reporting nodes at their latest snapshot.", float64(t.Counts.Addresses))
 	metricGauge(w, "netra_netlink_routes", "Routes (all tables) on reporting nodes at their latest snapshot.", float64(t.Counts.Routes))
 	metricGauge(w, "netra_netlink_neighbors", "ARP/NDP neighbor entries on reporting nodes at their latest snapshot.", float64(t.Counts.Neighbors))
+	bySeverity := map[string]int{}
+	for _, f := range netlinkdiag.Build(agents, time.Now(), netlinkdiag.DefaultWindow).Findings {
+		bySeverity[f.Severity]++
+	}
+	fmt.Fprint(w, "# HELP netra_netlink_findings Active host-network findings (default route removed, gateway unreachable, uplink down or deleted, MTU changed, recorder overrun) by severity. Level-triggered: they clear when the network recovers.\n# TYPE netra_netlink_findings gauge\n")
+	for _, sev := range []string{"critical", "warning", "info"} {
+		fmt.Fprintf(w, "netra_netlink_findings{severity=\"%s\"} %d\n", sev, bySeverity[sev])
+	}
 }

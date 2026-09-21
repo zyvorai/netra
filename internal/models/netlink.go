@@ -145,3 +145,36 @@ type NetlinkReport struct {
 	Snapshot *NetlinkSnapshot `json:"snapshot,omitempty"`
 	Events   []NetlinkEvent   `json:"events,omitempty"`
 }
+
+// NetlinkFinding is one evidence-backed observation derived from the recorded
+// changes. It is level-triggered: it is reported only while the latest snapshot
+// still shows the problem, so it clears itself when the network recovers. It
+// states what changed, not why; nothing here is a causal claim.
+type NetlinkFinding struct {
+	Severity string `json:"severity"` // critical|warning|info
+	Kind     string `json:"kind"`
+	Node     string `json:"node"`
+	// Subject is the node, never an interface or address: interfaces churn per
+	// pod, and the alert de-duplication key is built from it.
+	Subject       string    `json:"subject"`
+	Message       string    `json:"message"`
+	Value         float64   `json:"value,omitempty"`
+	FirstObserved time.Time `json:"firstObserved"`
+	LastObserved  time.Time `json:"lastObserved"`
+	// Evidence is the newest few underlying events, newest first. Neighbor
+	// events carry MAC addresses, so this stays in the authenticated API and is
+	// never copied into an alert, SIEM record or AI brief.
+	Evidence []NetlinkEvent `json:"evidence,omitempty"`
+}
+
+// NetlinkFindingsResponse is GET /api/v1/netlink/findings.
+type NetlinkFindingsResponse struct {
+	ObservedAt time.Time `json:"observedAt"`
+	Window     string    `json:"window"`
+	// Evaluated is the number of fresh nodes whose recorder was read; Skipped
+	// counts the rest (stale, recorder off, or unavailable), so "no findings"
+	// cannot be mistaken for "nothing was looked at".
+	Evaluated int              `json:"evaluated"`
+	Skipped   int              `json:"skipped"`
+	Findings  []NetlinkFinding `json:"findings"`
+}
