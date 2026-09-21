@@ -85,13 +85,15 @@ is an `fentry` on `rtnetlink_rcv_msg`, which runs synchronously in the task that
 called `sendmsg()` on its netlink socket, so at that point the current task is the
 requester. For each request that **modifies** state it records the process's `comm`
 (its 16-byte name), pid, cgroup id, the `RTM_*` type and the interface index the
-request names (a fixed field of link, address and neighbor requests; `RTA_OIF` for a
-route). For a route it also reads the destination (`RTA_DST` and the prefix length),
+request names (a fixed field of address and neighbor requests; `RTA_OIF` for a route).
+A link request may instead name its device only by name (`ip link set dev X` sends index 0
+and `IFLA_IFNAME`), so for those it reads the name too, and the message flags, to tell a
+create from an operation on an existing link. For a route it also reads the destination (`RTA_DST` and the prefix length),
 because two processes can add routes on one interface in the same instant and only the
 destination tells them apart. Read-only requests (`RTM_GET*`, dumps) are dropped in the
 kernel before anything is reserved. It captures **no argv and no environment**, and
-nothing of a message beyond the interface index and a route's destination, which are the
-same values the recorder already publishes about the change; it only observes.
+nothing of a message beyond the interface (index or name) and a route's destination,
+which are the same values the recorder already publishes about the change; it only observes.
 
 The agent joins each recorded change to the request behind it by message type,
 interface and time (a request is looked for in the 750 ms before the notification
@@ -110,7 +112,11 @@ The join is strict about what it claims:
   names are listed as `alternatives`. It is a join, not proof.
 - **Interface matters.** A request for one interface does not explain a change on
   another, so a veth's carrier loss is not credited to the `ip link set <peer> down`
-  that happened at the same instant. A link create names no interface and matches any.
+  that happened at the same instant. A link request that names its device only by name
+  (which is how modern `ip link set dev X` works) explains only that device. A create is
+  the exception: it also creates a peer whose name is not in the request, so it matches
+  any. A request that names a device by an *alternative* name would not match the
+  device's primary name and would be read as nobody's (kernel), which is a known limit.
 - **So does the route's destination.** Two processes adding routes on one interface in
   the same instant are told apart by prefix (`10.90.0.0/24` is one process's,
   `10.91.0.0/24` the other's). Two requests for the very same prefix cannot be, and are

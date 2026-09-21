@@ -275,3 +275,54 @@ func TestARequestWithNoKnownDestinationOrInterfaceStillMatches(t *testing.T) {
 		t.Fatalf("a request with unknown destination and interface must still match: %+v", a)
 	}
 }
+
+func linkRec(tgid uint32, comm string, typ uint16, ifindex uint32, ifname string, flags uint16, ms int) Record {
+	r := rec(tgid, comm, typ, ifindex, ms)
+	r.IfName, r.Flags = ifname, flags
+	return r
+}
+
+// The case a real kernel exposed: modern `ip link set dev X` sends index 0 and names
+// the device in IFLA_IFNAME, so an index-only join treated it as "names no interface"
+// and credited the peer's carrier loss to it.
+func TestALinkRequestThatNamesItsDeviceOnlyByNameExplainsOnlyThatDevice(t *testing.T) {
+	j := joiner()
+	j.Add(linkRec(7, "ip", RTMNewLink, 0, "nlat1", 0x1|0x4, 1000)) // ip link set dev nlat1 down
+	named := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "nlat1", InterfaceIndex: 5, ObservedAt: at(1020)}
+	if a, _ := j.Attribute(named); a == nil || a.Comm != "ip" {
+		t.Fatalf("the named device's change must be ip's: %+v", a)
+	}
+	peer := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "nlat0", InterfaceIndex: 4, ObservedAt: at(1020)}
+	if a, origin := j.Attribute(peer); a != nil || origin != models.NetlinkOriginKernel {
+		t.Fatalf("the peer's carrier loss was credited to ip: %+v %q", a, origin)
+	}
+}
+
+func TestACreateRequestMatchesThePeerItAlsoCreates(t *testing.T) {
+	// ip link add nlat0 type veth peer name nlat1: IFLA_IFNAME is nlat0, but nlat1 is created too.
+	j := joiner()
+	j.Add(linkRec(7, "ip", RTMNewLink, 0, "nlat0", NLMFCreate|0x1|0x200, 1000))
+	for _, name := range []string{"nlat0", "nlat1"} {
+		e := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: name, InterfaceIndex: 9, ObservedAt: at(1020)}
+		if a, _ := j.Attribute(e); a == nil || a.Comm != "ip" {
+			t.Fatalf("a create must explain %s, the peer included: %+v", name, a)
+		}
+	}
+}
+
+func TestAnIndexWinsOverAName(t *testing.T) {
+	// When a request gives an index the name is not consulted.
+	j := joiner()
+	j.Add(linkRec(7, "ip", RTMSetLink, 5, "stale-name", 0x1, 1000))
+	e := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "nlat1", InterfaceIndex: 5, ObservedAt: at(1020)}
+	if a, _ := j.Attribute(e); a == nil {
+		t.Fatal("a request naming ifindex 5 must explain a change on ifindex 5 whatever the name says")
+	}
+	// An event with no name cannot be ruled out by one.
+	j2 := joiner()
+	j2.Add(linkRec(8, "ip", RTMNewLink, 0, "nlat1", 0x1, 1000))
+	anon := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", InterfaceIndex: 5, ObservedAt: at(1020)}
+	if a, _ := j2.Attribute(anon); a == nil {
+		t.Fatal("an event without a name must not be excluded by a request's name")
+	}
+}

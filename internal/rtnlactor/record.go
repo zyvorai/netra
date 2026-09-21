@@ -24,7 +24,11 @@ import (
 )
 
 // EventSize is the size of the kernel's struct rtnl_event (bpf/netra_rtnl.c).
-const EventSize = 64
+const EventSize = 88
+
+// NLMFCreate is NLM_F_CREATE: the request creates an object rather than operating
+// on an existing one.
+const NLMFCreate = 0x400
 
 // Address families as a route request carries them (rtm_family).
 const (
@@ -57,10 +61,17 @@ type Record struct {
 	TGID, PID uint32
 	// Type is the RTM_* message type.
 	Type uint16
-	// IfIndex is the interface the request names: the fixed field of a link,
-	// address or neighbor request, or a route's RTA_OIF. 0 when it names none (a link
-	// create names its interface by name) or the route is multipath.
+	// Flags is the message's nlmsg_flags; NLMFCreate marks a create.
+	Flags uint16
+	// IfIndex is the interface the request names by index: the fixed field of a link,
+	// address or neighbor request, or a route's RTA_OIF. 0 when it names none by
+	// index (a route may be multipath, and modern `ip link set dev X` names the device
+	// only by name).
 	IfIndex uint32
+	// IfName is the device a link request names by IFLA_IFNAME when it gives no
+	// index; empty otherwise. For a create it is the new link's name, which says
+	// nothing about a peer created with it.
+	IfName string
 	// Dest is a route request's destination in the form the recorder uses for the
 	// change it causes ("10.91.0.0/24", "2001:db8::/32", "default"); empty for every
 	// other kind of request. Two processes adding routes on one interface in the same
@@ -82,9 +93,11 @@ func Parse(b []byte) (Record, error) {
 		TGID:     le.Uint32(b[16:20]),
 		PID:      le.Uint32(b[20:24]),
 		Type:     le.Uint16(b[24:26]),
+		Flags:    le.Uint16(b[26:28]),
 		IfIndex:  le.Uint32(b[28:32]),
-		Comm:     comm(b[32:48]),
-		Dest:     routeDest(le.Uint16(b[24:26]), b[26], b[27], b[48:64]),
+		Comm:     comm(b[40:56]),
+		Dest:     routeDest(le.Uint16(b[24:26]), b[32], b[33], b[56:72]),
+		IfName:   comm(b[72:88]),
 	}, nil
 }
 

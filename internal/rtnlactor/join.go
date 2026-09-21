@@ -153,6 +153,12 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 		if r.IfIndex != 0 && e.InterfaceIndex != 0 && r.IfIndex != uint32(e.InterfaceIndex) {
 			continue
 		}
+		// A link request that names its device only by name (`ip link set dev X` sends
+		// index 0 and IFLA_IFNAME) only explains a change to that device. A create is
+		// exempt: it also creates a peer whose name is not in that attribute.
+		if r.IfIndex == 0 && r.IfName != "" && r.Flags&NLMFCreate == 0 && e.Interface != "" && r.IfName != e.Interface {
+			continue
+		}
 		// A route request names its destination: it only explains the change to that
 		// prefix, so two processes adding routes on one interface in the same instant
 		// are still told apart. A request whose destination is unknown matches any.

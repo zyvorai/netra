@@ -13,18 +13,21 @@
 //   - its cgroup id (userspace maps it to a workload; it is the same id the rest
 //     of the agent already uses),
 //   - the RTM_* message type,
-//   - the interface index the request names (0 when it names none, as a link
-//     create does): a fixed field for link, address and neighbor requests, and the
-//     RTA_OIF attribute for a route,
+//   - the interface the request names: an index (a fixed field for address and
+//     neighbor requests, RTA_OIF for a route, and for a link request when it gives
+//     one) or, for a link request that names its device only by name (modern
+//     `ip link set dev X` sends index 0 and IFLA_IFNAME, so altnames work), the
+//     name, plus the message flags so a create (which also creates a peer whose name
+//     is not in that attribute) can be told from an operation on an existing link,
 //   - for a route, its destination (RTA_DST and the prefix length), since two
 //     processes can add routes on one interface in the same instant and only the
 //     destination tells them apart, and
 //   - a monotonic timestamp (userspace joins it to the recorded change by type,
 //     interface, destination and time).
 //
-// Not recorded: argv, environment, or any of the message beyond the interface index
-// and, for a route, its destination: values the recorder already publishes about the
-// change. Read-only requests (RTM_GET*, dumps) are dropped in the
+// Not recorded: argv, environment, or any of the message beyond the interface (index
+// or name) and, for a route, its destination: values the recorder already publishes
+// about the change. Read-only requests (RTM_GET*, dumps) are dropped in the
 // kernel before anything is reserved, so a monitoring tool listing routes costs
 // nothing. It only observes: the return value is ignored and no packet, message or
 // program state is changed.
@@ -54,6 +57,7 @@
 
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)BPF_FUNC_map_lookup_elem;
 static long (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)BPF_FUNC_probe_read_kernel;
+static long (*bpf_probe_read_kernel_str)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)BPF_FUNC_probe_read_kernel_str;
 static __u64 (*bpf_ktime_get_ns)(void) = (void *)BPF_FUNC_ktime_get_ns;
 static __u64 (*bpf_get_current_pid_tgid)(void) = (void *)BPF_FUNC_get_current_pid_tgid;
 static __u64 (*bpf_get_current_cgroup_id)(void) = (void *)BPF_FUNC_get_current_cgroup_id;
@@ -72,18 +76,21 @@ struct rtnl_nlmsghdr {
 };
 
 /* One request that modifies network state. Mirrored by internal/rtnlactor.Record;
- * 64 bytes, little endian, checked by both sides. */
+ * 88 bytes, little endian, checked by both sides. */
 struct rtnl_event {
-	__u64 ts_ns;      /* bpf_ktime_get_ns(): CLOCK_MONOTONIC */
-	__u64 cgroup_id;  /* the requester's cgroup */
-	__u32 tgid;       /* process id */
-	__u32 pid;        /* thread id */
-	__u16 nlmsg_type; /* RTM_NEWLINK ... */
-	__u8 family;      /* routes: rtm_family */
-	__u8 dst_len;     /* routes: rtm_dst_len (the prefix length) */
-	__u32 ifindex;    /* the interface the request names, 0 if none */
+	__u64 ts_ns;       /* bpf_ktime_get_ns(): CLOCK_MONOTONIC */
+	__u64 cgroup_id;   /* the requester's cgroup */
+	__u32 tgid;        /* process id */
+	__u32 pid;         /* thread id */
+	__u16 nlmsg_type;  /* RTM_NEWLINK ... */
+	__u16 nlmsg_flags; /* NLM_F_CREATE (0x400) marks a create */
+	__u32 ifindex;     /* the interface the request names by index, 0 if none */
+	__u8 family;       /* routes: rtm_family */
+	__u8 dst_len;      /* routes: rtm_dst_len (the prefix length) */
+	__u8 _pad[6];
 	char comm[16];
-	__u8 dst[16];     /* routes: RTA_DST (4 bytes of IPv4 or 16 of IPv6), else zero */
+	__u8 dst[16];      /* routes: RTA_DST (4 bytes of IPv4 or 16 of IPv6), else zero */
+	char ifname[16];   /* link requests naming the device by IFLA_IFNAME, else empty */
 };
 
 struct {
@@ -130,6 +137,7 @@ static inline int names_interface(__u16 t)
 
 #define RTA_DST_TYPE 1
 #define RTA_OIF_TYPE 4
+#define IFLA_IFNAME_TYPE 3
 
 /* struct rtattr, restated (uAPI). */
 struct rtnl_rtattr {
@@ -179,6 +187,32 @@ static inline void route_fields(struct rtnl_event *e, const char *nlh, __u32 msg
 	}
 }
 
+/* A link request names its device by index (ifi_index, at byte 4 of the ifinfomsg)
+ * or, when that is 0, by name in an IFLA_IFNAME attribute after the 16-byte
+ * ifinfomsg. Walk a bounded number of attributes for the name. */
+static inline void link_name(struct rtnl_event *e, const char *nlh, __u32 msglen)
+{
+	__u32 off = 16 + 16; /* NLMSG_HDRLEN + sizeof(struct ifinfomsg) */
+	int i;
+
+#pragma unroll
+	for (i = 0; i < 24; i++) {
+		struct rtnl_rtattr a = {};
+
+		if (off + 4 > msglen)
+			break;
+		if (bpf_probe_read_kernel(&a, sizeof(a), nlh + off) != 0)
+			break;
+		if (a.rta_len < 4)
+			break;
+		if (a.rta_type == IFLA_IFNAME_TYPE) {
+			bpf_probe_read_kernel_str(e->ifname, sizeof(e->ifname), nlh + off + 4);
+			break;
+		}
+		off += ((__u32)a.rta_len + 3) & ~3U;
+	}
+}
+
 /* rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
  *                   struct netlink_ext_ack *extack): the fentry context is the
  * array of the traced function's arguments. */
@@ -208,15 +242,21 @@ int netra_rtnl_msg(unsigned long long *ctx)
 	e->tgid = pt >> 32;
 	e->pid = (__u32)pt;
 	e->nlmsg_type = hdr.nlmsg_type;
+	e->nlmsg_flags = hdr.nlmsg_flags;
 	e->family = 0;
 	e->dst_len = 0;
 	e->ifindex = 0;
 	/* The ring buffer hands back uninitialised memory: never let it reach userspace. */
+	__builtin_memset(e->_pad, 0, sizeof(e->_pad));
 	__builtin_memset(e->dst, 0, sizeof(e->dst));
+	__builtin_memset(e->ifname, 0, sizeof(e->ifname));
 	if (names_interface(hdr.nlmsg_type)) {
 		__s32 idx = 0;
 		if (bpf_probe_read_kernel(&idx, sizeof(idx), (const char *)ctx[1] + 20) == 0 && idx > 0)
 			e->ifindex = (__u32)idx;
+		/* A link request may name its device only by name. */
+		if (e->ifindex == 0 && (hdr.nlmsg_type == 16 || hdr.nlmsg_type == 17 || hdr.nlmsg_type == 19))
+			link_name(e, (const char *)ctx[1], hdr.nlmsg_len);
 	} else if (hdr.nlmsg_type == 24 || hdr.nlmsg_type == 25) {
 		route_fields(e, (const char *)ctx[1], hdr.nlmsg_len);
 	}

@@ -31,8 +31,8 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
   read-only RTNL observation. Never add a route/link/address/neighbor/rule
   mutation to it or wire it to one. Its requester attribution (`internal/rtnlactor`,
   `bpf/netra_rtnl.c`) records only comm, pid and cgroup of the requester, the
-  interface index and, for a route, its destination: never argv, environment or
-  any other part of the message. Details: `docs/netlink-recorder.md`.
+  interface (index or name) and, for a route, its destination: never argv,
+  environment or any other part of the message. Details: `docs/netlink-recorder.md`.
 - New source files need the `LicenseRef-Zyvor-Production-1.0` SPDX header used everywhere else.
 - P0–P5 observe surfaces catalog: `docs/p0-p5-surfaces.md`. Buyer narrative:
   `docs/sales/buyers-guide.md`.

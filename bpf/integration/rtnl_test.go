@@ -100,6 +100,18 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 	if child.CgroupID == 0 || child.PID == 0 {
 		t.Fatalf("child record lacks ids: %+v", child)
 	}
+	// `ip link add nlrt0 ...` is a create naming the new device by IFLA_IFNAME.
+	if child.Flags&rtnlactor.NLMFCreate == 0 || child.IfName != "nlrt0" {
+		t.Fatalf("the create request must carry NLM_F_CREATE and the name nlrt0: flags=%#x name=%q", child.Flags, child.IfName)
+	}
+	// `ip link set nlrt0 up` operates on an existing device: it names it by index or, as
+	// modern iproute2 does, by IFLA_IFNAME with index 0. Either way the request must say which.
+	set := next(t, ch, "RTM_NEWLINK for ip link set nlrt0 up", func(r rtnlactor.Record) bool {
+		return r.Type == rtnlactor.RTMNewLink && r.Comm == "ip" && r.TGID != me && r.Flags&rtnlactor.NLMFCreate == 0
+	})
+	if set.IfIndex != uint32(link.Attrs().Index) && set.IfName != "nlrt0" {
+		t.Fatalf("a request on an existing link must name it (ifindex %d or name nlrt0): %+v", link.Attrs().Index, set)
+	}
 
 	// This process: an address, a route, and the route's removal, over our own netlink socket.
 	_, dst, _ := net.ParseCIDR("10.93.0.0/24")

@@ -21,6 +21,11 @@ func eventOn(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, co
 // routeEvent builds a struct rtnl_event the way the kernel program lays it out,
 // including the route fields (family, dst_len, RTA_DST bytes).
 func routeEvent(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, comm string, family, dstLen uint8, dst []byte) []byte {
+	return fullEvent(ts, cgroup, tgid, pid, typ, 0, ifindex, comm, family, dstLen, dst, "")
+}
+
+// fullEvent builds a struct rtnl_event byte for byte as bpf/netra_rtnl.c lays it out.
+func fullEvent(ts, cgroup uint64, tgid, pid uint32, typ, flags uint16, ifindex uint32, comm string, family, dstLen uint8, dst []byte, ifname string) []byte {
 	b := make([]byte, EventSize)
 	le := binary.LittleEndian
 	le.PutUint64(b[0:], ts)
@@ -28,10 +33,12 @@ func routeEvent(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32,
 	le.PutUint32(b[16:], tgid)
 	le.PutUint32(b[20:], pid)
 	le.PutUint16(b[24:], typ)
-	b[26], b[27] = family, dstLen
+	le.PutUint16(b[26:], flags)
 	le.PutUint32(b[28:], ifindex)
-	copy(b[32:], comm)
-	copy(b[48:], dst)
+	b[32], b[33] = family, dstLen
+	copy(b[40:], comm)
+	copy(b[56:], dst)
+	copy(b[72:], ifname)
 	return b
 }
 
@@ -82,16 +89,38 @@ func TestParseRouteDestinationIsFormattedLikeTheRecorder(t *testing.T) {
 	}
 }
 
+func TestParseDecodesTheFlagsAndTheDeviceNameOfALinkRequest(t *testing.T) {
+	// `ip link set dev nlat1 down`: index 0, the device named in IFLA_IFNAME, no create flag.
+	r, err := Parse(fullEvent(1, 2, 3, 4, RTMNewLink, 0x1|0x4, 0, "ip", 0, 0, nil, "nlat1"))
+	if err != nil || r.IfName != "nlat1" || r.IfIndex != 0 || r.Flags&NLMFCreate != 0 {
+		t.Fatalf("record=%+v err=%v", r, err)
+	}
+	// `ip link add nlat0 type veth peer name nlat1`: NLM_F_CREATE.
+	r, _ = Parse(fullEvent(1, 2, 3, 4, RTMNewLink, NLMFCreate|0x1|0x200, 0, "ip", 0, 0, nil, "nlat0"))
+	if r.Flags&NLMFCreate == 0 || r.IfName != "nlat0" {
+		t.Fatalf("create record=%+v", r)
+	}
+	// The comm and the name come from different fields and must not bleed into each other.
+	if r.Comm != "ip" {
+		t.Fatalf("comm=%q", r.Comm)
+	}
+	// A 15-character name (the longest an interface can have) is read whole.
+	r, _ = Parse(fullEvent(1, 2, 3, 4, RTMDelLink, 0, 0, "ip", 0, 0, nil, "abcdefghijklmno"))
+	if r.IfName != "abcdefghijklmno" {
+		t.Fatalf("name=%q", r.IfName)
+	}
+}
+
 func TestParseComm(t *testing.T) {
 	// A full 15-character name has its NUL at byte 15; a 16-byte field with no NUL
 	// (never produced by the kernel, but defensive) is taken whole.
 	full := make([]byte, EventSize)
-	copy(full[32:], "bpfintegration.")
+	copy(full[40:], "bpfintegration.")
 	if r, _ := Parse(full); r.Comm != "bpfintegration." {
 		t.Fatalf("comm=%q", r.Comm)
 	}
 	noNul := make([]byte, EventSize)
-	copy(noNul[32:], "0123456789abcdef")
+	copy(noNul[40:], "0123456789abcdef")
 	if r, _ := Parse(noNul); r.Comm != "0123456789abcdef" {
 		t.Fatalf("comm=%q", r.Comm)
 	}
@@ -112,8 +141,8 @@ func TestParseRejectsAShortRecord(t *testing.T) {
 }
 
 func TestEventSizeMatchesTheKernelStruct(t *testing.T) {
-	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 1 family + 1 dst_len + 4 ifindex + 16 comm + 16 dst.
-	if EventSize != 8+8+4+4+2+1+1+4+16+16 {
+	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 2 flags + 4 ifindex + 1 family + 1 dst_len + 6 pad + 16 comm + 16 dst + 16 ifname.
+	if EventSize != 8+8+4+4+2+2+4+1+1+6+16+16+16 {
 		t.Fatalf("EventSize=%d", EventSize)
 	}
 }
