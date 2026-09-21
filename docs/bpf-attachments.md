@@ -22,9 +22,11 @@ the agent believes it attached.
 | TCX ingress / egress | `bpf(BPF_PROG_QUERY)` | programs in **execution order**; needs kernel 6.6+ |
 | Classic tc (`cls_bpf`) | Netlink filter list on the `clsact` ingress/egress parents | the mechanism Cilium uses on older kernels |
 
-For each program it keeps only the id, the name the kernel already exposes (the
-kernel truncates it to 15 characters, so `netra_edge_ingress` is
-`netra_edge_ingr`) and an owner class: `netra` (`netra_*`), `cilium` (`cil_*`) or
+For each program it keeps only the id, the name the kernel already exposes and
+an owner class. The kernel reports a name either in full or truncated to 15
+characters (`netra_edge_ingress` or `netra_edge_ingr`), depending on the kernel and
+on whether it has BTF function info for the program; both are accepted as the same
+program. The owner classes are `netra` (`netra_*`), `cilium` (`cil_*`) or
 `other`. It never reads bytecode, never reads or touches a map, and **never
 attaches, detaches or replaces anything**. Cilium's programs are listed and left
 alone, so the Cilium coexistence rules are unchanged.

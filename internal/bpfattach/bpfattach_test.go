@@ -60,11 +60,19 @@ func TestOwnerClassificationAndKernelNameTruncation(t *testing.T) {
 			t.Errorf("OwnerOf(%q)=%q, want %q", name, got, want)
 		}
 	}
-	// The kernel keeps 15 characters, so the agent's long names must still match.
-	if !Same("netra_edge_ingress", "netra_edge_ingr") || !Same("netra_ingress", "netra_ingress") {
-		t.Fatal("truncated kernel names must match the agent's names")
+	// The kernel reports either the full name (BTF function info present, as on
+	// current x86_64 and arm64 kernels) or its 15-character truncation. Both are
+	// the same program; matching only one form reported every long-named Netra
+	// program as missing on a real kernel.
+	for _, reported := range []string{"netra_edge_ingress", "netra_edge_ingr"} {
+		if !Same("netra_edge_ingress", reported) {
+			t.Fatalf("%q must match netra_edge_ingress", reported)
+		}
 	}
-	if Same("netra_edge_ingress", "netra_edge_egres") || Same("netra_ingress", "cil_from_netdev") {
+	if !Same("netra_ingress", "netra_ingress") {
+		t.Fatal("a short name matches itself")
+	}
+	if Same("netra_edge_ingress", "netra_edge_egres") || Same("netra_edge_ingress", "netra_edge_egress") || Same("netra_ingress", "cil_from_netdev") {
 		t.Fatal("different programs must not match")
 	}
 }

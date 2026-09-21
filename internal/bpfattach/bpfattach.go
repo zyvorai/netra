@@ -39,8 +39,12 @@ const MaxInterfaces = 200
 // maxFailed bounds how many unreadable interfaces one report names.
 const maxFailed = 50
 
-// kernelNameLen is BPF_OBJ_NAME_LEN-1: the kernel keeps only the first 15
-// characters of a program name, so "netra_edge_ingress" is "netra_edge_ingr".
+// kernelNameLen is BPF_OBJ_NAME_LEN-1: the kernel's own name field keeps only the
+// first 15 characters, so "netra_edge_ingress" is "netra_edge_ingr" there. But
+// when the kernel has BTF function info for the program (the case on current
+// kernels, x86_64 and arm64 alike) the name comes back in full, so a reported
+// name can be either form. A real-kernel test found this: matching only the
+// truncated form reported every long-named Netra program as missing.
 const kernelNameLen = 15
 
 // LinkInfo is what the inventory needs to know about one interface.
@@ -83,7 +87,8 @@ func OwnerOf(name string) string {
 	return models.BPFOwnerOther
 }
 
-// KernelName is what the kernel reports for a program the agent named name.
+// KernelName is the truncated form of a program name, as the kernel's fixed-size
+// name field holds it.
 func KernelName(name string) string {
 	if len(name) > kernelNameLen {
 		return name[:kernelNameLen]
@@ -92,8 +97,12 @@ func KernelName(name string) string {
 }
 
 // Same reports whether a kernel-reported program name is the program the agent
-// loaded under expected.
-func Same(expected, kernelName string) bool { return KernelName(expected) == kernelName }
+// loaded under expected. The kernel may report the full name or its 15-character
+// truncation depending on the kernel and whether BTF function info is present;
+// both are the same program.
+func Same(expected, reported string) bool {
+	return reported == expected || reported == KernelName(expected)
+}
 
 // Collect inventories every non-loopback interface that has at least one
 // program. A query that fails for one interface (it vanished, or the kernel

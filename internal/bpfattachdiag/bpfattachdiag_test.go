@@ -77,12 +77,18 @@ func TestInterfaceGoneFromTheInventoryIsAlsoMissing(t *testing.T) {
 	}
 }
 
-func TestLongProgramNamesMatchTheirKernelTruncation(t *testing.T) {
-	// The kernel keeps 15 characters: netra_edge_ingress is netra_edge_ingr.
-	a := agent("n1", []string{"edge-tcx-ingress:eth0", "capture-tcx-ingress:eth0"}, []string{"eth0"},
-		inventory(eth0([]models.BPFProgram{prog("netra_edge_ingr"), prog("netra_capture_i")}, nil)))
-	if r := Build([]models.AgentStatus{a}, now); len(r.Findings) != 0 {
-		t.Fatalf("truncated names must match: %v", kinds(r))
+func TestLongProgramNamesMatchInFullOrTruncatedForm(t *testing.T) {
+	hooks := []string{"edge-tcx-ingress:eth0", "capture-tcx-ingress:eth0"}
+	// The kernel reports the full name when it has BTF function info (real kernels
+	// on x86_64 and arm64 did), and 15 characters otherwise: both are the program.
+	for name, progs := range map[string][]models.BPFProgram{
+		"truncated": {prog("netra_edge_ingr"), prog("netra_capture_i")},
+		"full":      {prog("netra_edge_ingress"), prog("netra_capture_ingress")},
+	} {
+		a := agent("n1", hooks, []string{"eth0"}, inventory(eth0(progs, nil)))
+		if r := Build([]models.AgentStatus{a}, now); len(r.Findings) != 0 {
+			t.Fatalf("%s names must match: %v", name, kinds(r))
+		}
 	}
 }
 
