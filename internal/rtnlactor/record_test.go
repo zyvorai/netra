@@ -15,6 +15,12 @@ func event(ts, cgroup uint64, tgid, pid uint32, typ uint16, comm string) []byte 
 }
 
 func eventOn(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, comm string) []byte {
+	return routeEvent(ts, cgroup, tgid, pid, typ, ifindex, comm, 0, 0, nil)
+}
+
+// routeEvent builds a struct rtnl_event the way the kernel program lays it out,
+// including the route fields (family, dst_len, RTA_DST bytes).
+func routeEvent(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, comm string, family, dstLen uint8, dst []byte) []byte {
 	b := make([]byte, EventSize)
 	le := binary.LittleEndian
 	le.PutUint64(b[0:], ts)
@@ -22,8 +28,10 @@ func eventOn(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, co
 	le.PutUint32(b[16:], tgid)
 	le.PutUint32(b[20:], pid)
 	le.PutUint16(b[24:], typ)
+	b[26], b[27] = family, dstLen
 	le.PutUint32(b[28:], ifindex)
 	copy(b[32:], comm)
+	copy(b[48:], dst)
 	return b
 }
 
@@ -44,6 +52,33 @@ func TestParseDecodesTheInterfaceIndex(t *testing.T) {
 	}
 	if r, _ := Parse(event(1, 2, 3, 4, RTMNewRoute, "ip")); r.IfIndex != 0 {
 		t.Fatalf("a route request names no interface, got %d", r.IfIndex)
+	}
+}
+
+func TestParseRouteDestinationIsFormattedLikeTheRecorder(t *testing.T) {
+	v4 := routeEvent(1, 2, 3, 4, RTMNewRoute, 7, "ip", afInet, 24, []byte{10, 91, 0, 0})
+	if r, _ := Parse(v4); r.Dest != "10.91.0.0/24" || r.IfIndex != 7 {
+		t.Fatalf("v4 record=%+v", r)
+	}
+	v6 := routeEvent(1, 2, 3, 4, RTMDelRoute, 0, "ip", afInet6, 32,
+		[]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	if r, _ := Parse(v6); r.Dest != "2001:db8::/32" {
+		t.Fatalf("v6 record=%+v", r)
+	}
+	// dst_len 0 with no RTA_DST is the default route, as the recorder calls it.
+	if r, _ := Parse(routeEvent(1, 2, 3, 4, RTMNewRoute, 0, "ip", afInet, 0, nil)); r.Dest != "default" {
+		t.Fatalf("default route dest=%q", r.Dest)
+	}
+	// Not a route request: no destination.
+	if r, _ := Parse(routeEvent(1, 2, 3, 4, RTMNewAddr, 0, "ip", afInet, 24, []byte{10, 0, 0, 0})); r.Dest != "" {
+		t.Fatalf("an address request has no route destination, got %q", r.Dest)
+	}
+	// An impossible prefix length or an unknown family is not guessed at.
+	if r, _ := Parse(routeEvent(1, 2, 3, 4, RTMNewRoute, 0, "ip", afInet, 40, []byte{10, 0, 0, 0})); r.Dest != "" {
+		t.Fatalf("a /40 IPv4 prefix must not be formatted, got %q", r.Dest)
+	}
+	if r, _ := Parse(routeEvent(1, 2, 3, 4, RTMNewRoute, 0, "ip", 99, 24, []byte{10, 0, 0, 0})); r.Dest != "" {
+		t.Fatalf("an unknown family must not be formatted, got %q", r.Dest)
 	}
 }
 
@@ -77,8 +112,8 @@ func TestParseRejectsAShortRecord(t *testing.T) {
 }
 
 func TestEventSizeMatchesTheKernelStruct(t *testing.T) {
-	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 2 + 4 pad + 16 comm.
-	if EventSize != 8+8+4+4+2+2+4+16 {
+	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 1 family + 1 dst_len + 4 ifindex + 16 comm + 16 dst.
+	if EventSize != 8+8+4+4+2+1+1+4+16+16 {
 		t.Fatalf("EventSize=%d", EventSize)
 	}
 }

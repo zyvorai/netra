@@ -207,3 +207,71 @@ func TestStatusCountsRecordsAndDrops(t *testing.T) {
 		t.Fatalf("status=%+v", s)
 	}
 }
+
+func routeRec(tgid uint32, comm string, typ uint16, ifindex uint32, dest string, ms int) Record {
+	r := rec(tgid, comm, typ, ifindex, ms)
+	r.Dest = dest
+	return r
+}
+
+func routeTo(action, dst string, ifindex, ms int) models.NetlinkEvent {
+	return models.NetlinkEvent{Kind: models.NetlinkKindRoute, Action: action, Destination: dst, InterfaceIndex: ifindex, ObservedAt: at(ms)}
+}
+
+// The case that failed on a real kernel: two processes add a route on the SAME
+// interface in the same instant. Neither interface nor time separates them; the
+// destination does.
+func TestTwoProcessesAddingRoutesOnOneInterfaceAreToldApartByDestination(t *testing.T) {
+	j := joiner()
+	j.Add(routeRec(11, "ip", RTMNewRoute, 4, "10.91.0.0/24", 1000))
+	j.Add(routeRec(22, "calico-node", RTMNewRoute, 4, "10.90.0.0/24", 1100))
+
+	a, origin := j.Attribute(routeTo("new", "10.91.0.0/24", 4, 1150))
+	if origin != models.NetlinkOriginProcess || a == nil || a.Comm != "ip" || a.Confidence != models.NetlinkActorProbable {
+		t.Fatalf("10.91.0.0/24 must be ip's: %+v %q", a, origin)
+	}
+	a, _ = j.Attribute(routeTo("new", "10.90.0.0/24", 4, 1150))
+	if a == nil || a.Comm != "calico-node" || a.Confidence != models.NetlinkActorProbable {
+		t.Fatalf("10.90.0.0/24 must be calico-node's: %+v", a)
+	}
+}
+
+func TestTheSameRouteFromTwoProcessesIsStillAmbiguous(t *testing.T) {
+	j := joiner()
+	j.Add(routeRec(11, "ip", RTMNewRoute, 4, "10.91.0.0/24", 1000))
+	j.Add(routeRec(22, "calico-node", RTMNewRoute, 4, "10.91.0.0/24", 1050))
+	a, _ := j.Attribute(routeTo("new", "10.91.0.0/24", 4, 1100))
+	if a == nil || a.Confidence != models.NetlinkActorAmbiguous || a.Candidates != 2 {
+		t.Fatalf("two requests for the very same prefix cannot be told apart: %+v", a)
+	}
+}
+
+func TestARouteRequestForAnotherInterfaceOrPrefixDoesNotExplainThisOne(t *testing.T) {
+	j := joiner()
+	j.Add(routeRec(1, "ip", RTMNewRoute, 4, "10.91.0.0/24", 1000))
+	if a, origin := j.Attribute(routeTo("new", "10.91.0.0/24", 9, 1050)); a != nil || origin != models.NetlinkOriginKernel {
+		t.Fatalf("a route on another interface was credited: %+v %q", a, origin)
+	}
+	if a, origin := j.Attribute(routeTo("new", "10.99.0.0/24", 4, 1050)); a != nil || origin != models.NetlinkOriginKernel {
+		t.Fatalf("a route to another prefix was credited: %+v %q", a, origin)
+	}
+	// A default route is a destination too.
+	j2 := joiner()
+	j2.Add(routeRec(2, "dhclient", RTMNewRoute, 4, "default", 1000))
+	if a, _ := j2.Attribute(routeTo("new", "default", 4, 1050)); a == nil || a.Comm != "dhclient" {
+		t.Fatalf("a default route must match a default request: %+v", a)
+	}
+	if a, _ := j2.Attribute(routeTo("new", "10.0.0.0/8", 4, 1050)); a != nil {
+		t.Fatalf("a default-route request must not explain a /8: %+v", a)
+	}
+}
+
+func TestARequestWithNoKnownDestinationOrInterfaceStillMatches(t *testing.T) {
+	// A multipath route has no single output interface, and a request the kernel program
+	// could not fully read has no destination: neither may rule the request out.
+	j := joiner()
+	j.Add(routeRec(5, "ip", RTMNewRoute, 0, "", 1000))
+	if a, _ := j.Attribute(routeTo("new", "10.91.0.0/24", 4, 1050)); a == nil || a.Comm != "ip" {
+		t.Fatalf("a request with unknown destination and interface must still match: %+v", a)
+	}
+}

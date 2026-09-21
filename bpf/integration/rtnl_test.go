@@ -120,6 +120,11 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 	if add.Comm != comm || add.CgroupID == 0 || add.PID == 0 {
 		t.Fatalf("route record=%+v, want comm %q with a cgroup", add, comm)
 	}
+	// A route request names its output interface (RTA_OIF) and its destination
+	// (RTA_DST + prefix length): the kernel program must have read both.
+	if add.IfIndex != uint32(link.Attrs().Index) || add.Dest != "10.93.0.0/24" {
+		t.Fatalf("route record names ifindex %d dest %q, want %d and 10.93.0.0/24", add.IfIndex, add.Dest, link.Attrs().Index)
+	}
 	if age := time.Since(add.Wall); age < 0 || age > 30*time.Second {
 		t.Fatalf("the wall time is off by %s: the monotonic-to-wall conversion is wrong", age)
 	}

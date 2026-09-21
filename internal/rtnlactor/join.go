@@ -153,6 +153,12 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 		if r.IfIndex != 0 && e.InterfaceIndex != 0 && r.IfIndex != uint32(e.InterfaceIndex) {
 			continue
 		}
+		// A route request names its destination: it only explains the change to that
+		// prefix, so two processes adding routes on one interface in the same instant
+		// are still told apart. A request whose destination is unknown matches any.
+		if r.Dest != "" && e.Destination != "" && r.Dest != e.Destination {
+			continue
+		}
 		byTGID[r.TGID] = r // the latest request of each process
 	}
 

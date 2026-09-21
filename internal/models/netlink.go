@@ -65,7 +65,7 @@ const (
 // type, interface and time. It is a join, not proof: "probable" means exactly one
 // requester issued a matching request at that moment, and two requesters in the
 // same instant are reported as ambiguous rather than picked between. Only the
-// process name, ids and cgroup are captured; never argv, environment or payload.
+// process name, ids and cgroup are captured; never argv, environment or message content.
 type NetlinkActor struct {
 	Confidence string `json:"confidence"`
 	Comm       string `json:"comm,omitempty"`

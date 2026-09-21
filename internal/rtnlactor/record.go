@@ -18,12 +18,19 @@ package rtnlactor
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
 
 // EventSize is the size of the kernel's struct rtnl_event (bpf/netra_rtnl.c).
-const EventSize = 48
+const EventSize = 64
+
+// Address families as a route request carries them (rtm_family).
+const (
+	afInet  = 2
+	afInet6 = 10
+)
 
 // RTM_* message types the program records, restated from linux/rtnetlink.h.
 const (
@@ -50,10 +57,15 @@ type Record struct {
 	TGID, PID uint32
 	// Type is the RTM_* message type.
 	Type uint16
-	// IfIndex is the interface the request names: set for link, address and
-	// neighbor requests that carry one, 0 otherwise (a link create names its
-	// interface by name, and routes carry it in an attribute).
+	// IfIndex is the interface the request names: the fixed field of a link,
+	// address or neighbor request, or a route's RTA_OIF. 0 when it names none (a link
+	// create names its interface by name) or the route is multipath.
 	IfIndex uint32
+	// Dest is a route request's destination in the form the recorder uses for the
+	// change it causes ("10.91.0.0/24", "2001:db8::/32", "default"); empty for every
+	// other kind of request. Two processes adding routes on one interface in the same
+	// instant are told apart by it.
+	Dest string
 	// Comm is the process name (at most 15 characters, as the kernel keeps it).
 	Comm string
 }
@@ -72,7 +84,33 @@ func Parse(b []byte) (Record, error) {
 		Type:     le.Uint16(b[24:26]),
 		IfIndex:  le.Uint32(b[28:32]),
 		Comm:     comm(b[32:48]),
+		Dest:     routeDest(le.Uint16(b[24:26]), b[26], b[27], b[48:64]),
 	}, nil
+}
+
+// routeDest formats a route request's destination like netlinkwatch does for the
+// recorded change: a CIDR, or "default" for a prefix length of 0.
+func routeDest(typ uint16, family, dstLen uint8, dst []byte) string {
+	if typ != RTMNewRoute && typ != RTMDelRoute {
+		return ""
+	}
+	if dstLen == 0 {
+		return "default"
+	}
+	var ip net.IP
+	var bits int
+	switch family {
+	case afInet:
+		ip, bits = net.IP(dst[:4]), 32
+	case afInet6:
+		ip, bits = net.IP(dst[:16]), 128
+	default:
+		return ""
+	}
+	if int(dstLen) > bits {
+		return ""
+	}
+	return (&net.IPNet{IP: ip, Mask: net.CIDRMask(int(dstLen), bits)}).String()
 }
 
 // comm reads a NUL-terminated kernel task name.

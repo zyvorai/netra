@@ -84,10 +84,14 @@ A multicast notification says that something changed, not who asked. `bpf/netra_
 is an `fentry` on `rtnetlink_rcv_msg`, which runs synchronously in the task that
 called `sendmsg()` on its netlink socket, so at that point the current task is the
 requester. For each request that **modifies** state it records the process's `comm`
-(its 16-byte name), pid, cgroup id, the `RTM_*` type and, for link, address and
-neighbor requests, the interface index. Read-only requests (`RTM_GET*`, dumps) are
-dropped in the kernel before anything is reserved. It captures **no argv, no
-environment and no message payload**, and it only observes.
+(its 16-byte name), pid, cgroup id, the `RTM_*` type and the interface index the
+request names (a fixed field of link, address and neighbor requests; `RTA_OIF` for a
+route). For a route it also reads the destination (`RTA_DST` and the prefix length),
+because two processes can add routes on one interface in the same instant and only the
+destination tells them apart. Read-only requests (`RTM_GET*`, dumps) are dropped in the
+kernel before anything is reserved. It captures **no argv and no environment**, and
+nothing of a message beyond the interface index and a route's destination, which are the
+same values the recorder already publishes about the change; it only observes.
 
 The agent joins each recorded change to the request behind it by message type,
 interface and time (a request is looked for in the 750 ms before the notification
@@ -107,7 +111,10 @@ The join is strict about what it claims:
 - **Interface matters.** A request for one interface does not explain a change on
   another, so a veth's carrier loss is not credited to the `ip link set <peer> down`
   that happened at the same instant. A link create names no interface and matches any.
-  Routes carry no interface index, so a route change is matched by type and time alone.
+- **So does the route's destination.** Two processes adding routes on one interface in
+  the same instant are told apart by prefix (`10.90.0.0/24` is one process's,
+  `10.91.0.0/24` the other's). Two requests for the very same prefix cannot be, and are
+  reported as ambiguous. A multipath route names no single interface and matches any.
 - **`origin: "kernel"` is only claimed when nothing weakens it:** the sensor was already
   running before the change, the kernel has not dropped requests around then (the
   ring buffer is 256 KiB; `actor.dropped` counts overflows), and the ring of recent

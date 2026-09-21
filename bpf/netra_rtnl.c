@@ -13,14 +13,18 @@
 //   - its cgroup id (userspace maps it to a workload; it is the same id the rest
 //     of the agent already uses),
 //   - the RTM_* message type,
-//   - for link, address and neighbor requests, the interface index the request
-//     names (0 when it names none, as a link create does, and for routes, which
-//     carry the interface in an attribute), and
+//   - the interface index the request names (0 when it names none, as a link
+//     create does): a fixed field for link, address and neighbor requests, and the
+//     RTA_OIF attribute for a route,
+//   - for a route, its destination (RTA_DST and the prefix length), since two
+//     processes can add routes on one interface in the same instant and only the
+//     destination tells them apart, and
 //   - a monotonic timestamp (userspace joins it to the recorded change by type,
-//     interface and time).
+//     interface, destination and time).
 //
-// Not recorded: argv, environment, the message payload, or anything about the
-// object being changed. Read-only requests (RTM_GET*, dumps) are dropped in the
+// Not recorded: argv, environment, or any of the message beyond the interface index
+// and, for a route, its destination: values the recorder already publishes about the
+// change. Read-only requests (RTM_GET*, dumps) are dropped in the
 // kernel before anything is reserved, so a monitoring tool listing routes costs
 // nothing. It only observes: the return value is ignored and no packet, message or
 // program state is changed.
@@ -36,9 +40,10 @@
 // match what the agent recorded in the host namespace.
 //
 // No BTF field access and no CO-RE: the only kernel memory read is the 16-byte
-// struct nlmsghdr and, for link/address/neighbor requests, the 4-byte interface
-// index at its fixed uAPI offset, both fetched with bpf_probe_read_kernel from the
-// second argument. The program is attached by name (fentry needs the running
+// struct nlmsghdr and a few uAPI fields after it (the 4-byte interface index of a
+// link/address/neighbor message; for a route the rtmsg header and a bounded walk of
+// its attributes for RTA_OIF and RTA_DST), all fetched with bpf_probe_read_kernel
+// from the second argument. The program is attached by name (fentry needs the running
 // kernel's BTF only to resolve the function's address and signature).
 
 #include <linux/bpf.h>
@@ -67,16 +72,18 @@ struct rtnl_nlmsghdr {
 };
 
 /* One request that modifies network state. Mirrored by internal/rtnlactor.Record;
- * 48 bytes, little endian, checked by both sides. */
+ * 64 bytes, little endian, checked by both sides. */
 struct rtnl_event {
 	__u64 ts_ns;      /* bpf_ktime_get_ns(): CLOCK_MONOTONIC */
 	__u64 cgroup_id;  /* the requester's cgroup */
 	__u32 tgid;       /* process id */
 	__u32 pid;        /* thread id */
 	__u16 nlmsg_type; /* RTM_NEWLINK ... */
-	__u16 _pad0;
+	__u8 family;      /* routes: rtm_family */
+	__u8 dst_len;     /* routes: rtm_dst_len (the prefix length) */
 	__u32 ifindex;    /* the interface the request names, 0 if none */
 	char comm[16];
+	__u8 dst[16];     /* routes: RTA_DST (4 bytes of IPv4 or 16 of IPv6), else zero */
 };
 
 struct {
@@ -121,6 +128,57 @@ static inline int names_interface(__u16 t)
 	return 0;
 }
 
+#define RTA_DST_TYPE 1
+#define RTA_OIF_TYPE 4
+
+/* struct rtattr, restated (uAPI). */
+struct rtnl_rtattr {
+	__u16 rta_len;
+	__u16 rta_type;
+};
+
+/* A route request is an rtmsg (12 bytes: family, dst_len, src_len, tos, table,
+ * protocol, scope, type, flags) after the netlink header, then attributes. Read the
+ * family and prefix length, then walk a bounded number of attributes for the output
+ * interface and the destination. A route with no RTA_DST is the default route
+ * (dst_len 0). RTA_MULTIPATH nexthops are not descended into: their interfaces stay
+ * unknown (ifindex 0), which userspace treats as "matches any". */
+static inline void route_fields(struct rtnl_event *e, const char *nlh, __u32 msglen)
+{
+	__u8 rt[2] = {};
+	__u32 off = 16 + 12; /* NLMSG_HDRLEN + sizeof(struct rtmsg) */
+	int i;
+
+	if (bpf_probe_read_kernel(rt, sizeof(rt), nlh + 16) != 0)
+		return;
+	e->family = rt[0];
+	e->dst_len = rt[1];
+
+#pragma unroll
+	for (i = 0; i < 24; i++) {
+		struct rtnl_rtattr a = {};
+
+		if (off + 4 > msglen)
+			break;
+		if (bpf_probe_read_kernel(&a, sizeof(a), nlh + off) != 0)
+			break;
+		if (a.rta_len < 4)
+			break;
+		if (a.rta_type == RTA_OIF_TYPE && a.rta_len >= 8) {
+			__s32 idx = 0;
+
+			if (bpf_probe_read_kernel(&idx, sizeof(idx), nlh + off + 4) == 0 && idx > 0)
+				e->ifindex = (__u32)idx;
+		} else if (a.rta_type == RTA_DST_TYPE) {
+			if (a.rta_len >= 20)
+				bpf_probe_read_kernel(e->dst, 16, nlh + off + 4);
+			else if (a.rta_len >= 8)
+				bpf_probe_read_kernel(e->dst, 4, nlh + off + 4);
+		}
+		off += ((__u32)a.rta_len + 3) & ~3U;
+	}
+}
+
 /* rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
  *                   struct netlink_ext_ack *extack): the fentry context is the
  * array of the traced function's arguments. */
@@ -150,12 +208,17 @@ int netra_rtnl_msg(unsigned long long *ctx)
 	e->tgid = pt >> 32;
 	e->pid = (__u32)pt;
 	e->nlmsg_type = hdr.nlmsg_type;
-	e->_pad0 = 0;
+	e->family = 0;
+	e->dst_len = 0;
 	e->ifindex = 0;
+	/* The ring buffer hands back uninitialised memory: never let it reach userspace. */
+	__builtin_memset(e->dst, 0, sizeof(e->dst));
 	if (names_interface(hdr.nlmsg_type)) {
 		__s32 idx = 0;
 		if (bpf_probe_read_kernel(&idx, sizeof(idx), (const char *)ctx[1] + 20) == 0 && idx > 0)
 			e->ifindex = (__u32)idx;
+	} else if (hdr.nlmsg_type == 24 || hdr.nlmsg_type == 25) {
+		route_fields(e, (const char *)ctx[1], hdr.nlmsg_len);
 	}
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
 	bpf_ringbuf_submit(e, 0);
