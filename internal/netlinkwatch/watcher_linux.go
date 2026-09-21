@@ -147,13 +147,14 @@ func (w *Watcher) startNeighbors(ctx context.Context) (<-chan struct{}, func() s
 }
 
 func linkEvent(u netlink.LinkUpdate) (models.NetlinkEvent, bool) {
-	if u.Link == nil {
+	link := u.Link
+	if link == nil {
 		return models.NetlinkEvent{}, false
 	}
-	a := u.Link.Attrs()
+	a := link.Attrs()
 	return models.NetlinkEvent{
 		Kind: models.NetlinkKindLink, Action: rtnlAction(u.Header.Type),
-		InterfaceIndex: a.Index, Interface: a.Name, LinkType: u.Link.Type(),
+		InterfaceIndex: a.Index, Interface: a.Name, LinkType: link.Type(),
 		MTU: a.MTU, State: a.OperState.String(), Flags: a.Flags.String(), MasterIndex: a.MasterIndex,
 	}, true
 }

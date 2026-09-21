@@ -167,7 +167,7 @@ func (w *Watcher) recordNeighbor(e models.NetlinkEvent) {
 		prev, seen := w.neighbors[key]
 		w.neighbors[key] = e.State
 		bad := strings.Contains(e.State, "failed") || strings.Contains(e.State, "incomplete")
-		if seen && !(bad && prev != e.State) {
+		if seen && (!bad || prev == e.State) {
 			w.suppressed++
 			w.mu.Unlock()
 			return
