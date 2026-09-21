@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.28.3"
+  tag: "0.28.4"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.28.3"
+  tag: "0.28.4"
 replicaCount: 1
 ha:
   enabled: false
@@ -323,6 +323,11 @@ agent:
   netlink: auto
   # Agent-side ring of recorded changes. Overflow is counted, not silent.
   netlinkEventBuffer: 4096
+  # Read-only inventory of the BPF programs attached to the node's interfaces
+  # (XDP, TCX, classic tc), so a Netra hook that has gone missing is visible
+  # (docs/bpf-attachments.md). No new privilege; it never attaches or detaches
+  # anything. auto|off.
+  bpfAttach: auto
   # Sampled application-protocol observation (bpf/netra_l7sample.c,
   # docs/l7-sampling.md): which Redis commands, SQL verbs, Kafka APIs and gRPC
   # methods workloads use and how often they fail. It reads application payload

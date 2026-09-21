@@ -116,7 +116,7 @@ func ebpfReadCommands() []cliCommand {
 	names := []string{
 		"stats", "summary", "coverage", "reasons", "census", "health",
 		"capdrift", "nsdrift", "exehash", "path", "drops",
-		"kernel-network", "sysctl-audit", "dns-findings", "scan-findings",
+		"kernel-network", "attachments", "sysctl-audit", "dns-findings", "scan-findings",
 		"ai-destinations", "app-categories", "auto-mitigate",
 		"tls-fingerprints", "tls-fingerprint-risk", "encrypted-dns", "ipv6",
 		"shield", "interfaces", "diagnose", "l7", "capabilities", "workloads",

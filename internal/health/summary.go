@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zyvorai/netra/internal/bpfattachdiag"
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/netlinkdiag"
 )
@@ -300,6 +301,10 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 	// reach the alert poller, incidents, the AI brief and the SIEM export because
 	// those all read this list.
 	out = append(out, netlinkdiag.Anomalies(netlinkdiag.Build(agents, now(), netlinkdiag.DefaultWindow).Findings)...)
+	// Netra hooks the agent believes it has but the kernel no longer shows
+	// (docs/bpf-attachments.md): the same route into alerts, incidents, the AI
+	// brief and SIEM.
+	out = append(out, bpfattachdiag.Anomalies(bpfattachdiag.Build(agents, now()).Findings)...)
 	out = correlateAnomalies(out)
 	order := map[string]int{"critical": 3, "warning": 2, "info": 1}
 	sort.SliceStable(out, func(i, j int) bool {

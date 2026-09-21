@@ -101,6 +101,14 @@ jobs:
       # views and metric bounds. The real-kernel half runs in `netlink-veth-smoke`.
       # Same command locally: ./scripts/ci-netlink-unit.sh
       run: ./scripts/ci-netlink-unit.sh
+    - name: BPF attachment inventory unit + race (scripted)
+      # Read-only inventory of XDP/TCX/classic-tc attachments and the drift check
+      # between what the agent believes it attached and what the kernel reports:
+      # owner classification, the kernel's 15-character program names, a query that
+      # failed is unknown and never "detached", the unchanged-summary protocol, and
+      # the controller carry-forward. The real-kernel half runs in the `ebpf` job.
+      # Same command locally: ./scripts/ci-bpfattach-unit.sh
+      run: ./scripts/ci-bpfattach-unit.sh
     - name: OIDC login + RBAC + metrics-token unit + race (scripted)
       # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
       # the role table over the real route set, spoof-proof audit actor and
@@ -292,6 +300,10 @@ jobs:
           --set agent.netlink=off --set agent.netlinkEventBuffer=8192 >/tmp/netra-netlink.yaml
         awk '/name: NETRA_NETLINK$/{getline; if ($0 !~ /"off"/) exit 1}' /tmp/netra-netlink.yaml
         awk '/name: NETRA_NETLINK_EVENT_BUFFER$/{getline; if ($0 !~ /"8192"/) exit 1}' /tmp/netra-netlink.yaml
+        # The BPF attachment inventory is a plain env knob (read-only).
+        awk '/name: NETRA_BPF_ATTACH$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.bpfAttach=off | awk '/name: NETRA_BPF_ATTACH$/{getline; if ($0 !~ /"off"/) exit 1}'
     - name: Controller memory limit leaves room for the flow history (OOM regression)
       # 0.27.102 shipped 256Mi and the controller was OOM-killed every ~12
       # minutes on a real cluster. netrad now derives Go's soft limit from the

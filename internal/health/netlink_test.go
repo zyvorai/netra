@@ -83,3 +83,21 @@ func TestNodesWithoutTheRecorderAddNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCarriesBPFAttachDriftAsAnAnomaly(t *testing.T) {
+	pinNow(t, time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC))
+	a := models.AgentStatus{AgentReport: models.AgentReport{
+		Node: "worker-1", Hooks: []string{"tcx-ingress:eth0"}, Interfaces: []string{"eth0"},
+		BPFAttach: &models.BPFAttachReport{Available: true, TCXSupported: true, ObservedAt: now()},
+	}}
+	var got *models.NetworkHealthAnomaly
+	for _, an := range Build([]models.AgentStatus{a}, 20).Summary.Anomalies {
+		if an.Kind == "bpf-netra-hook-missing" {
+			an := an
+			got = &an
+		}
+	}
+	if got == nil || got.Severity != "warning" || got.Subject != "worker-1" || got.SourceKey != "node:worker-1" {
+		t.Fatalf("anomaly=%+v", got)
+	}
+}

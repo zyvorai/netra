@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/zyvorai/netra/internal/afcapture"
+	"github.com/zyvorai/netra/internal/bpfattach"
 	"github.com/zyvorai/netra/internal/capture"
 	"github.com/zyvorai/netra/internal/cgroupmeta"
 	"github.com/zyvorai/netra/internal/dropinfo"
@@ -120,6 +121,15 @@ type Agent struct {
 	// start (netlinkWhy says why).
 	netlinkWatch *netlinkwatch.Watcher
 	netlinkWhy   string
+	// bpfSource reads which BPF programs are attached to the interfaces
+	// (docs/bpf-attachments.md); nil when NETRA_BPF_ATTACH=off. The rest is the
+	// last inventory and what the controller already has, so an unchanged one is
+	// not re-sent every report.
+	bpfSource   bpfattach.Source
+	bpfLast     models.BPFAttachReport
+	bpfLastAt   time.Time
+	bpfSentHash string
+	bpfSentAt   time.Time
 	// l7sample* are the sampled application-protocol observer (bpf/netra_l7sample.c,
 	// docs/l7-sampling.md). Off unless NETRA_L7_SAMPLE is set; the sampler is nil
 	// when it is off or could not start (l7SampleWhy says why).
@@ -264,6 +274,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.readEvents(ctx)
 	go a.readTLSHelloEvents(ctx)
 	a.startNetlink(ctx)
+	a.startBPFAttach()
 	if a.l7Sampler != nil {
 		go a.l7Sampler.Run(ctx, a.l7Counters.Observe)
 	}
@@ -1183,6 +1194,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	l7 := a.readL7Sample()
 	tlsSample := a.readTLSSample()
 	netlinkReport, commitNetlink := a.readNetlink()
+	bpfAttachReport, commitBPFAttach := a.readBPFAttach(time.Now().UTC())
 	if err := a.report(ctx, models.AgentReport{
 		Node: a.node, Mode: cfg.Mode, Interfaces: a.interfaces, XDPInterfaces: a.xdpInterfaces,
 		Hooks: append([]string(nil), a.hooks...), CgroupPath: a.cgroupPath, Standalone: true,
@@ -1195,6 +1207,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,
 		Netlink:            netlinkReport,
+		BPFAttach:          bpfAttachReport,
 		KernelNetwork:      kernelNetwork,
 		SysctlNetworkAudit: sysctlAudit,
 		NodeResources:      nodeResources,
@@ -1205,6 +1218,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	commitNetlink()
+	commitBPFAttach()
 	return nil
 }
 

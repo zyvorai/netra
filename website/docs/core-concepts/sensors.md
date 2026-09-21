@@ -23,6 +23,7 @@ A node that cannot run a sensor shows the reason in the API and the dashboard (f
 | **Drop attribution** | Which connection's packets the kernel dropped, why, and which kernel function dropped them | `auto` | kernel BTF, tracefs | `GET /api/v1/ebpf/drop-info` |
 | **TCP events** | Retransmits, resets and state changes per flow, with the tuple | `auto` | tracefs (no BTF) | `GET /api/v1/ebpf/tcp-events` |
 | **Listen queues** | Accept-queue depth and overflow per listening socket | `auto` | `inet_diag` (no BPF) | `GET /api/v1/listen-queues` |
+| **BPF attachments** | Which BPF programs the kernel says are attached to each interface (XDP, TCX, classic tc), and when a Netra hook the agent believes it has is gone | `auto` | agent privileges (no new BPF) | `GET /api/v1/ebpf/attachments` |
 | **Netlink changes** | Which link, address, route or neighbor changed on a node, and when; overflow is counted, not hidden | `auto` | host netns (no BPF) | `GET /api/v1/netlink` |
 | **Sampled L7** | Redis commands, SQL verbs, Kafka APIs, HTTP/1 and HTTP/2 status, gRPC methods and errors | **off** | cgroup skb | `GET /api/v1/l7/sampled` |
 | **TLS plaintext** | The same for HTTPS, read where the application hands bytes to OpenSSL | **off** | libssl uprobes, host PID view | `GET /api/v1/l7/tls` |

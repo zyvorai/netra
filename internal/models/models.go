@@ -1174,6 +1174,10 @@ type AgentReport struct {
 	// recorder could not start. It never represents desired state or authorizes
 	// a route/link/neighbor mutation.
 	Netlink *NetlinkReport `json:"netlink,omitempty"`
+	// BPFAttach is a read-only inventory of the BPF programs attached to this
+	// node's interfaces (XDP, TCX, classic tc), so drift from what the agent
+	// believes it attached is visible. nil when NETRA_BPF_ATTACH=off.
+	BPFAttach *BPFAttachReport `json:"bpfAttach,omitempty"`
 	// KernelNetwork is an observe-only snapshot of networking sysctls and
 	// cumulative /proc/net counters. Netra never applies these values.
 	KernelNetwork KernelNetworkSnapshot `json:"kernelNetwork,omitempty"`

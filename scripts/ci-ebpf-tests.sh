@@ -119,6 +119,25 @@ if grep -q -- '^--- SKIP: TestSSL' "$ssl_log" || (( ssl_pass < 7 )); then
 fi
 echo "    ${ssl_pass} passed"
 
+# BPF attachment inventory (docs/bpf-attachments.md). Netra's real programs are
+# attached (TCX ingress and egress, XDP, and a classic cls_bpf filter on the peer)
+# to a scratch veth next to somebody else's program, and the real collector must
+# report each with the right owner and the kernel's execution order; then a hook is
+# detached and the interface deleted and recreated, and the drift diagnostic must
+# say so. They must pass AND not skip: a skip here (no TCX, no permission) means
+# the kernel half silently did not run.
+echo "==> BPF attachments: real TCX/XDP/cls_bpf inventory and hook drift on a real kernel"
+ba_log="${OUT}/bpfattach.log"
+NETRA_BPF_TEST_OBJECT="${OUT}/netra_tc.o" \
+  "$BIN" -test.v -test.count=1 -test.run 'TestBPFAttach' >"$ba_log" 2>&1 || { cat "$ba_log"; exit 1; }
+ba_pass="$(grep -c -- '^--- PASS: TestBPFAttach' "$ba_log" || true)"
+if grep -q -- '^--- SKIP: TestBPFAttach' "$ba_log" || (( ba_pass < 2 )); then
+  cat "$ba_log"
+  echo "BPF attachment tests: ${ba_pass} passed (want 2) or some skipped" >&2
+  exit 1
+fi
+echo "    ${ba_pass} passed"
+
 # Agent map reads. The agent reads several 131 072-entry LRU hash maps every few
 # seconds; it used to walk each entry with two syscalls, decode and format all of
 # them, sort all of them, and keep 1 000, which cost about two cores on a busy

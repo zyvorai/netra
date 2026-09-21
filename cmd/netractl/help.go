@@ -51,6 +51,7 @@ func helpSections() []helpSection {
 			cmds: []helpCmd{
 				{"ebpf summary|health|path|drops|l7|…", "Datapath counters and diagnostics"},
 				{"ebpf kernel-network [5m]", "Windowed kernel network pressure"},
+				{"ebpf attachments [--node N]", "BPF programs attached per interface + hook drift"},
 				{"netlink state|events|findings …", "Route, link, address and neighbor changes + what is wrong now"},
 				{"ebpf sysctl-audit | dns-findings | scan-findings", "Hardening + detectors"},
 				{"ebpf coverage | census | maps | capabilities", "Hook coverage + map inventory"},

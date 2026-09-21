@@ -44,6 +44,8 @@ shared group even with `cancel-in-progress: false`.
 | eBPF programs and verifier, x86_64 and arm64 | `ebpf`, `ebpf-arm64` | `ci-ebpf-tests.sh` | real kernel |
 | Flow observability and auto-capture | `flow-observe-veth`, `auto-capture-veth` | `ci-flow-observe-veth.sh`, `ci-auto-capture-veth.sh` | veth |
 | Netlink change recorder: ring and delivery cursor, resubscribe after ENOBUFS, controller history | `go` job | `ci-netlink-unit.sh` | unit + race |
+| BPF attachment inventory and hook drift: owners, kernel-truncated names, unchanged-summary protocol, controller carry-forward | `go` job | `ci-bpfattach-unit.sh` | unit + race |
+| BPF attachment inventory against a real kernel: real TCX/XDP/cls_bpf attachments, a detached hook, a recreated interface | `ebpf` job | `ci-ebpf-tests.sh` | real kernel |
 | Netlink change recorder against a real kernel: veth address/route/neighbor/MTU changes, forced overrun | `netlink-veth-smoke` | `ci-netlink-veth.sh` | real kernel, throwaway netns |
 | Agent to controller mutual TLS | `mtls-smoke` | `ci-mtls-smoke.sh` | real controller and agent |
 | OIDC login and RBAC | `oidc-live` | `ci-oidc-live.sh` | real controller |

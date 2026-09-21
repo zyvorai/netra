@@ -23,6 +23,10 @@ PacketWolf. Co-existence rules: `docs/packetwolf.md`.
 - Policy apply stays plan-token + risk confirm. Enforce stays leased.
 - Do not wire a PacketWolf↔Netra control-plane sync unless product work
   explicitly requests it (today they export sideways only).
+- The BPF attachment inventory (`internal/bpfattach`, `GET /api/v1/ebpf/attachments`)
+  is read-only: it lists what the kernel reports and never attaches, detaches or
+  replaces a program, and never touches a Cilium-owned program or map.
+  Details: `docs/bpf-attachments.md`.
 - The netlink recorder (`internal/netlinkwatch`, `GET /api/v1/netlink`) is
   read-only RTNL observation. Never add a route/link/address/neighbor/rule
   mutation to it or wire it to one. Details: `docs/netlink-recorder.md`.
@@ -54,6 +58,7 @@ go test ./...
 ./scripts/ci-tlsfp-unit.sh
 ./scripts/ci-p1-p5-unit.sh
 ./scripts/ci-netlink-unit.sh
+./scripts/ci-bpfattach-unit.sh
 make test-features
 make test-netractl-commands
 make test-netractl-live
@@ -82,6 +87,7 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
 | `scripts/ci-flow-observe-veth.sh` | `flow-observe-veth` — veth + iperf3 flow history, RED, traces, stacks |
 | `scripts/ci-netlink-unit.sh` | `go` — netlink recorder ring/cursor, resubscribe, controller history, API, metrics |
+| `scripts/ci-bpfattach-unit.sh` | `go` — BPF attachment inventory, hook drift, carry-forward, API, metrics |
 | `scripts/ci-netlink-veth.sh` | `netlink-veth-smoke` — real RTNL in a throwaway netns, forced ENOBUFS overrun |
 | `scripts/ci-http-status-smoke.sh` | `http-status-smoke` — agent + cleartext HTTP/1 503 |
 

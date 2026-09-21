@@ -406,6 +406,7 @@ docs/investigation-ux.md          Native investigation UX
 docs/l7-sampling.md               Sampled L7 protocol observation
 docs/listen-queues.md             TCP listen-queue pressure
 docs/netlink-recorder.md          Route / link / address / neighbor change recorder (read-only)
+docs/bpf-attachments.md           BPF programs attached per interface + Netra hook drift (read-only)
 docs/loki-push.md                 Loki push export
 docs/microseg.md                  East-west microsegmentation guidance
 docs/network-health.md            Netra Network Health — v0.10
@@ -460,8 +461,8 @@ make bpf
 Container images:
 
 ```bash
-docker build -t ghcr.io/zyvorai/netra:0.28.3 .
-docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.28.3 .
+docker build -t ghcr.io/zyvorai/netra:0.28.4 .
+docker build -f Dockerfile.agent -t ghcr.io/zyvorai/netra-agent:0.28.4 .
 ```
 
 Tagged releases publish both images (`linux/amd64` and `linux/arm64`) to `ghcr.io/zyvorai/netra` and

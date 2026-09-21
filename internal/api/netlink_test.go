@@ -265,3 +265,85 @@ func TestNetlinkFindingsGaugeCountsBySeverityWithFixedLabels(t *testing.T) {
 		}
 	}
 }
+
+func bpfServer(now time.Time) *Server {
+	st := store.New()
+	st.Report(models.AgentReport{
+		Node: "worker-1", ObservedAt: now, Hooks: []string{"tcx-ingress:eth0", "tcx-egress:eth0"}, Interfaces: []string{"eth0"},
+		BPFAttach: &models.BPFAttachReport{Available: true, TCXSupported: true, ObservedAt: now, Total: 1, Hash: "h",
+			Interfaces: []models.BPFInterfaceAttach{{Name: "eth0", Index: 2, TCXIngress: []models.BPFProgram{{ID: 1, Name: "cil_from_netdev", Owner: "cilium"}}}}},
+	})
+	st.Report(models.AgentReport{Node: "off-node", ObservedAt: now})
+	return &Server{store: st, agentStaleAfter: time.Minute}
+}
+
+func TestBPFAttachmentsShowsKernelStateAndDrift(t *testing.T) {
+	s := bpfServer(time.Now().UTC())
+	rec := httptest.NewRecorder()
+	s.bpfAttachments(rec, httptest.NewRequest("GET", "/api/v1/ebpf/attachments", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	nodes := body["nodes"].([]any)
+	byName := map[string]map[string]any{}
+	for _, n := range nodes {
+		m := n.(map[string]any)
+		byName[m["node"].(string)] = m
+	}
+	w1 := byName["worker-1"]
+	if w1["reporting"] != true || len(w1["attached"].([]any)) != 1 || len(w1["hooks"].([]any)) != 2 {
+		t.Fatalf("worker-1=%v", w1)
+	}
+	if byName["off-node"]["reporting"] != false || byName["off-node"]["unavailable"] == "" {
+		t.Fatalf("a node with the inventory off must say so: %v", byName["off-node"])
+	}
+	// The agent believes it has Netra's hooks on eth0; the kernel shows only Cilium's.
+	fs := body["findings"].([]any)
+	if len(fs) != 1 || fs[0].(map[string]any)["kind"] != "bpf-netra-hook-missing" {
+		t.Fatalf("findings=%v", fs)
+	}
+	if body["evaluated"].(float64) != 1 || body["skipped"].(float64) != 1 {
+		t.Fatalf("evaluated=%v skipped=%v", body["evaluated"], body["skipped"])
+	}
+}
+
+func TestBPFAttachmentsFiltersByNode(t *testing.T) {
+	s := bpfServer(time.Now().UTC())
+	rec := httptest.NewRecorder()
+	s.bpfAttachments(rec, httptest.NewRequest("GET", "/api/v1/ebpf/attachments?node=off-node", nil))
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body["nodes"].([]any)) != 1 || len(body["findings"].([]any)) != 0 {
+		t.Fatalf("body=%v", body)
+	}
+}
+
+func TestBPFAttachMetricsAreFixedCardinality(t *testing.T) {
+	now := time.Now().UTC()
+	agents := bpfServer(now).store.AgentStatuses(now, time.Minute)
+	rec := httptest.NewRecorder()
+	writeBPFAttachMetrics(rec, agents)
+	out := rec.Body.String()
+	for _, want := range []string{
+		"netra_bpf_attach_nodes_reporting 1", "netra_bpf_attach_nodes_not_reporting 1", "netra_bpf_attach_interfaces 1",
+		`netra_bpf_attach_findings{severity="warning"} 1`, `netra_bpf_attach_findings{severity="critical"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "netra_bpf_attach") && strings.Contains(line, "{") && !strings.Contains(line, "{severity=") {
+			t.Errorf("unexpected label on %q", line)
+		}
+	}
+	empty := httptest.NewRecorder()
+	writeBPFAttachMetrics(empty, []models.AgentStatus{{AgentReport: models.AgentReport{Node: "old"}}})
+	if strings.Contains(empty.Body.String(), "netra_bpf_attach_findings") {
+		t.Fatal("gauges must be absent, not zero, when nothing reports")
+	}
+}
