@@ -68,6 +68,11 @@ type Record struct {
 	// index (a route may be multipath, and modern `ip link set dev X` names the device
 	// only by name).
 	IfIndex uint32
+	// Len is the whole message's length. A link request of 32 bytes (the netlink
+	// header and the ifinfomsg, no attributes) with no index names no device at all:
+	// iproute2 sends one at the start of every `ip link` command to probe whether the
+	// kernel supports RTM_NEWLINK, and it changes nothing.
+	Len uint32
 	// IfName is the device a link request names by IFLA_IFNAME when it gives no
 	// index; empty otherwise. For a create it is the new link's name, which says
 	// nothing about a peer created with it.
@@ -95,6 +100,7 @@ func Parse(b []byte) (Record, error) {
 		Type:     le.Uint16(b[24:26]),
 		Flags:    le.Uint16(b[26:28]),
 		IfIndex:  le.Uint32(b[28:32]),
+		Len:      le.Uint32(b[36:40]),
 		Comm:     comm(b[40:56]),
 		Dest:     routeDest(le.Uint16(b[24:26]), b[32], b[33], b[56:72]),
 		IfName:   comm(b[72:88]),

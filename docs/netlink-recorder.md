@@ -117,6 +117,13 @@ The join is strict about what it claims:
   the exception: it also creates a peer whose name is not in the request, so it matches
   any. A request that names a device by an *alternative* name would not match the
   device's primary name and would be read as nobody's (kernel), which is a known limit.
+- **iproute2's probe is ignored.** Every `ip link` command first sends a bare
+  `RTM_NEWLINK` (no index, no name, no attributes) to ask whether the kernel supports it.
+  It changes nothing, so a link request with no target and no attributes explains
+  nothing; otherwise whoever ran `ip link` would be credited with every link change
+  around it. A link request that has attributes but names no device the sensor reads is
+  *uncertain*: it names nobody and, unlike a real absence, does not let the event be
+  called the kernel's.
 - **So does the route's destination.** Two processes adding routes on one interface in
   the same instant are told apart by prefix (`10.90.0.0/24` is one process's,
   `10.91.0.0/24` the other's). Two requests for the very same prefix cannot be, and are

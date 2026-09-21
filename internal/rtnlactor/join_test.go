@@ -107,7 +107,7 @@ func TestARequestForAnotherInterfaceDoesNotExplainThisOne(t *testing.T) {
 	}
 	// A link create names no interface (ifindex 0), so it explains any.
 	j2 := joiner()
-	j2.Add(rec(2, "ip", RTMNewLink, 0, 1000))
+	j2.Add(linkRec(2, "ip", RTMNewLink, 0, "nlat0", NLMFCreate|0x1|0x200, 1000)) // ip link add ... (NLM_F_CREATE)
 	if a, _ := j2.Attribute(onLink(models.NetlinkKindLink, "new", 9, 1020)); a == nil {
 		t.Fatal("a create request (no ifindex) must match")
 	}
@@ -324,5 +324,53 @@ func TestAnIndexWinsOverAName(t *testing.T) {
 	anon := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", InterfaceIndex: 5, ObservedAt: at(1020)}
 	if a, _ := j2.Attribute(anon); a == nil {
 		t.Fatal("an event without a name must not be excluded by a request's name")
+	}
+}
+
+func withMsgLen(r Record, n uint32) Record { r.Len = n; return r }
+
+// What a real kernel showed: every `ip link` command first sends a bare RTM_NEWLINK
+// (no index, no name, no attributes) to probe for kernel support. It changes nothing
+// and must explain nothing, or whoever runs `ip link` is credited with every link change
+// near it.
+func TestIproute2sProbeExplainsNothing(t *testing.T) {
+	j := joiner()
+	j.Add(withMsgLen(linkRec(9, "ip", RTMNewLink, 0, "", 0x5, 1000), 32)) // the probe
+	j.Add(linkRec(9, "ip", RTMNewLink, 13, "", 0x5, 1001))                // the real request, by index
+	carrier := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "nlat0", InterfaceIndex: 14, ObservedAt: at(1040)}
+	if a, origin := j.Attribute(carrier); a != nil || origin != models.NetlinkOriginKernel {
+		t.Fatalf("the probe (or a request for another device) was credited with a carrier loss: %+v %q", a, origin)
+	}
+	real := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "nlat1", InterfaceIndex: 13, ObservedAt: at(1040)}
+	if a, _ := j.Attribute(real); a == nil || a.Comm != "ip" || a.Confidence != models.NetlinkActorProbable {
+		t.Fatalf("the real request must still explain its own device: %+v", a)
+	}
+}
+
+func TestALinkRequestWithAttributesButNoNameWeReadIsUncertainNotKernel(t *testing.T) {
+	// It has attributes (length 60) but no index and no IFLA_IFNAME we read: say an
+	// alternative name. It may be about this device, so nobody can be named and "kernel"
+	// must not be claimed either.
+	j := joiner()
+	j.Add(withMsgLen(linkRec(9, "ip", RTMSetLink, 0, "", 0x5, 1000), 60))
+	e := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "eth0", InterfaceIndex: 2, ObservedAt: at(1040)}
+	if a, origin := j.Attribute(e); a != nil || origin != "" {
+		t.Fatalf("an uncertain request must leave the event unattributed: %+v %q", a, origin)
+	}
+	// An exact match elsewhere is stronger than an uncertain one.
+	j.Add(linkRec(10, "netplan", RTMSetLink, 2, "", 0x5, 1010))
+	if a, _ := j.Attribute(e); a == nil || a.Comm != "netplan" {
+		t.Fatalf("an exact match must win over an uncertain request: %+v", a)
+	}
+}
+
+func TestAMessageLengthOfZeroIsUnknownAndNotAProbe(t *testing.T) {
+	// A record from a program that did not report the length (Len 0) must not be
+	// discarded as a probe: unknown is not "bare".
+	j := joiner()
+	j.Add(linkRec(9, "ip", RTMNewLink, 0, "", 0x5, 1000))
+	e := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "eth0", InterfaceIndex: 2, ObservedAt: at(1040)}
+	if _, origin := j.Attribute(e); origin != "" {
+		t.Fatalf("an unknown-length untargeted request must leave the event unattributed, got %q", origin)
 	}
 }

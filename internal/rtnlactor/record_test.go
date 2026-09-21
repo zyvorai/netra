@@ -36,6 +36,7 @@ func fullEvent(ts, cgroup uint64, tgid, pid uint32, typ, flags uint16, ifindex u
 	le.PutUint16(b[26:], flags)
 	le.PutUint32(b[28:], ifindex)
 	b[32], b[33] = family, dstLen
+	// nlmsg_len is at [36:40]; tests that care set it with withLen.
 	copy(b[40:], comm)
 	copy(b[56:], dst)
 	copy(b[72:], ifname)
@@ -108,6 +109,23 @@ func TestParseDecodesTheFlagsAndTheDeviceNameOfALinkRequest(t *testing.T) {
 	r, _ = Parse(fullEvent(1, 2, 3, 4, RTMDelLink, 0, 0, "ip", 0, 0, nil, "abcdefghijklmno"))
 	if r.IfName != "abcdefghijklmno" {
 		t.Fatalf("name=%q", r.IfName)
+	}
+}
+
+// withLen sets the nlmsg_len field of a built event.
+func withLen(b []byte, n uint32) []byte {
+	binary.LittleEndian.PutUint32(b[36:], n)
+	return b
+}
+
+func TestParseDecodesTheMessageLength(t *testing.T) {
+	r, err := Parse(withLen(fullEvent(1, 2, 3, 4, RTMNewLink, 0x5, 0, "ip", 0, 0, nil, ""), 32))
+	if err != nil || r.Len != 32 {
+		t.Fatalf("record=%+v err=%v", r, err)
+	}
+	// The length must not bleed into the comm or the name.
+	if r.Comm != "ip" || r.IfName != "" {
+		t.Fatalf("record=%+v", r)
 	}
 }
 

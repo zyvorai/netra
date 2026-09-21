@@ -115,6 +115,12 @@ func requestTypes(e models.NetlinkEvent) []uint16 {
 	return nil
 }
 
+// linkBareLen is NLMSG_HDRLEN plus sizeof(struct ifinfomsg): a link request with
+// nothing after them.
+const linkBareLen = 16 + 16
+
+func isLinkRequest(t uint16) bool { return t == RTMNewLink || t == RTMDelLink || t == RTMSetLink }
+
 func hasType(types []uint16, t uint16) bool {
 	for _, x := range types {
 		if x == t {
@@ -143,6 +149,7 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	byTGID := map[uint32]Record{}
+	uncertain := false
 	for i := 0; i < j.size; i++ {
 		r := j.ring[(j.head+i)%len(j.ring)]
 		if r.Wall.Before(lo) || r.Wall.After(hi) || !hasType(types, r.Type) {
@@ -153,11 +160,26 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 		if r.IfIndex != 0 && e.InterfaceIndex != 0 && r.IfIndex != uint32(e.InterfaceIndex) {
 			continue
 		}
-		// A link request that names its device only by name (`ip link set dev X` sends
-		// index 0 and IFLA_IFNAME) only explains a change to that device. A create is
-		// exempt: it also creates a peer whose name is not in that attribute.
-		if r.IfIndex == 0 && r.IfName != "" && r.Flags&NLMFCreate == 0 && e.Interface != "" && r.IfName != e.Interface {
-			continue
+		if isLinkRequest(r.Type) && r.Flags&NLMFCreate == 0 && r.IfIndex == 0 {
+			switch {
+			case r.IfName != "":
+				// Names its device only by name: it explains only that device.
+				if e.Interface != "" && r.IfName != e.Interface {
+					continue
+				}
+			case r.Len != 0 && r.Len <= linkBareLen:
+				// No index, no name and no attributes: iproute2's probe at the start of
+				// every `ip link` command. It targets nothing and changes nothing, so it
+				// explains nothing; matching it would credit whoever ran `ip link` at that
+				// moment with every link change around it.
+				continue
+			default:
+				// It has attributes but none that names its device the way we read (an
+				// alternative name, say). It may or may not be about this device: not a
+				// match, and not proof of a kernel-originated change either.
+				uncertain = true
+				continue
+			}
 		}
 		// A route request names its destination: it only explains the change to that
 		// prefix, so two processes adding routes on one interface in the same instant
@@ -170,7 +192,7 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 
 	switch len(byTGID) {
 	case 0:
-		if j.cannotSee(e.ObservedAt, lo) {
+		if uncertain || j.cannotSee(e.ObservedAt, lo) {
 			return nil, ""
 		}
 		return nil, models.NetlinkOriginKernel

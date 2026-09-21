@@ -119,7 +119,11 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 		if r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate != 0 {
 			create = r
 		}
-		if r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate == 0 && set == nil {
+		// `ip link set` names its device by index (modern iproute2) or by IFLA_IFNAME. It
+		// is preceded by iproute2's bare probe (no index, no name, 32 bytes), which names
+		// nothing and is not this request.
+		if r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate == 0 && set == nil &&
+			(r.IfIndex == uint32(link.Attrs().Index) || r.IfName == "nlrt0") {
 			set = r
 		}
 	}
@@ -135,8 +139,20 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 	}
 	// `ip link set nlrt0 up` operates on an existing device: it names it by index or, as
 	// modern iproute2 may, by IFLA_IFNAME with index 0. Either way the request must say which.
-	if set == nil || (set.IfIndex != uint32(link.Attrs().Index) && set.IfName != "nlrt0") {
-		t.Fatalf("a request on an existing link must name it (ifindex %d or name nlrt0): %+v", link.Attrs().Index, set)
+	if set == nil {
+		t.Fatalf("no request on the existing link named it (ifindex %d or name nlrt0)", link.Attrs().Index)
+	}
+	// The probe must be reported as what it is: untargeted, and short.
+	var probe *rtnlactor.Record
+	for i := range seen {
+		r := &seen[i]
+		if r.Comm == "ip" && r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate == 0 && r.IfIndex == 0 && r.IfName == "" {
+			probe = r
+			break
+		}
+	}
+	if probe != nil && probe.Len != 32 {
+		t.Fatalf("iproute2's untargeted probe should be the bare 32-byte message, got %+v", *probe)
 	}
 
 	// This process: an address, a route, and the route's removal, over our own netlink socket.

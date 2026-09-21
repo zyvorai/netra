@@ -87,7 +87,8 @@ struct rtnl_event {
 	__u32 ifindex;     /* the interface the request names by index, 0 if none */
 	__u8 family;       /* routes: rtm_family */
 	__u8 dst_len;      /* routes: rtm_dst_len (the prefix length) */
-	__u8 _pad[6];
+	__u16 _pad;
+	__u32 nlmsg_len;   /* the whole message: 32 for a link request with no attributes */
 	char comm[16];
 	__u8 dst[16];      /* routes: RTA_DST (4 bytes of IPv4 or 16 of IPv6), else zero */
 	char ifname[16];   /* link requests naming the device by IFLA_IFNAME, else empty */
@@ -243,11 +244,12 @@ int netra_rtnl_msg(unsigned long long *ctx)
 	e->pid = (__u32)pt;
 	e->nlmsg_type = hdr.nlmsg_type;
 	e->nlmsg_flags = hdr.nlmsg_flags;
+	e->nlmsg_len = hdr.nlmsg_len;
 	e->family = 0;
 	e->dst_len = 0;
 	e->ifindex = 0;
 	/* The ring buffer hands back uninitialised memory: never let it reach userspace. */
-	__builtin_memset(e->_pad, 0, sizeof(e->_pad));
+	e->_pad = 0;
 	__builtin_memset(e->dst, 0, sizeof(e->dst));
 	__builtin_memset(e->ifname, 0, sizeof(e->ifname));
 	if (names_interface(hdr.nlmsg_type)) {
