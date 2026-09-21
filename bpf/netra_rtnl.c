@@ -37,23 +37,31 @@
 // issued by a process. That absence is information, and userspace reports it as
 // such only while this sensor is running.
 //
-// Ring buffer, not a map of counters: the join needs each request. If it fills,
-// events are dropped and counted (rtnl_stats), never blocked on. Every netns's
-// requests reach here (the function is global); userspace keeps only the ones that
-// match what the agent recorded in the host namespace.
+// Network namespace. Interface indexes are per namespace, and this function runs
+// for every namespace's requests (a pod's CNI setup included), so a request in some
+// pod's namespace for ifindex 3 must never be credited with a host change on ifindex
+// 3. The requester's namespace (the socket's, as rtnetlink_rcv_msg itself uses it:
+// skb->sk->sk_net.net->ns.inum, read with CO-RE) is recorded with every event, and
+// userspace names the one namespace it records changes in through rtnl_config[0]:
+// requests from any other are dropped here, before anything is reserved, which also
+// keeps a busy node's pod churn out of the ring buffer.
 //
-// No BTF field access and no CO-RE: the only kernel memory read is the 16-byte
-// struct nlmsghdr and a few uAPI fields after it (the 4-byte interface index of a
+// Ring buffer, not a map of counters: the join needs each request. If it fills,
+// events are dropped and counted (rtnl_stats), never blocked on.
+//
+// Kernel memory read: the 16-byte struct nlmsghdr and a few uAPI fields after it (the 4-byte interface index of a
 // link/address/neighbor message; for a route the rtmsg header and a bounded walk of
 // its attributes for RTA_OIF and RTA_DST), all fetched with bpf_probe_read_kernel
-// from the second argument. The program is attached by name (fentry needs the running
-// kernel's BTF only to resolve the function's address and signature).
+// from the second argument, and the namespace inode through three CO-RE-relocated
+// member reads (the loader relocates them against the running kernel's BTF, which an
+// fentry needs anyway to resolve the function's address and signature).
 
 #include <linux/bpf.h>
 
 #define SEC(NAME) __attribute__((section(NAME), used))
 #define __uint(name, val) int (*name)[val]
 #define __type(name, val) val *name
+#define __core __attribute__((preserve_access_index))
 
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)BPF_FUNC_map_lookup_elem;
 static long (*bpf_probe_read_kernel)(void *dst, __u32 size, const void *unsafe_ptr) = (void *)BPF_FUNC_probe_read_kernel;
@@ -64,6 +72,30 @@ static __u64 (*bpf_get_current_cgroup_id)(void) = (void *)BPF_FUNC_get_current_c
 static long (*bpf_get_current_comm)(void *buf, __u32 size) = (void *)BPF_FUNC_get_current_comm;
 static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size, __u64 flags) = (void *)BPF_FUNC_ringbuf_reserve;
 static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *)BPF_FUNC_ringbuf_submit;
+
+/* Only the members read to find the requester's network namespace; the loader
+ * relocates each against the running kernel's types. skb->sk is the requester's
+ * netlink socket, and sock_net(sk) is sk->__sk_common.skc_net.net. */
+struct ns_common {
+	unsigned int inum;
+} __core;
+struct net {
+	struct ns_common ns;
+} __core;
+typedef struct {
+	struct net *net;
+} __core possible_net_t;
+struct sock_common {
+	possible_net_t skc_net;
+} __core;
+struct sock {
+	struct sock_common __sk_common;
+} __core;
+struct sk_buff {
+	struct sock *sk;
+} __core;
+
+#define CORE_READ(dst, ptr, field) bpf_probe_read_kernel(&(dst), sizeof(dst), &((ptr)->field))
 
 /* linux/netlink.h's struct nlmsghdr, restated so this object needs no more than
  * linux/bpf.h. The layout is uAPI and never changes. */
@@ -76,7 +108,7 @@ struct rtnl_nlmsghdr {
 };
 
 /* One request that modifies network state. Mirrored by internal/rtnlactor.Record;
- * 88 bytes, little endian, checked by both sides. */
+ * 96 bytes, little endian, checked by both sides. */
 struct rtnl_event {
 	__u64 ts_ns;       /* bpf_ktime_get_ns(): CLOCK_MONOTONIC */
 	__u64 cgroup_id;   /* the requester's cgroup */
@@ -92,12 +124,23 @@ struct rtnl_event {
 	char comm[16];
 	__u8 dst[16];      /* routes: RTA_DST (4 bytes of IPv4 or 16 of IPv6), else zero */
 	char ifname[16];   /* link requests naming the device by IFLA_IFNAME, else empty */
+	__u32 netns_ino;   /* the requester's network namespace (its inode), 0 if unknown */
+	__u32 _pad2;
 };
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 262144);
 } rtnl_events SEC(".maps");
+
+/* rtnl_config[0] = the network namespace (inode) whose requests are recorded; 0 means
+ * every namespace. Set by userspace after load. */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} rtnl_config SEC(".maps");
 
 /* [0] = requests dropped because the ring buffer was full. */
 struct {
@@ -214,6 +257,23 @@ static inline void link_name(struct rtnl_event *e, const char *nlh, __u32 msglen
 	}
 }
 
+/* The network namespace the request applies to: the inode of sock_net(skb->sk). */
+static inline __u32 request_netns(const void *skb_ptr)
+{
+	const struct sk_buff *skb = skb_ptr;
+	struct sock *sk = 0;
+	struct net *net = 0;
+	__u32 inum = 0;
+
+	if (CORE_READ(sk, skb, sk) != 0 || !sk)
+		return 0;
+	if (CORE_READ(net, sk, __sk_common.skc_net.net) != 0 || !net)
+		return 0;
+	if (CORE_READ(inum, net, ns.inum) != 0)
+		return 0;
+	return inum;
+}
+
 /* rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
  *                   struct netlink_ext_ack *extack): the fentry context is the
  * array of the traced function's arguments. */
@@ -222,11 +282,19 @@ int netra_rtnl_msg(unsigned long long *ctx)
 {
 	struct rtnl_nlmsghdr hdr = {};
 	struct rtnl_event *e;
+	__u32 *want, netns, zero = 0;
 	__u64 pt;
 
 	if (bpf_probe_read_kernel(&hdr, sizeof(hdr), (const void *)ctx[1]) != 0)
 		return 0;
 	if (!modifies_network(hdr.nlmsg_type))
+		return 0;
+
+	/* Only the namespace userspace records changes in: interface indexes of any other
+	 * namespace would collide with it. An unreadable namespace (0) is kept. */
+	netns = request_netns((const void *)ctx[0]);
+	want = bpf_map_lookup_elem(&rtnl_config, &zero);
+	if (want && *want != 0 && netns != 0 && netns != *want)
 		return 0;
 
 	e = bpf_ringbuf_reserve(&rtnl_events, sizeof(*e), 0);
@@ -245,6 +313,8 @@ int netra_rtnl_msg(unsigned long long *ctx)
 	e->nlmsg_type = hdr.nlmsg_type;
 	e->nlmsg_flags = hdr.nlmsg_flags;
 	e->nlmsg_len = hdr.nlmsg_len;
+	e->netns_ino = netns;
+	e->_pad2 = 0;
 	e->family = 0;
 	e->dst_len = 0;
 	e->ifindex = 0;

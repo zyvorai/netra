@@ -15,6 +15,7 @@ import (
 type Options struct {
 	ObjectPath string
 	BTFPath    string
+	NetNS      uint32
 	Log        *slog.Logger
 }
 

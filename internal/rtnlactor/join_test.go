@@ -374,3 +374,39 @@ func TestAMessageLengthOfZeroIsUnknownAndNotAProbe(t *testing.T) {
 		t.Fatalf("an unknown-length untargeted request must leave the event unattributed, got %q", origin)
 	}
 }
+
+func inNetNS(r Record, ns uint32) Record { r.NetNS = ns; return r }
+
+// Interface indexes are per network namespace. A pod's CNI setup issues requests for its
+// own ifindex 3 while the host has an unrelated ifindex 3: they must not be confused.
+func TestARequestInAnotherNetworkNamespaceNeverExplainsAChangeHere(t *testing.T) {
+	const host, pod = 4026531840, 4026532999
+	j := joiner()
+	j.netns = host
+	j.Add(inNetNS(linkRec(50, "cni-plugin", RTMSetLink, 3, "", 0x5, 1000), pod)) // the pod's eth0 is ifindex 3
+	hostEvent := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", Interface: "eth3", InterfaceIndex: 3, ObservedAt: at(1030)}
+	if a, origin := j.Attribute(hostEvent); a != nil || origin != models.NetlinkOriginKernel {
+		t.Fatalf("a pod-namespace request was credited with a host change on the same ifindex: %+v %q", a, origin)
+	}
+	// The same request in the host namespace does explain it.
+	j.Add(inNetNS(linkRec(51, "ip", RTMSetLink, 3, "", 0x5, 1000), host))
+	if a, _ := j.Attribute(hostEvent); a == nil || a.Comm != "ip" || a.Confidence != models.NetlinkActorProbable {
+		t.Fatalf("the host-namespace request must explain it, and only it: %+v", a)
+	}
+}
+
+func TestAnUnknownNamespaceIsKeptAndAJoinerWithoutOneChecksNothing(t *testing.T) {
+	const host = 4026531840
+	j := joiner()
+	j.netns = host
+	j.Add(inNetNS(linkRec(1, "ip", RTMSetLink, 3, "", 0x5, 1000), 0)) // the kernel program could not read it
+	e := models.NetlinkEvent{Kind: models.NetlinkKindLink, Action: "new", InterfaceIndex: 3, ObservedAt: at(1030)}
+	if a, _ := j.Attribute(e); a == nil {
+		t.Fatal("a request with an unreadable namespace must not be discarded")
+	}
+	j2 := joiner() // netns 0: no check
+	j2.Add(inNetNS(linkRec(1, "ip", RTMSetLink, 3, "", 0x5, 1000), 4026532999))
+	if a, _ := j2.Attribute(e); a == nil {
+		t.Fatal("a joiner given no namespace must not filter")
+	}
+}

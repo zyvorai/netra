@@ -133,6 +133,11 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 	if child.CgroupID == 0 || child.PID == 0 {
 		t.Fatalf("child record lacks ids: %+v", *child)
 	}
+	// The kernel program read the requester's network namespace (three CO-RE member
+	// reads) and it is this one.
+	if self := rtnlactor.SelfNetNS(); self == 0 || child.NetNS != self {
+		t.Fatalf("the record's network namespace is %d, want this process's %d", child.NetNS, self)
+	}
 	// `ip link add nlrt0 ...` is a create naming the new device by IFLA_IFNAME.
 	if create == nil || create.IfName != "nlrt0" {
 		t.Fatalf("no create request carrying NLM_F_CREATE and the name nlrt0 (create=%+v)", create)
@@ -236,7 +241,7 @@ func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	j := rtnlactor.NewJoiner(nil)
+	j := rtnlactor.NewJoiner(nil, rtnlactor.SelfNetNS())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	var mu sync.Mutex
@@ -351,5 +356,44 @@ func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
 
 	if r := w.Report(500); r.Actor == nil || !r.Actor.Available || r.Actor.Records == 0 {
 		t.Fatalf("the report must carry the sensor's status: %+v", r.Actor)
+	}
+}
+
+// Interface indexes are per network namespace and the hook sees every namespace's
+// requests (a pod's CNI setup included). Changes made in another namespace must not be
+// recorded at all: the program is told which namespace to record and drops the rest.
+func TestRTNLActorRecordsOnlyItsOwnNetworkNamespace(t *testing.T) {
+	_, ch := startRTNL(t)
+	self := rtnlactor.SelfNetNS()
+	if self == 0 {
+		t.Fatal("cannot read this process's network namespace")
+	}
+
+	_ = exec.Command("ip", "netns", "del", "nlxns").Run()
+	run(t, "netns", "add", "nlxns")
+	t.Cleanup(func() { _ = exec.Command("ip", "netns", "del", "nlxns").Run() })
+	_ = exec.Command("ip", "link", "del", "nlns0").Run()
+	t.Cleanup(func() { _ = exec.Command("ip", "link", "del", "nlns0").Run() })
+
+	// A change in ANOTHER namespace (ip -n runs its request from inside it), then one in ours.
+	run(t, "-n", "nlxns", "link", "add", "xa", "type", "veth", "peer", "name", "xb")
+	run(t, "link", "add", "nlns0", "type", "veth", "peer", "name", "nlns1")
+
+	mine := next(t, ch, "the create in this namespace", func(r rtnlactor.Record) bool {
+		return r.Type == rtnlactor.RTMNewLink && r.Comm == "ip" && r.IfName == "nlns0"
+	})
+	if mine.NetNS != self {
+		t.Fatalf("this namespace's request carries namespace %d, want %d", mine.NetNS, self)
+	}
+	// Give the other namespace's request every chance to appear, then look at everything seen.
+	time.Sleep(500 * time.Millisecond)
+	for len(ch) > 0 {
+		r := <-ch
+		if r.IfName == "xa" || r.IfName == "xb" {
+			t.Fatalf("a request in another network namespace was recorded: %+v", r)
+		}
+		if r.NetNS != 0 && r.NetNS != self {
+			t.Fatalf("a record from namespace %d reached a sensor recording %d: %+v", r.NetNS, self, r)
+		}
 	}
 }

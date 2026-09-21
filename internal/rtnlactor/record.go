@@ -24,7 +24,7 @@ import (
 )
 
 // EventSize is the size of the kernel's struct rtnl_event (bpf/netra_rtnl.c).
-const EventSize = 88
+const EventSize = 96
 
 // NLMFCreate is NLM_F_CREATE: the request creates an object rather than operating
 // on an existing one.
@@ -73,6 +73,10 @@ type Record struct {
 	// iproute2 sends one at the start of every `ip link` command to probe whether the
 	// kernel supports RTM_NEWLINK, and it changes nothing.
 	Len uint32
+	// NetNS is the inode of the network namespace the request applies to; 0 when the
+	// kernel program could not read it. Interface indexes are per namespace, so a
+	// request only explains a change in the same one.
+	NetNS uint32
 	// IfName is the device a link request names by IFLA_IFNAME when it gives no
 	// index; empty otherwise. For a create it is the new link's name, which says
 	// nothing about a peer created with it.
@@ -104,6 +108,7 @@ func Parse(b []byte) (Record, error) {
 		Comm:     comm(b[40:56]),
 		Dest:     routeDest(le.Uint16(b[24:26]), b[32], b[33], b[56:72]),
 		IfName:   comm(b[72:88]),
+		NetNS:    le.Uint32(b[88:92]),
 	}, nil
 }
 

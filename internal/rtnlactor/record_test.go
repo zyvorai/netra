@@ -129,6 +129,19 @@ func TestParseDecodesTheMessageLength(t *testing.T) {
 	}
 }
 
+func TestParseDecodesTheNetworkNamespace(t *testing.T) {
+	b := fullEvent(1, 2, 3, 4, RTMNewRoute, 0, 7, "ip", afInet, 24, []byte{10, 91, 0, 0}, "")
+	binary.LittleEndian.PutUint32(b[88:], 4026531840)
+	r, err := Parse(b)
+	if err != nil || r.NetNS != 4026531840 {
+		t.Fatalf("record=%+v err=%v", r, err)
+	}
+	// The namespace must not bleed into the fields before it.
+	if r.IfName != "" || r.Comm != "ip" || r.Dest != "10.91.0.0/24" {
+		t.Fatalf("record=%+v", r)
+	}
+}
+
 func TestParseComm(t *testing.T) {
 	// A full 15-character name has its NUL at byte 15; a 16-byte field with no NUL
 	// (never produced by the kernel, but defensive) is taken whole.
@@ -159,8 +172,9 @@ func TestParseRejectsAShortRecord(t *testing.T) {
 }
 
 func TestEventSizeMatchesTheKernelStruct(t *testing.T) {
-	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 2 flags + 4 ifindex + 1 family + 1 dst_len + 6 pad + 16 comm + 16 dst + 16 ifname.
-	if EventSize != 8+8+4+4+2+2+4+1+1+6+16+16+16 {
+	// 8 ts + 8 cgroup + 4 tgid + 4 pid + 2 type + 2 flags + 4 ifindex + 1 family + 1 dst_len + 2 pad + 4 len +
+	// 16 comm + 16 dst + 16 ifname + 4 netns + 4 pad.
+	if EventSize != 8+8+4+4+2+2+4+1+1+2+4+16+16+16+4+4 {
 		t.Fatalf("EventSize=%d", EventSize)
 	}
 }

@@ -38,6 +38,8 @@ type Joiner struct {
 	mu      sync.Mutex
 	resolve Resolver
 	started time.Time
+	// netns is the network namespace changes are recorded in (0: not checked).
+	netns uint32
 
 	ring      []Record
 	head      int
@@ -47,8 +49,13 @@ type Joiner struct {
 	droppedAt time.Time
 }
 
-// NewJoiner returns a Joiner. resolve may be nil (no pod names).
-func NewJoiner(resolve Resolver) *Joiner { return newJoiner(resolve, time.Now()) }
+// NewJoiner returns a Joiner for changes recorded in network namespace netns
+// (SelfNetNS for the agent; 0 disables the check). resolve may be nil (no pod names).
+func NewJoiner(resolve Resolver, netns uint32) *Joiner {
+	j := newJoiner(resolve, time.Now())
+	j.netns = netns
+	return j
+}
 
 func newJoiner(resolve Resolver, started time.Time) *Joiner {
 	return &Joiner{resolve: resolve, started: started, ring: make([]Record, maxRecords)}
@@ -153,6 +160,13 @@ func (j *Joiner) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string)
 	for i := 0; i < j.size; i++ {
 		r := j.ring[(j.head+i)%len(j.ring)]
 		if r.Wall.Before(lo) || r.Wall.After(hi) || !hasType(types, r.Type) {
+			continue
+		}
+		// Interface indexes are per network namespace: a request made in another one
+		// (a pod's CNI setup, say) cannot explain a change here, whatever its ifindex.
+		// The kernel program already drops them; this is the second guard, and a record
+		// whose namespace is unknown (0) is kept.
+		if j.netns != 0 && r.NetNS != 0 && r.NetNS != j.netns {
 			continue
 		}
 		// A request that names an interface only explains a change on that

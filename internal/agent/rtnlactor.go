@@ -50,7 +50,7 @@ func (a *Agent) startRTNLActor(ctx context.Context, target actorTarget) {
 		a.log.Warn("netlink change attribution unavailable; changes are recorded without a requester", "error", err)
 		return
 	}
-	j := rtnlactor.NewJoiner(a.rtnlResolve)
+	j := rtnlactor.NewJoiner(a.rtnlResolve, rtnlactor.SelfNetNS())
 	a.rtnlSensor = s
 	target.SetAttributor(j, rtnlAttributionGrace)
 	go s.Run(ctx, j.Add)

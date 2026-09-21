@@ -30,7 +30,10 @@ type Options struct {
 	ObjectPath string
 	// BTFPath overrides defaultBTF (tests).
 	BTFPath string
-	Log     *slog.Logger
+	// NetNS is the network namespace (inode) whose requests are recorded; 0 means this
+	// process's own, which is the right answer for the agent (hostNetwork) and for tests.
+	NetNS uint32
+	Log   *slog.Logger
 }
 
 // Sensor is a loaded, attached rtnetlink_rcv_msg fentry program.
@@ -67,6 +70,18 @@ func Load(opt Options) (*Sensor, error) {
 	if prog == nil || events == nil {
 		coll.Close()
 		return nil, errors.New("bpf object lacks netra_rtnl_msg or rtnl_events (out of date?)")
+	}
+	// Name the one namespace to record BEFORE attaching, so the program never records
+	// another namespace's requests, whose interface indexes could collide.
+	netns := opt.NetNS
+	if netns == 0 {
+		netns = SelfNetNS()
+	}
+	if cfg := coll.Maps["rtnl_config"]; cfg != nil && netns != 0 {
+		if err := cfg.Put(uint32(0), netns); err != nil {
+			coll.Close()
+			return nil, fmt.Errorf("set the recorded network namespace: %w", err)
+		}
 	}
 	l, err := link.AttachTracing(link.TracingOptions{Program: prog})
 	if err != nil {

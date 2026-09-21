@@ -153,9 +153,17 @@ agent:
 ```
 
 `NETRA_RTNL_ACTOR=auto|off` (and `NETRA_BPF_RTNL_OBJECT`, default
-`/opt/netra/bpf/netra_rtnl.o`). It needs the recorder to be on. Every network
-namespace's requests reach the hook; only ones that match a change the agent recorded
-in the host namespace are used.
+`/opt/netra/bpf/netra_rtnl.o`). It needs the recorder to be on.
+
+**Network namespaces.** Interface indexes are per namespace, and the hook runs for every
+namespace's requests (a pod's CNI setup included), so a pod's request for its `ifindex 3`
+could otherwise be credited with an unrelated host change on the host's `ifindex 3`. The
+kernel program reads the requester's namespace (the socket's, as `rtnetlink_rcv_msg`
+itself uses it), the agent tells it the one namespace it records changes in (its own:
+the host's, since the agent runs `hostNetwork`), and requests from any other namespace
+are dropped in the kernel before anything is reserved. That also keeps a busy node's pod
+churn out of the ring buffer. The joiner refuses to match across namespaces as a second
+guard.
 
 ## Findings: what is wrong now
 
