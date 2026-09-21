@@ -59,6 +59,7 @@ go test ./...
 ./scripts/ci-p1-p5-unit.sh
 ./scripts/ci-netlink-unit.sh
 ./scripts/ci-bpfattach-unit.sh
+./scripts/ci-deploy-guards.sh
 make test-features
 make test-netractl-commands
 make test-netractl-live
@@ -87,6 +88,7 @@ CI jobs live in `.github/workflows/ci.yml` (`go`, `web`, `helm`, `ebpf`,
 | `scripts/ci-auto-capture-veth.sh` | `auto-capture-veth` — AF_PACKET + iperf3 + drop context |
 | `scripts/ci-flow-observe-veth.sh` | `flow-observe-veth` — veth + iperf3 flow history, RED, traces, stacks |
 | `scripts/ci-netlink-unit.sh` | `go` — netlink recorder ring/cursor, resubscribe, controller history, API, metrics |
+| `scripts/ci-deploy-guards.sh` | `go` — deploy-remote.sh disk guard, image GC repair, readiness wait, script ordering |
 | `scripts/ci-bpfattach-unit.sh` | `go` — BPF attachment inventory, hook drift, carry-forward, API, metrics |
 | `scripts/ci-netlink-veth.sh` | `netlink-veth-smoke` — real RTNL in a throwaway netns, forced ENOBUFS overrun |
 | `scripts/ci-http-status-smoke.sh` | `http-status-smoke` — agent + cleartext HTTP/1 503 |

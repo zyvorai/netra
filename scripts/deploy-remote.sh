@@ -17,6 +17,14 @@
 # scripts syncing into that shared parent with `rsync --delete` — a
 # sibling project's delete-sync can otherwise wipe netra's checkout mid-run.
 #
+# Deploy guards (scripts/lib/deploy-guards.sh): the images are imported into k3s under
+# a fixed tag, and kubelet's image GC (disk above 85%) can remove one before its pod
+# starts, leaving the controller in ImagePullBackOff with helm reporting success.
+# The deploy warns at NETRA_DEPLOY_WARN_DISK_PCT (default 80) and refuses at
+# NETRA_DEPLOY_MAX_DISK_PCT (default 95); NETRA_DEPLOY_SKIP_DISK_CHECK=1 overrides.
+# It re-imports a missing image and waits for the pods to be Ready
+# (NETRA_DEPLOY_READY_TIMEOUT, default 600 s) instead of trusting helm.
+#
 # Netra runs on top of Cilium; it does not replace the CNI.
 # UI/API default NodePort/host access: :30870
 set -euo pipefail
@@ -34,7 +42,7 @@ POSITIONAL=()
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 
 usage() {
-  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -143,6 +151,15 @@ if [[ ! -r "\$HOME/.kube/netra-k3s.yaml" ]] || [[ /etc/rancher/k3s/k3s.yaml -nt 
 fi
 export KUBECONFIG="\$HOME/.kube/netra-k3s.yaml"
 
+# The images are built here and imported into containerd under a fixed tag, so
+# kubelet's image GC can remove one between the import and its pod starting (the
+# disk near 85%). These guards say so up front, re-import a missing image, and wait
+# for the pods to be Ready instead of trusting helm (scripts/lib/deploy-guards.sh).
+source scripts/lib/deploy-guards.sh
+CONTROLLER_IMAGE="ghcr.io/zyvorai/netra:0.27.81"
+AGENT_IMAGE="ghcr.io/zyvorai/netra-agent:0.27.81"
+deploy_disk_guard /
+
 if [[ "\$PROFILE" == "k3s" ]]; then
   bash scripts/lib/ensure-cilium-k3s.sh
 fi
@@ -248,10 +265,16 @@ import_agent_image() {
 }
 
 if [[ "\$PROFILE" != "quick" ]]; then
+  # Build both, then import both: an imported image no pod uses yet is exactly what
+  # kubelet's image GC collects, and the second build is what pushes the disk toward
+  # its threshold, so importing the controller image first left it exposed for the
+  # whole agent build.
   build_image
-  import_image
   if [[ "\$AGENT_ENABLED" == "true" ]]; then
     build_agent_image
+  fi
+  import_image
+  if [[ "\$AGENT_ENABLED" == "true" ]]; then
     import_agent_image
   fi
 fi
@@ -277,6 +300,11 @@ if [[ -n "\$AGENT_INTERFACES" ]]; then
 fi
 if [[ -n "\$AGENT_XDP_INTERFACES" ]]; then
   IFACE_SET+=(--set "agent.xdpInterfaces=\$AGENT_XDP_INTERFACES")
+fi
+
+deploy_ensure_image "\$CONTROLLER_IMAGE"
+if [[ "\$AGENT_ENABLED" == "true" ]]; then
+  deploy_ensure_image "\$AGENT_IMAGE"
 fi
 
 helm upgrade --install netra ./helm/netra \
@@ -305,11 +333,17 @@ helm upgrade --install netra ./helm/netra \
 # diff to roll out, and the old pod keeps serving the old image indefinitely.
 # Force a real restart every run so the freshly imported image is always
 # what ends up running, not just what's sitting in the local image store.
+deploy_ensure_image "\$CONTROLLER_IMAGE"
 kubectl -n netra-system rollout restart deployment/netra
-kubectl -n netra-system rollout status deploy/netra --timeout=180s
+# Not "rollout status --timeout=180s": on a loaded host that timed out and aborted
+# the script before the agent restart, and it cannot tell a slow rollout from a pod
+# stuck in ImagePullBackOff. This waits for Ready, repairs a missing image, and
+# fails loudly (with the pods printed) if the controller does not come up.
+deploy_wait_ready "app.kubernetes.io/name=netra" "\$CONTROLLER_IMAGE"
 if [[ "\$AGENT_ENABLED" == "true" ]]; then
+  deploy_ensure_image "\$AGENT_IMAGE"
   kubectl -n netra-system rollout restart daemonset/netra-agent
-  kubectl -n netra-system rollout status daemonset/netra-agent --timeout=180s
+  deploy_wait_ready "app.kubernetes.io/name=netra-agent" "\$AGENT_IMAGE"
 fi
 echo "API_KEY=\$API_KEY"
 echo "NETRA_URL=https://\$(hostname -I | awk '{print \$1}'):30870"

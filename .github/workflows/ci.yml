@@ -109,6 +109,14 @@ jobs:
       # the controller carry-forward. The real-kernel half runs in the `ebpf` job.
       # Same command locally: ./scripts/ci-bpfattach-unit.sh
       run: ./scripts/ci-bpfattach-unit.sh
+    - name: Deploy guards (scripted)
+      # deploy-remote.sh imports images under a fixed tag and kubelet's image GC can
+      # remove one before its pod starts (ImagePullBackOff, helm still "succeeds").
+      # Exercises the disk guard, the image re-import and the readiness wait against
+      # stubbed df/k3s/kubectl, and checks the rendered remote script parses and
+      # orders builds, imports and helm correctly. Same command locally:
+      # ./scripts/ci-deploy-guards.sh
+      run: ./scripts/ci-deploy-guards.sh
     - name: OIDC login + RBAC + metrics-token unit + race (scripted)
       # JWT verifier attacks (alg none/HS256/audience/issuer/forged kid),
       # the role table over the real route set, spoof-proof audit actor and
