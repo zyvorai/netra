@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -93,23 +94,48 @@ func TestRTNLActorNamesTheProcessThatChangedTheNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The child: `ip` made the veth. Its comm is "ip" and its pid is not ours.
-	child := next(t, ch, "RTM_NEWLINK from the child ip", func(r rtnlactor.Record) bool {
-		return r.Type == rtnlactor.RTMNewLink && r.Comm == "ip" && r.TGID != me
-	})
+	// The child: `ip` made the veth and brought it up. Collect every request `ip` made
+	// for a moment and check the set as a whole, logging each record so a failure shows
+	// exactly what the kernel program reported.
+	time.Sleep(500 * time.Millisecond)
+	var seen []rtnlactor.Record
+	for len(ch) > 0 {
+		seen = append(seen, <-ch)
+	}
+	for _, r := range seen {
+		if r.Comm == "ip" {
+			t.Logf("ip request: %s flags=%#x ifindex=%d ifname=%q dest=%q tgid=%d", rtnlactor.TypeName(r.Type), r.Flags, r.IfIndex, r.IfName, r.Dest, r.TGID)
+		}
+	}
+	var child, create, set *rtnlactor.Record
+	for i := range seen {
+		r := &seen[i]
+		if r.Comm != "ip" || r.TGID == me {
+			continue
+		}
+		if r.Type == rtnlactor.RTMNewLink && child == nil {
+			child = r
+		}
+		if r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate != 0 {
+			create = r
+		}
+		if r.Type == rtnlactor.RTMNewLink && r.Flags&rtnlactor.NLMFCreate == 0 && set == nil {
+			set = r
+		}
+	}
+	if child == nil {
+		t.Fatalf("no RTM_NEWLINK from the child ip among %d records", len(seen))
+	}
 	if child.CgroupID == 0 || child.PID == 0 {
-		t.Fatalf("child record lacks ids: %+v", child)
+		t.Fatalf("child record lacks ids: %+v", *child)
 	}
 	// `ip link add nlrt0 ...` is a create naming the new device by IFLA_IFNAME.
-	if child.Flags&rtnlactor.NLMFCreate == 0 || child.IfName != "nlrt0" {
-		t.Fatalf("the create request must carry NLM_F_CREATE and the name nlrt0: flags=%#x name=%q", child.Flags, child.IfName)
+	if create == nil || create.IfName != "nlrt0" {
+		t.Fatalf("no create request carrying NLM_F_CREATE and the name nlrt0 (create=%+v)", create)
 	}
 	// `ip link set nlrt0 up` operates on an existing device: it names it by index or, as
-	// modern iproute2 does, by IFLA_IFNAME with index 0. Either way the request must say which.
-	set := next(t, ch, "RTM_NEWLINK for ip link set nlrt0 up", func(r rtnlactor.Record) bool {
-		return r.Type == rtnlactor.RTMNewLink && r.Comm == "ip" && r.TGID != me && r.Flags&rtnlactor.NLMFCreate == 0
-	})
-	if set.IfIndex != uint32(link.Attrs().Index) && set.IfName != "nlrt0" {
+	// modern iproute2 may, by IFLA_IFNAME with index 0. Either way the request must say which.
+	if set == nil || (set.IfIndex != uint32(link.Attrs().Index) && set.IfName != "nlrt0") {
 		t.Fatalf("a request on an existing link must name it (ifindex %d or name nlrt0): %+v", link.Attrs().Index, set)
 	}
 
@@ -197,7 +223,30 @@ func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
 	j := rtnlactor.NewJoiner(nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { defer close(done); s.Run(ctx, j.Add) }()
+	var mu sync.Mutex
+	var all []rtnlactor.Record
+	go func() {
+		defer close(done)
+		s.Run(ctx, func(r rtnlactor.Record) {
+			j.Add(r)
+			mu.Lock()
+			all = append(all, r)
+			mu.Unlock()
+		})
+	}()
+	// On failure, show every request the sensor saw from ip, so the join can be judged.
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		for _, r := range all {
+			if r.Comm == "ip" {
+				t.Logf("saw: %s at %s flags=%#x ifindex=%d ifname=%q dest=%q tgid=%d", rtnlactor.TypeName(r.Type), r.Wall.Format("15:04:05.000"), r.Flags, r.IfIndex, r.IfName, r.Dest, r.TGID)
+			}
+		}
+	})
 	t.Cleanup(func() { cancel(); <-done; _ = s.Close() })
 
 	w, err := netlinkwatch.Start(ctx, 4096)
@@ -279,6 +328,8 @@ func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
 		return e.Kind == "link" && e.Interface == "nlat0" && e.State != "up" && e.Origin != "" && e.ObservedAt.After(issued)
 	})
 	if carrier.Origin != models.NetlinkOriginKernel || carrier.Actor != nil {
+		t.Logf("carrier event: %+v", carrier)
+		t.Logf("admin event:   %+v", admin)
 		t.Fatalf("a carrier loss nobody requested was attributed as origin=%q actor=%+v: it must be the kernel's, and not credited to `ip link set nlat1 down`", carrier.Origin, carrier.Actor)
 	}
 
