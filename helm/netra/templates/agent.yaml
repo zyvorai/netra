@@ -77,6 +77,8 @@ spec:
           value: {{ .Values.agent.netlinkEventBuffer | default 4096 | quote }}
         - name: NETRA_BPF_ATTACH
           value: {{ .Values.agent.bpfAttach | default "auto" | quote }}
+        - name: NETRA_RTNL_ACTOR
+          value: {{ .Values.agent.rtnlActor | default "auto" | quote }}
         - name: NETRA_TLS_UPROBES
           value: {{ .Values.agent.tlsUprobes | default "off" | quote }}
         {{- if .Values.agent.tlsUprobesComms }}

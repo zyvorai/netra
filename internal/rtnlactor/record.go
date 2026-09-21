@@ -50,6 +50,10 @@ type Record struct {
 	TGID, PID uint32
 	// Type is the RTM_* message type.
 	Type uint16
+	// IfIndex is the interface the request names: set for link, address and
+	// neighbor requests that carry one, 0 otherwise (a link create names its
+	// interface by name, and routes carry it in an attribute).
+	IfIndex uint32
 	// Comm is the process name (at most 15 characters, as the kernel keeps it).
 	Comm string
 }
@@ -66,6 +70,7 @@ func Parse(b []byte) (Record, error) {
 		TGID:     le.Uint32(b[16:20]),
 		PID:      le.Uint32(b[20:24]),
 		Type:     le.Uint16(b[24:26]),
+		IfIndex:  le.Uint32(b[28:32]),
 		Comm:     comm(b[32:48]),
 	}, nil
 }

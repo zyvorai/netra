@@ -1,10 +1,10 @@
 image:
   repository: ghcr.io/zyvorai/netra
-  tag: "0.28.4"
+  tag: "0.28.5"
   pullPolicy: IfNotPresent
 agentImage:
   repository: ghcr.io/zyvorai/netra-agent
-  tag: "0.28.4"
+  tag: "0.28.5"
 replicaCount: 1
 ha:
   enabled: false
@@ -328,6 +328,12 @@ agent:
   # (docs/bpf-attachments.md). No new privilege; it never attaches or detaches
   # anything. auto|off.
   bpfAttach: auto
+  # Names the process behind each recorded network change (bpf/netra_rtnl.c, an
+  # fentry on rtnetlink_rcv_msg): comm, pid and cgroup only, never argv or payload.
+  # Needs kernel BTF and fentry; reported as unavailable, with the reason, where the
+  # kernel cannot run it, and the recorder carries on without a requester. Needs the
+  # netlink recorder. auto|off.
+  rtnlActor: auto
   # Sampled application-protocol observation (bpf/netra_l7sample.c,
   # docs/l7-sampling.md): which Redis commands, SQL verbs, Kafka APIs and gRPC
   # methods workloads use and how often they fail. It reads application payload

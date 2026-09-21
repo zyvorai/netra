@@ -54,6 +54,8 @@ type netlinkNodeState struct {
 	// spot, not a quiet period.
 	HistorySince time.Time               `json:"historySince,omitzero"`
 	Snapshot     *models.NetlinkSnapshot `json:"snapshot,omitempty"`
+	// Actor is the requester-attribution sensor's state: nil when it is off.
+	Actor *models.NetlinkActorStatus `json:"actor,omitempty"`
 }
 
 // netlinkChanges serves GET /api/v1/netlink?view=events|state|all&node=&kind=&since=&limit=.
@@ -150,6 +152,7 @@ func netlinkStates(agents []models.AgentStatus, withSnapshot bool) []netlinkNode
 			st.Dropped, st.Missed, st.Overruns = n.Dropped, n.Missed, n.Overruns
 			st.Resubscribes, st.Suppressed, st.Totals = n.Resubscribes, n.Suppressed, n.Totals
 			st.Generation, st.ResyncedAt, st.Counts = n.Generation, n.ResyncedAt, n.Counts
+			st.Actor = n.Actor
 			if len(n.Events) > 0 {
 				st.HistorySince = n.Events[0].ObservedAt
 			}

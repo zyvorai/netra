@@ -6,7 +6,9 @@ import (
 	"context"
 	"runtime"
 	"testing"
+	"time"
 
+	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/netlinkwatch"
 )
 
@@ -73,5 +75,54 @@ func TestNetlinkEventBufferEnv(t *testing.T) {
 		if got := netlinkEventBuffer(); got != netlinkwatch.DefaultCapacity {
 			t.Fatalf("value %q got %d, want the default", v, got)
 		}
+	}
+}
+
+type fakeActorTarget struct {
+	attributor netlinkwatch.Attributor
+	grace      time.Duration
+	why        string
+}
+
+func (f *fakeActorTarget) SetAttributor(a netlinkwatch.Attributor, g time.Duration) {
+	f.attributor, f.grace = a, g
+}
+func (f *fakeActorTarget) SetActorUnavailable(why string) { f.why = why }
+
+func TestRTNLActorOffLeavesTheRecorderAlone(t *testing.T) {
+	t.Setenv("NETRA_RTNL_ACTOR", "off")
+	a := newNetlinkWatchAgent()
+	f := &fakeActorTarget{}
+	a.startRTNLActor(context.Background(), f)
+	if f.attributor != nil || f.why != "" || a.rtnlSensor != nil {
+		t.Fatalf("NETRA_RTNL_ACTOR=off must change nothing: %+v", f)
+	}
+}
+
+func TestRTNLActorThatCannotLoadIsReportedWithItsReasonAndDoesNotStopAnything(t *testing.T) {
+	t.Setenv("NETRA_RTNL_ACTOR", "auto")
+	t.Setenv("NETRA_BPF_RTNL_OBJECT", "/nonexistent/netra_rtnl.o")
+	a := newNetlinkWatchAgent()
+	f := &fakeActorTarget{}
+	a.startRTNLActor(context.Background(), f)
+	if f.attributor != nil || a.rtnlSensor != nil {
+		t.Fatal("a sensor that failed to load must not attach anything")
+	}
+	if f.why == "" || len(f.why) > maxWhy {
+		t.Fatalf("the report must carry a bounded reason, got %q", f.why)
+	}
+}
+
+func TestRTNLResolveNamesThePodOfACgroup(t *testing.T) {
+	a := newNetlinkWatchAgent()
+	a.workloadByCgroup = map[uint64]models.WorkloadIdentity{
+		77: {Namespace: "kube-system", Pod: "calico-node-x", WorkloadName: "calico-node"},
+	}
+	ns, pod, wl, ok := a.rtnlResolve(77)
+	if !ok || ns != "kube-system" || pod != "calico-node-x" || wl != "calico-node" {
+		t.Fatalf("resolve=%q %q %q %v", ns, pod, wl, ok)
+	}
+	if _, _, _, ok := a.rtnlResolve(1); ok {
+		t.Fatal("a host cgroup has no pod")
 	}
 }

@@ -415,3 +415,106 @@ func TestCapacityIsClamped(t *testing.T) {
 		t.Fatalf("capacity=%d", w.capacity)
 	}
 }
+
+type fakeAttributor struct {
+	calls  int
+	actors map[string]*models.NetlinkActor // by destination
+	origin string
+}
+
+func (f *fakeAttributor) Attribute(e models.NetlinkEvent) (*models.NetlinkActor, string) {
+	f.calls++
+	if a, ok := f.actors[e.Destination]; ok {
+		return a, models.NetlinkOriginProcess
+	}
+	return nil, f.origin
+}
+func (f *fakeAttributor) Status() models.NetlinkActorStatus {
+	return models.NetlinkActorStatus{Available: true, Records: 7, Dropped: 1}
+}
+
+func routeEv(dst string) models.NetlinkEvent {
+	return models.NetlinkEvent{Kind: models.NetlinkKindRoute, Action: "new", Destination: dst}
+}
+
+func TestEventsAreAttributedOnTheReportedCopyNotInTheRing(t *testing.T) {
+	w := newWatcher(8)
+	clock := time.Unix(5_000, 0).UTC()
+	w.now = func() time.Time { return clock }
+	w.append(routeEv("10.1.0.0/24"))
+	w.append(routeEv("10.2.0.0/24"))
+	clock = clock.Add(time.Second)
+	f := &fakeAttributor{actors: map[string]*models.NetlinkActor{"10.1.0.0/24": {Confidence: "probable", Comm: "calico-node"}}, origin: models.NetlinkOriginKernel}
+	w.SetAttributor(f, 300*time.Millisecond)
+
+	r := w.Report(10)
+	if len(r.Events) != 2 {
+		t.Fatalf("events=%d", len(r.Events))
+	}
+	if r.Events[0].Origin != models.NetlinkOriginProcess || r.Events[0].Actor == nil || r.Events[0].Actor.Comm != "calico-node" {
+		t.Fatalf("first event=%+v", r.Events[0])
+	}
+	if r.Events[1].Origin != models.NetlinkOriginKernel || r.Events[1].Actor != nil {
+		t.Fatalf("second event=%+v", r.Events[1])
+	}
+	// The ring itself stays raw: a failed delivery resends and is attributed again.
+	if w.ring[0].Actor != nil || w.ring[0].Origin != "" {
+		t.Fatal("the ring was mutated by attribution")
+	}
+	callsBefore := f.calls
+	if again := w.Report(10); len(again.Events) != 2 || again.Events[0].Actor == nil {
+		t.Fatalf("a resent event lost its attribution: %+v", again.Events)
+	}
+	if f.calls <= callsBefore {
+		t.Fatal("a resent event was not re-attributed")
+	}
+	if r.Actor == nil || !r.Actor.Available || r.Actor.Records != 7 {
+		t.Fatalf("the report must carry the sensor's status: %+v", r.Actor)
+	}
+}
+
+func TestAYoungEventWaitsForItsRequestRecord(t *testing.T) {
+	w := newWatcher(8)
+	clock := time.Unix(5_000, 0).UTC()
+	w.now = func() time.Time { return clock }
+	w.SetAttributor(&fakeAttributor{}, 300*time.Millisecond)
+	w.append(routeEv("10.1.0.0/24"))
+	clock = clock.Add(100 * time.Millisecond)
+	w.append(routeEv("10.2.0.0/24"))
+	clock = clock.Add(250 * time.Millisecond) // first is 350 ms old, second 250 ms
+
+	r := w.Report(10)
+	if len(r.Events) != 1 || r.Events[0].Destination != "10.1.0.0/24" || r.Cursor != 1 {
+		t.Fatalf("only the event past the grace period may go out: %+v cursor=%d", r.Events, r.Cursor)
+	}
+	if r.Sequence != 2 {
+		t.Fatalf("sequence=%d: the held-back event is still pending", r.Sequence)
+	}
+	w.Commit(r)
+	clock = clock.Add(100 * time.Millisecond)
+	if next := w.Report(10); len(next.Events) != 1 || next.Events[0].Destination != "10.2.0.0/24" {
+		t.Fatalf("the held-back event must follow: %+v", next.Events)
+	}
+}
+
+func TestWithoutAnAttributorEventsAreUntouchedAndUnheld(t *testing.T) {
+	w := newWatcher(4)
+	w.append(routeEv("10.1.0.0/24"))
+	r := w.Report(10)
+	if len(r.Events) != 1 || r.Events[0].Origin != "" || r.Events[0].Actor != nil || r.Actor != nil {
+		t.Fatalf("report=%+v", r)
+	}
+}
+
+func TestAnUnavailableSensorIsSaidInsteadOfSilent(t *testing.T) {
+	w := newWatcher(4)
+	w.SetActorUnavailable("kernel BTF is not available")
+	r := w.Report(1)
+	if r.Actor == nil || r.Actor.Available || r.Actor.Unavailable != "kernel BTF is not available" {
+		t.Fatalf("actor=%+v", r.Actor)
+	}
+	w.append(routeEv("10.1.0.0/24"))
+	if ev := w.Report(10).Events; len(ev) != 1 || ev[0].Origin != "" {
+		t.Fatalf("without a sensor no origin may be claimed: %+v", ev)
+	}
+}

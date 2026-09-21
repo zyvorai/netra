@@ -85,10 +85,41 @@ type Watcher struct {
 	sentGen uint64
 	sentAt  time.Time
 
+	// attr, when set, says who requested each change (bpf/netra_rtnl.c); events are
+	// attributed on the copies a report carries, never in the ring, so a resent
+	// event is attributed again and the ring stays the raw record.
+	attr        Attributor
+	attrGrace   time.Duration
+	actorWhy    string
 	resync      chan struct{}
 	backoffBase time.Duration
 	now         func() time.Time
 	stop        context.CancelFunc
+}
+
+// Attributor joins a recorded change to the request that caused it.
+type Attributor interface {
+	// Attribute returns the requester (nil when none is named) and the change's
+	// origin: "process", "kernel", or "" when that cannot be told.
+	Attribute(models.NetlinkEvent) (*models.NetlinkActor, string)
+	Status() models.NetlinkActorStatus
+}
+
+// SetAttributor turns attribution on. Events younger than grace are held back from
+// reports until their request record has had time to arrive, since the request is
+// read from the kernel independently of the change notification.
+func (w *Watcher) SetAttributor(a Attributor, grace time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.attr, w.attrGrace, w.actorWhy = a, grace, ""
+}
+
+// SetActorUnavailable records why attribution could not start, so a report says
+// "unavailable" instead of saying nothing.
+func (w *Watcher) SetActorUnavailable(why string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.attr, w.actorWhy = nil, why
 }
 
 func newWatcher(capacity int) *Watcher {
@@ -312,10 +343,27 @@ func (w *Watcher) Report(limit int) models.NetlinkReport {
 		}
 	}
 	for i := 0; i < w.size && len(out.Events) < limit; i++ {
-		if e := w.ring[(w.head+i)%w.capacity]; e.Sequence > w.acked {
-			out.Events = append(out.Events, e)
-			out.Cursor = e.Sequence
+		e := w.ring[(w.head+i)%w.capacity]
+		if e.Sequence <= w.acked {
+			continue
 		}
+		if w.attr != nil {
+			// Oldest first, so everything after this is younger still: wait for the
+			// request record of a change that only just happened.
+			if w.now().Sub(e.ObservedAt) < w.attrGrace {
+				break
+			}
+			e.Actor, e.Origin = w.attr.Attribute(e)
+		}
+		out.Events = append(out.Events, e)
+		out.Cursor = e.Sequence
+	}
+	switch {
+	case w.attr != nil:
+		st := w.attr.Status()
+		out.Actor = &st
+	case w.actorWhy != "":
+		out.Actor = &models.NetlinkActorStatus{Unavailable: w.actorWhy}
 	}
 	if w.generation > 0 && (w.generation != w.sentGen || w.sentAt.IsZero() || w.now().Sub(w.sentAt) >= snapshotRefresh) {
 		s := w.snapshot

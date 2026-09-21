@@ -12,9 +12,12 @@
 //   - the process: comm (16 bytes), tgid and thread id,
 //   - its cgroup id (userspace maps it to a workload; it is the same id the rest
 //     of the agent already uses),
-//   - the RTM_* message type, and
-//   - a monotonic timestamp (userspace joins it to the recorded change by type
-//     and time).
+//   - the RTM_* message type,
+//   - for link, address and neighbor requests, the interface index the request
+//     names (0 when it names none, as a link create does, and for routes, which
+//     carry the interface in an attribute), and
+//   - a monotonic timestamp (userspace joins it to the recorded change by type,
+//     interface and time).
 //
 // Not recorded: argv, environment, the message payload, or anything about the
 // object being changed. Read-only requests (RTM_GET*, dumps) are dropped in the
@@ -33,8 +36,9 @@
 // match what the agent recorded in the host namespace.
 //
 // No BTF field access and no CO-RE: the only kernel memory read is the 16-byte
-// struct nlmsghdr, a stable uAPI layout, fetched with bpf_probe_read_kernel from
-// the second argument. The program is attached by name (fentry needs the running
+// struct nlmsghdr and, for link/address/neighbor requests, the 4-byte interface
+// index at its fixed uAPI offset, both fetched with bpf_probe_read_kernel from the
+// second argument. The program is attached by name (fentry needs the running
 // kernel's BTF only to resolve the function's address and signature).
 
 #include <linux/bpf.h>
@@ -71,7 +75,7 @@ struct rtnl_event {
 	__u32 pid;        /* thread id */
 	__u16 nlmsg_type; /* RTM_NEWLINK ... */
 	__u16 _pad0;
-	__u32 _pad1;
+	__u32 ifindex;    /* the interface the request names, 0 if none */
 	char comm[16];
 };
 
@@ -98,6 +102,20 @@ static inline int modifies_network(__u16 t)
 	case 20: case 21:
 	case 24: case 25:
 	case 28: case 29:
+		return 1;
+	}
+	return 0;
+}
+
+/* ifinfomsg, ifaddrmsg and ndmsg all carry the interface index as a 32-bit field at
+ * byte 4 of their payload (family and padding first), i.e. 16 (NLMSG_HDRLEN) + 4
+ * from the start of the message. rtmsg has no such field. */
+static inline int names_interface(__u16 t)
+{
+	switch (t) {
+	case 16: case 17: case 19: /* link */
+	case 20: case 21:          /* address */
+	case 28: case 29:          /* neighbor */
 		return 1;
 	}
 	return 0;
@@ -133,7 +151,12 @@ int netra_rtnl_msg(unsigned long long *ctx)
 	e->pid = (__u32)pt;
 	e->nlmsg_type = hdr.nlmsg_type;
 	e->_pad0 = 0;
-	e->_pad1 = 0;
+	e->ifindex = 0;
+	if (names_interface(hdr.nlmsg_type)) {
+		__s32 idx = 0;
+		if (bpf_probe_read_kernel(&idx, sizeof(idx), (const char *)ctx[1] + 20) == 0 && idx > 0)
+			e->ifindex = (__u32)idx;
+	}
 	bpf_get_current_comm(e->comm, sizeof(e->comm));
 	bpf_ringbuf_submit(e, 0);
 	return 0;

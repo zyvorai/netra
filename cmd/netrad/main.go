@@ -39,7 +39,7 @@ import (
 	"github.com/zyvorai/netra/internal/workloadobs"
 )
 
-const version = "0.28.4"
+const version = "0.28.5"
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))

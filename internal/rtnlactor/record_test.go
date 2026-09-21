@@ -11,6 +11,10 @@ import (
 // event builds the bytes of a struct rtnl_event exactly as the kernel program
 // lays it out.
 func event(ts, cgroup uint64, tgid, pid uint32, typ uint16, comm string) []byte {
+	return eventOn(ts, cgroup, tgid, pid, typ, 0, comm)
+}
+
+func eventOn(ts, cgroup uint64, tgid, pid uint32, typ uint16, ifindex uint32, comm string) []byte {
 	b := make([]byte, EventSize)
 	le := binary.LittleEndian
 	le.PutUint64(b[0:], ts)
@@ -18,6 +22,7 @@ func event(ts, cgroup uint64, tgid, pid uint32, typ uint16, comm string) []byte 
 	le.PutUint32(b[16:], tgid)
 	le.PutUint32(b[20:], pid)
 	le.PutUint16(b[24:], typ)
+	le.PutUint32(b[28:], ifindex)
 	copy(b[32:], comm)
 	return b
 }
@@ -29,6 +34,16 @@ func TestParseDecodesTheKernelLayout(t *testing.T) {
 	}
 	if r.TS != 123456789 || r.CgroupID != 4242 || r.TGID != 999 || r.PID != 1001 || r.Type != RTMDelRoute || r.Comm != "calico-node" {
 		t.Fatalf("record=%+v", r)
+	}
+}
+
+func TestParseDecodesTheInterfaceIndex(t *testing.T) {
+	r, err := Parse(eventOn(1, 2, 3, 4, RTMSetLink, 17, "ip"))
+	if err != nil || r.IfIndex != 17 || r.Comm != "ip" {
+		t.Fatalf("record=%+v err=%v", r, err)
+	}
+	if r, _ := Parse(event(1, 2, 3, 4, RTMNewRoute, "ip")); r.IfIndex != 0 {
+		t.Fatalf("a route request names no interface, got %d", r.IfIndex)
 	}
 }
 

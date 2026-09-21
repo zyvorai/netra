@@ -16,6 +16,8 @@ import (
 
 	"github.com/vishvananda/netlink"
 
+	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/netlinkwatch"
 	"github.com/zyvorai/netra/internal/rtnlactor"
 )
 
@@ -162,5 +164,100 @@ func drain(ch <-chan rtnlactor.Record) {
 		default:
 			return
 		}
+	}
+}
+
+// The whole chain on a real kernel: the recorder hears a change, the sensor saw the
+// request, and the joiner attributes one to the other. Includes the case the design
+// exists for: a change nobody requested (the kernel taking a veth's carrier away when
+// its peer is set down) must be reported as the kernel's, and must not be credited to
+// the `ip link set <peer> down` that happened at the same moment.
+func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
+	s, err := rtnlactor.Load(rtnlactor.Options{ObjectPath: rtnlObjectPath()})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	j := rtnlactor.NewJoiner(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); s.Run(ctx, j.Add) }()
+	t.Cleanup(func() { cancel(); <-done; _ = s.Close() })
+
+	w, err := netlinkwatch.Start(ctx, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(w.Close)
+	w.SetAttributor(j, 300*time.Millisecond)
+	// The sensor must have been running for longer than the join window before a
+	// change can honestly be called kernel-originated.
+	time.Sleep(1200 * time.Millisecond)
+
+	me, comm := uint32(os.Getpid()), selfComm(t)
+	_ = exec.Command("ip", "link", "del", "nlat0").Run()
+	run(t, "link", "add", "nlat0", "type", "veth", "peer", "name", "nlat1")
+	t.Cleanup(func() { _ = exec.Command("ip", "link", "del", "nlat0").Run() })
+	run(t, "link", "set", "nlat0", "up")
+	run(t, "link", "set", "nlat1", "up")
+	link, err := netlink.LinkByName("nlat0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// waitEvent polls the recorder's report until an event matching pred is attributed.
+	waitEvent := func(what string, pred func(models.NetlinkEvent) bool) models.NetlinkEvent {
+		t.Helper()
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, e := range w.Report(500).Events {
+				if pred(e) {
+					return e
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("no attributed event for: %s", what)
+		return models.NetlinkEvent{}
+	}
+
+	// A child process's route: ip.
+	run(t, "route", "add", "10.91.0.0/24", "dev", "nlat0")
+	e := waitEvent("route added by ip", func(e models.NetlinkEvent) bool {
+		return e.Kind == "route" && e.Action == "new" && e.Destination == "10.91.0.0/24"
+	})
+	if e.Origin != models.NetlinkOriginProcess || e.Actor == nil || e.Actor.Comm != "ip" || e.Actor.PID == me || e.Actor.Confidence != models.NetlinkActorProbable {
+		t.Fatalf("the route ip added was attributed as origin=%q actor=%+v", e.Origin, e.Actor)
+	}
+
+	// This process's own route.
+	_, dst, _ := net.ParseCIDR("10.90.0.0/24")
+	if err := netlink.RouteAdd(&netlink.Route{LinkIndex: link.Attrs().Index, Dst: dst}); err != nil {
+		t.Fatal(err)
+	}
+	e = waitEvent("route added by this process", func(e models.NetlinkEvent) bool {
+		return e.Kind == "route" && e.Action == "new" && e.Destination == "10.90.0.0/24"
+	})
+	if e.Origin != models.NetlinkOriginProcess || e.Actor == nil || e.Actor.PID != me || e.Actor.Comm != comm {
+		t.Fatalf("this process's route was attributed as origin=%q actor=%+v (want pid %d comm %q)", e.Origin, e.Actor, me, comm)
+	}
+
+	// ip link set nlat1 down: nlat1's own change was requested by ip; nlat0 then loses
+	// its carrier, which nobody requested.
+	run(t, "link", "set", "nlat1", "down")
+	admin := waitEvent("nlat1 set down by ip", func(e models.NetlinkEvent) bool {
+		return e.Kind == "link" && e.Interface == "nlat1" && e.State != "up" && e.Origin != ""
+	})
+	if admin.Origin != models.NetlinkOriginProcess || admin.Actor == nil || admin.Actor.Comm != "ip" {
+		t.Fatalf("the admin's link down was attributed as origin=%q actor=%+v", admin.Origin, admin.Actor)
+	}
+	carrier := waitEvent("nlat0 carrier lost, requested by no one", func(e models.NetlinkEvent) bool {
+		return e.Kind == "link" && e.Interface == "nlat0" && e.State != "up" && e.Origin != ""
+	})
+	if carrier.Origin != models.NetlinkOriginKernel || carrier.Actor != nil {
+		t.Fatalf("a carrier loss nobody requested was attributed as origin=%q actor=%+v: it must be the kernel's, and not credited to `ip link set nlat1 down`", carrier.Origin, carrier.Actor)
+	}
+
+	if r := w.Report(500); r.Actor == nil || !r.Actor.Available || r.Actor.Records == 0 {
+		t.Fatalf("the report must carry the sensor's status: %+v", r.Actor)
 	}
 }
