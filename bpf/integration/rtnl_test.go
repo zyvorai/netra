@@ -248,15 +248,23 @@ func TestRTNLActorAttributesRecordedChanges(t *testing.T) {
 
 	// ip link set nlat1 down: nlat1's own change was requested by ip; nlat0 then loses
 	// its carrier, which nobody requested.
+	//
+	// Creating a veth makes udev workers (and anything else watching links) issue their
+	// own requests on the new interfaces for a moment, so the join for events from that
+	// period is legitimately ambiguous (a first run reported five requesters). Let those
+	// age out of the join window, and look only at events after the command below, so
+	// this asserts the one change it means to.
+	time.Sleep(1500 * time.Millisecond)
+	issued := time.Now()
 	run(t, "link", "set", "nlat1", "down")
 	admin := waitEvent("nlat1 set down by ip", func(e models.NetlinkEvent) bool {
-		return e.Kind == "link" && e.Interface == "nlat1" && e.State != "up" && e.Origin != ""
+		return e.Kind == "link" && e.Interface == "nlat1" && e.State != "up" && e.Origin != "" && e.ObservedAt.After(issued)
 	})
 	if admin.Origin != models.NetlinkOriginProcess || admin.Actor == nil || admin.Actor.Comm != "ip" {
 		t.Fatalf("the admin's link down was attributed as origin=%q actor=%+v", admin.Origin, admin.Actor)
 	}
 	carrier := waitEvent("nlat0 carrier lost, requested by no one", func(e models.NetlinkEvent) bool {
-		return e.Kind == "link" && e.Interface == "nlat0" && e.State != "up" && e.Origin != ""
+		return e.Kind == "link" && e.Interface == "nlat0" && e.State != "up" && e.Origin != "" && e.ObservedAt.After(issued)
 	})
 	if carrier.Origin != models.NetlinkOriginKernel || carrier.Actor != nil {
 		t.Fatalf("a carrier loss nobody requested was attributed as origin=%q actor=%+v: it must be the kernel's, and not credited to `ip link set nlat1 down`", carrier.Origin, carrier.Actor)
