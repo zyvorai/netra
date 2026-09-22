@@ -271,3 +271,66 @@ func TestZeroWindowFallsBackToTheDefault(t *testing.T) {
 		t.Fatalf("window=%q findings=%v", r.Window, r.Findings)
 	}
 }
+
+func withActor(e models.NetlinkEvent, origin string, a *models.NetlinkActor) models.NetlinkEvent {
+	e.Origin, e.Actor = origin, a
+	return e
+}
+
+func TestFindingsNameWhoAskedForTheChangeOnlyWhenTheSensorCouldTell(t *testing.T) {
+	probable := &models.NetlinkActor{Confidence: "probable", Comm: "calico-node", PID: 42, Namespace: "kube-system", Pod: "calico-node-x"}
+	del := withActor(defRoute("delete", "ipv4", "10.0.0.1", "eth0", 2, 10), models.NetlinkOriginProcess, probable)
+	f := only(t, build(60, agent("n1", nil, del)), "critical:"+KindDefaultRouteRemoved)
+	for _, want := range []string{"by calico-node (pid 42, pod kube-system/calico-node-x)", "10.0.0.1", "eth0", "none remains"} {
+		if !strings.Contains(f.Message, want) {
+			t.Fatalf("message %q lacks %q", f.Message, want)
+		}
+	}
+
+	// Nobody requested it: a route dropped as a link went down.
+	kernel := withActor(defRoute("delete", "ipv4", "10.0.0.1", "eth0", 2, 10), models.NetlinkOriginKernel, nil)
+	f = only(t, build(60, agent("n1", nil, kernel)), "critical:"+KindDefaultRouteRemoved)
+	if !strings.Contains(f.Message, "by the kernel (no process requested it)") {
+		t.Fatalf("message=%q", f.Message)
+	}
+
+	// Two requesters at once: listed, never picked between.
+	amb := withActor(defRoute("delete", "ipv4", "10.0.0.1", "eth0", 2, 10), models.NetlinkOriginProcess,
+		&models.NetlinkActor{Confidence: "ambiguous", Candidates: 2, Alternatives: []string{"ip", "kubelet"}})
+	f = only(t, build(60, agent("n1", nil, amb)), "critical:"+KindDefaultRouteRemoved)
+	if !strings.Contains(f.Message, "by one of ip, kubelet (ambiguous: 2 requesters") || strings.Contains(f.Message, "pid") {
+		t.Fatalf("message=%q", f.Message)
+	}
+
+	// The sensor could not tell (off, or dropped requests): the message claims nothing.
+	unknown := defRoute("delete", "ipv4", "10.0.0.1", "eth0", 2, 10)
+	f = only(t, build(60, agent("n1", nil, unknown)), "critical:"+KindDefaultRouteRemoved)
+	if strings.Contains(f.Message, " by ") {
+		t.Fatalf("a message without attribution must not name anyone: %q", f.Message)
+	}
+}
+
+func TestALinkThatWentDownSaysWhetherAProcessOrTheKernelDidIt(t *testing.T) {
+	snap := snapAt(100, models.NetlinkSnapshot{Links: []models.NetlinkLink{{Index: 3, Name: "eth1", State: "down"}}})
+	carrier := withActor(link("new", "device", "eth1", 3, "down", 1500, 10), models.NetlinkOriginKernel, nil)
+	f := only(t, build(120, agent("n1", snap, carrier)), "warning:"+KindLinkDown)
+	if !strings.Contains(f.Message, "eth1 (down) by the kernel") {
+		t.Fatalf("a carrier loss must read as the kernel's doing: %q", f.Message)
+	}
+	admin := withActor(link("new", "device", "eth1", 3, "down", 1500, 10), models.NetlinkOriginProcess,
+		&models.NetlinkActor{Confidence: "probable", Comm: "ip", PID: 900})
+	f = only(t, build(120, agent("n1", snap, admin)), "warning:"+KindLinkDown)
+	if !strings.Contains(f.Message, "eth1 (down) by ip (pid 900)") {
+		t.Fatalf("an administrator's ip link set down must name ip: %q", f.Message)
+	}
+}
+
+func TestAMixOfRequestersIsNotSummarisedAsOne(t *testing.T) {
+	snap := snapAt(100, models.NetlinkSnapshot{Links: []models.NetlinkLink{{Index: 3, Name: "eth1", State: "down"}, {Index: 4, Name: "eth2", State: "down"}}})
+	a := withActor(link("new", "device", "eth1", 3, "down", 1500, 10), models.NetlinkOriginKernel, nil)
+	b := withActor(link("new", "device", "eth2", 4, "down", 1500, 11), models.NetlinkOriginProcess, &models.NetlinkActor{Confidence: "probable", Comm: "ip", PID: 1})
+	f := only(t, build(120, agent("n1", snap, a, b)), "warning:"+KindLinkDown)
+	if strings.Contains(f.Message, " by ") {
+		t.Fatalf("two links with different requesters must not be attributed in one breath: %q", f.Message)
+	}
+}

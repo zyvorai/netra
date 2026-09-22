@@ -42,6 +42,7 @@ import (
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/mtls"
 	"github.com/zyvorai/netra/internal/netlinkwatch"
+	"github.com/zyvorai/netra/internal/rtnlactor"
 	"github.com/zyvorai/netra/internal/sslprobe"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
 	"github.com/zyvorai/netra/internal/sysres"
@@ -121,6 +122,9 @@ type Agent struct {
 	// start (netlinkWhy says why).
 	netlinkWatch *netlinkwatch.Watcher
 	netlinkWhy   string
+	// rtnlSensor names the process behind each recorded change (fentry on
+	// rtnetlink_rcv_msg); nil when off or unavailable.
+	rtnlSensor *rtnlactor.Sensor
 	// bpfSource reads which BPF programs are attached to the interfaces
 	// (docs/bpf-attachments.md); nil when NETRA_BPF_ATTACH=off. The rest is the
 	// last inventory and what the controller already has, so an unchanged one is
@@ -274,6 +278,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.readEvents(ctx)
 	go a.readTLSHelloEvents(ctx)
 	a.startNetlink(ctx)
+	if a.netlinkWatch != nil {
+		a.startRTNLActor(ctx, a.netlinkWatch)
+	}
 	a.startBPFAttach()
 	if a.l7Sampler != nil {
 		go a.l7Sampler.Run(ctx, a.l7Counters.Observe)
@@ -1013,6 +1020,8 @@ func (a *Agent) Close() {
 		_ = a.sslProber.Close()
 		a.sslProber = nil
 	}
+	_ = a.rtnlSensor.Close()
+	a.rtnlSensor = nil
 	a.netlinkWatch.Close()
 	a.netlinkWatch = nil
 }

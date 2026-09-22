@@ -78,6 +78,93 @@ stream missed, and it is what `netractl netlink state` shows.
   outage. Nothing here correlates a change with drops or retransmits yet, and it
   raises no alerts on its own; see "Not in this release".
 
+## Who made the change
+
+A multicast notification says that something changed, not who asked. `bpf/netra_rtnl.c`
+is an `fentry` on `rtnetlink_rcv_msg`, which runs synchronously in the task that
+called `sendmsg()` on its netlink socket, so at that point the current task is the
+requester. For each request that **modifies** state it records the process's `comm`
+(its 16-byte name), pid, cgroup id, the `RTM_*` type and the interface index the
+request names (a fixed field of address and neighbor requests; `RTA_OIF` for a route).
+A link request may instead name its device only by name (`ip link set dev X` sends index 0
+and `IFLA_IFNAME`), so for those it reads the name too, and the message flags, to tell a
+create from an operation on an existing link. For a route it also reads the destination (`RTA_DST` and the prefix length),
+because two processes can add routes on one interface in the same instant and only the
+destination tells them apart. Read-only requests (`RTM_GET*`, dumps) are dropped in the
+kernel before anything is reserved. It captures **no argv and no environment**, and
+nothing of a message beyond the interface (index or name) and a route's destination,
+which are the same values the recorder already publishes about the change; it only observes.
+
+The agent joins each recorded change to the request behind it by message type,
+interface and time (a request is looked for in the 750 ms before the notification
+reached the agent, and 100 ms after). Every event then carries:
+
+- `origin: "process"` and an `actor` (`comm`, `pid`, `cgroupId`, and `namespace`,
+  `pod`, `workload` when the requester is in a pod), or
+- `origin: "kernel"`: nobody requested it (carrier loss, kernel timers, router
+  advertisements), or
+- neither, when the sensor could not tell.
+
+The join is strict about what it claims:
+
+- **`confidence: "probable"`** means exactly one requester issued a matching request.
+  Several at that moment are **`ambiguous`**: no process is named, and up to three
+  names are listed as `alternatives`. It is a join, not proof.
+- **Interface matters.** A request for one interface does not explain a change on
+  another, so a veth's carrier loss is not credited to the `ip link set <peer> down`
+  that happened at the same instant. A link request that names its device only by name
+  (which is how modern `ip link set dev X` works) explains only that device. A create is
+  the exception: it also creates a peer whose name is not in the request, so it matches
+  any. A request that names a device by an *alternative* name would not match the
+  device's primary name and would be read as nobody's (kernel), which is a known limit.
+- **iproute2's probe is ignored.** Every `ip link` command first sends a bare
+  `RTM_NEWLINK` (no index, no name, no attributes) to ask whether the kernel supports it.
+  It changes nothing, so a link request with no target and no attributes explains
+  nothing; otherwise whoever ran `ip link` would be credited with every link change
+  around it. A link request that has attributes but names no device the sensor reads is
+  *uncertain*: it names nobody and, unlike a real absence, does not let the event be
+  called the kernel's.
+- **So does the route's destination.** Two processes adding routes on one interface in
+  the same instant are told apart by prefix (`10.90.0.0/24` is one process's,
+  `10.91.0.0/24` the other's). Two requests for the very same prefix cannot be, and are
+  reported as ambiguous. A multipath route names no single interface and matches any.
+- **`origin: "kernel"` is only claimed when nothing weakens it:** the sensor was already
+  running before the change, the kernel has not dropped requests around then (the
+  ring buffer is 256 KiB; `actor.dropped` counts overflows), and the ring of recent
+  requests still reaches back far enough to have held a match. Otherwise the event is
+  left unattributed rather than called the kernel's.
+- **Nothing is claimed when the sensor is off.** `actor` on each node's report says
+  `available`, or `unavailable` with the reason (it needs kernel BTF and `fentry`;
+  x86_64 5.5+, arm64 6.0+).
+
+Findings use it: `the IPv4 default route (via 10.0.0.1 on eth0) was removed from the
+main table by calico-node (pid 42, pod kube-system/calico-node-x) and none remains`,
+or `host link(s) went down: eth1 (down) by the kernel (no process requested it)`, which
+tells an administrator's `ip link set down` from a pulled cable. A finding built from
+events with different requesters is not summarised as one, and a message without
+attribution names nobody.
+
+Events are attributed on the copies a report carries and held back about 300 ms so the
+request record has arrived; the ring stays raw, so a resent event is attributed again.
+
+```yaml
+agent:
+  rtnlActor: auto   # auto | off
+```
+
+`NETRA_RTNL_ACTOR=auto|off` (and `NETRA_BPF_RTNL_OBJECT`, default
+`/opt/netra/bpf/netra_rtnl.o`). It needs the recorder to be on.
+
+**Network namespaces.** Interface indexes are per namespace, and the hook runs for every
+namespace's requests (a pod's CNI setup included), so a pod's request for its `ifindex 3`
+could otherwise be credited with an unrelated host change on the host's `ifindex 3`. The
+kernel program reads the requester's namespace (the socket's, as `rtnetlink_rcv_msg`
+itself uses it), the agent tells it the one namespace it records changes in (its own:
+the host's, since the agent runs `hostNetwork`), and requests from any other namespace
+are dropped in the kernel before anything is reserved. That also keeps a busy node's pod
+churn out of the ring buffer. The joiner refuses to match across namespaces as a second
+guard.
+
 ## Findings: what is wrong now
 
 The recorder also derives a small set of findings from what it recorded
@@ -235,6 +322,4 @@ sudo ./scripts/ci-netlink-veth.sh     # Linux root
 ## Not built yet
 
 Not implied by anything above: correlation with drops and retransmits,
-attributing an interface to a pod, who made a change (the recorder sees that it
-changed, not which process did it), watching BPF/TC/XDP attachments, an MCP tool
-and a web page.
+attributing an interface to a pod, an MCP tool and a web page.

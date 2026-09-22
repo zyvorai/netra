@@ -312,6 +312,10 @@ jobs:
         awk '/name: NETRA_BPF_ATTACH$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
         helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
           --set agent.bpfAttach=off | awk '/name: NETRA_BPF_ATTACH$/{getline; if ($0 !~ /"off"/) exit 1}'
+        # Requester attribution for netlink changes is a plain env knob too.
+        awk '/name: NETRA_RTNL_ACTOR$/{getline; if ($0 !~ /"auto"/) exit 1}' /tmp/netra.yaml
+        helm template test helm/netra --set auth.apiKey=ci-api-key --set auth.agentKey=ci-agent-key \
+          --set agent.rtnlActor=off | awk '/name: NETRA_RTNL_ACTOR$/{getline; if ($0 !~ /"off"/) exit 1}'
     - name: Controller memory limit leaves room for the flow history (OOM regression)
       # 0.27.102 shipped 256Mi and the controller was OOM-killed every ~12
       # minutes on a real cluster. netrad now derives Go's soft limit from the

@@ -234,7 +234,7 @@ func (v nodeView) defaultRoutes() []models.NetlinkFinding {
 		if fam == "ipv6" {
 			sev, name = "warning", "IPv6"
 		}
-		msg := fmt.Sprintf("%s default route was removed from the main table%s and none remains", name, viaDetail(*last))
+		msg := fmt.Sprintf("%s default route%s was removed from the main table%s and none remains", name, viaDetail(*last), who(*last))
 		out = append(out, v.finding(sev, KindDefaultRouteRemoved, msg, 1, deletes))
 	}
 	return out
@@ -243,13 +243,54 @@ func (v nodeView) defaultRoutes() []models.NetlinkFinding {
 func viaDetail(e models.NetlinkEvent) string {
 	switch {
 	case e.Gateway != "" && e.Interface != "":
-		return fmt.Sprintf(" (it was via %s on %s)", e.Gateway, e.Interface)
+		return fmt.Sprintf(" (via %s on %s)", e.Gateway, e.Interface)
 	case e.Interface != "":
-		return fmt.Sprintf(" (it was on %s)", e.Interface)
+		return fmt.Sprintf(" (on %s)", e.Interface)
 	case e.Gateway != "":
-		return fmt.Sprintf(" (it was via %s)", e.Gateway)
+		return fmt.Sprintf(" (via %s)", e.Gateway)
 	}
 	return ""
+}
+
+// who says who asked for a change, when the attribution sensor could tell. It is
+// empty when it could not (the sensor is off, unavailable, or dropped requests), so
+// a message never claims more than was known. The requester is a join by message
+// type, interface and time: "probable" is stated as such, and several matching
+// requesters are listed as alternatives, never picked between.
+func who(e models.NetlinkEvent) string {
+	switch e.Origin {
+	case models.NetlinkOriginKernel:
+		return " by the kernel (no process requested it)"
+	case models.NetlinkOriginProcess:
+		a := e.Actor
+		if a == nil {
+			return ""
+		}
+		if a.Confidence == models.NetlinkActorAmbiguous {
+			return fmt.Sprintf(" by one of %s (ambiguous: %d requesters at that moment)", strings.Join(a.Alternatives, ", "), a.Candidates)
+		}
+		detail := fmt.Sprintf("pid %d", a.PID)
+		if a.Pod != "" {
+			detail += fmt.Sprintf(", pod %s/%s", a.Namespace, a.Pod)
+		}
+		return fmt.Sprintf(" by %s (%s)", a.Comm, detail)
+	}
+	return ""
+}
+
+// whoAll is who() for a finding built from several events: named only when they
+// all agree, since one sentence cannot honestly attribute a mix.
+func whoAll(ev []models.NetlinkEvent) string {
+	if len(ev) == 0 {
+		return ""
+	}
+	first := who(ev[0])
+	for _, e := range ev[1:] {
+		if who(e) != first {
+			return ""
+		}
+	}
+	return first
 }
 
 func (v nodeView) neighbors() []models.NetlinkFinding {
@@ -398,11 +439,11 @@ func (v nodeView) links() []models.NetlinkFinding {
 			sev = "critical"
 		}
 		out = append(out, v.finding(sev, KindLinkDown,
-			fmt.Sprintf("host link(s) went down: %s", linkList(down, true)), float64(len(down)), down))
+			fmt.Sprintf("host link(s) went down: %s%s", linkList(down, true), whoAll(down)), float64(len(down)), down))
 	}
 	if len(deleted) > 0 {
 		out = append(out, v.finding("warning", KindLinkDeleted,
-			fmt.Sprintf("host link(s) were deleted: %s", linkList(deleted, false)), float64(len(deleted)), deleted))
+			fmt.Sprintf("host link(s) were deleted: %s%s", linkList(deleted, false), whoAll(deleted)), float64(len(deleted)), deleted))
 	}
 	return out
 }
@@ -485,7 +526,7 @@ func (v nodeView) mtu() []models.NetlinkFinding {
 	}
 	sort.Strings(descr)
 	return []models.NetlinkFinding{v.finding("warning", KindMTUChanged,
-		fmt.Sprintf("host link MTU changed: %s", listNames(descr)), float64(len(descr)), changed)}
+		fmt.Sprintf("host link MTU changed: %s%s", listNames(descr), whoAll(changed)), float64(len(descr)), changed)}
 }
 
 // overruns says the recorder itself lost changes, so a quiet timeline in the

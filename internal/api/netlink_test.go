@@ -347,3 +347,34 @@ func TestBPFAttachMetricsAreFixedCardinality(t *testing.T) {
 		t.Fatal("gauges must be absent, not zero, when nothing reports")
 	}
 }
+
+func TestNetlinkEventsCarryTheRequesterAndTheSensorStatus(t *testing.T) {
+	now := time.Now().UTC()
+	st := store.New()
+	st.Report(models.AgentReport{Node: "worker-1", ObservedAt: now, Netlink: &models.NetlinkReport{
+		Available: true, Epoch: 1, Sequence: 1, Cursor: 1,
+		Actor: &models.NetlinkActorStatus{Available: true, Records: 12},
+		Events: []models.NetlinkEvent{{
+			Epoch: 1, Sequence: 1, Kind: "route", Action: "delete", Destination: "default", ObservedAt: now.Add(-time.Minute),
+			Origin: models.NetlinkOriginProcess,
+			Actor:  &models.NetlinkActor{Confidence: "probable", Comm: "calico-node", PID: 42, Namespace: "kube-system", Pod: "calico-node-x"},
+		}},
+	}})
+	s := &Server{store: st, agentStaleAfter: time.Minute}
+	rec := httptest.NewRecorder()
+	s.netlinkChanges(rec, httptest.NewRequest("GET", "/api/v1/netlink?since=10m", nil))
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	ev := body["events"].([]any)[0].(map[string]any)
+	actor := ev["actor"].(map[string]any)
+	if ev["origin"] != "process" || actor["comm"] != "calico-node" || actor["pod"] != "calico-node-x" || actor["confidence"] != "probable" {
+		t.Fatalf("event=%v", ev)
+	}
+	node := body["nodes"].([]any)[0].(map[string]any)
+	status, ok := node["actor"].(map[string]any)
+	if !ok || status["available"] != true || status["records"].(float64) != 12 {
+		t.Fatalf("node=%v", node)
+	}
+}
