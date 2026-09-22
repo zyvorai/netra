@@ -53,6 +53,10 @@ EOF
 cat >"$STUB/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
+  *"rollout status"*)
+    n=$(cat "$STUB/rcalls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$STUB/rcalls"
+    f="$STUB/rollout.$n"; [[ -f "$f" ]] || f="$STUB/rollout.last"
+    exit "$(cat "$f" 2>/dev/null || echo 1)" ;;
   *"get pods"*)
     n=$(cat "$STUB/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" >"$STUB/calls"
     f="$STUB/pods.$n"; [[ -f "$f" ]] || f="$STUB/pods.last"; cat "$f" ;;
@@ -66,7 +70,9 @@ export NETRA_DEPLOY_POLL=0
 # shellcheck source=lib/deploy-guards.sh
 source "$ROOT/scripts/lib/deploy-guards.sh"
 
-reset() { rm -f "$STUB"/{df.out,images,log,calls} "$STUB"/pods.*; : >"$STUB/log"; }
+reset() { rm -f "$STUB"/{df.out,images,log,calls,rcalls} "$STUB"/pods.* "$STUB"/rollout.*; : >"$STUB/log"; }
+# rollout <n> <rc>: what the n-th `rollout status` returns (rollout last <rc> for every later call).
+rollout() { echo "$2" >"$STUB/rollout.$1"; }
 imports() { grep -c '^import$' "$STUB/log" || true; }
 deletes() { grep -c '^delete' "$STUB/log" || true; }
 df_out() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda2 1000 %s %s %s%% /\n' "$1" "$((1000 - $1))" "$1" >"$STUB/df.out"; }
@@ -105,41 +111,50 @@ reset; echo "ghcr.io/zyvorai/netra:0.27.8" >"$STUB/images"
 if deploy_image_present "$IMG"; then rc=0; else rc=1; fi
 check "a different tag is not mistaken for the image (exact match)" test "$rc" -eq 1
 
-# --- waiting for readiness, and the outage itself -------------------------------
+# --- waiting for the rollout, and the outage itself ------------------------------
 SEL="app.kubernetes.io/name=netra"
-reset; echo "netra-abc  true" >"$STUB/pods.last"
-deploy_wait_ready "$SEL" "$IMG" 5 >/dev/null 2>&1; check "ready pod: returns at once" test "$?" -eq 0
+WL="deployment/netra"
+
+reset; rollout last 0
+echo "netra-abc  true" >"$STUB/pods.last"
+if deploy_wait_ready "$WL" "$SEL" "$IMG" 5 >/dev/null 2>&1; then rc=0; else rc=1; fi
+check "a completed rollout returns at once" test "$rc" -eq 0
+
+# THE FLAW the first live use exposed: right after `rollout restart` the OLD pod is still
+# Running and Ready and the replacement does not exist yet, so a wait that only asks "are
+# all matching pods Ready?" succeeds immediately. The rollout is not done, and it must say so.
+reset
+echo "netra-old  true" >"$STUB/pods.last" # a Ready pod is all that is listed
+rollout 1 1; rollout 2 1; rollout 3 1; rollout last 0
+if deploy_wait_ready "$WL" "$SEL" "$IMG" 5 >/dev/null 2>&1; then rc=0; else rc=1; fi
+check "an old Ready pod does not end the wait while the rollout is incomplete" test "$rc" -eq 0
+check "it kept polling the rollout until it finished (4 calls)" test "$(cat "$STUB/rcalls")" -eq 4
+
+reset
+echo "netra-old  true" >"$STUB/pods.last"
+rollout last 1 # the rollout never completes, whatever the pods look like
+if deploy_wait_ready "$WL" "$SEL" "$IMG" 1 >/dev/null 2>&1; then rc=0; else rc=1; fi
+check "a Ready old pod is not success when the rollout never completes" test "$rc" -eq 1
 
 # The outage: the new pod is stuck in ImagePullBackOff, the image is gone from
-# containerd. It must be re-imported, the stuck pod deleted, and then the wait
-# must succeed once the recreated pod is Ready.
+# containerd. It must be re-imported and the stuck pod deleted so it restarts at once;
+# the wait then succeeds once the rollout completes.
 reset
-echo "netra-new ImagePullBackOff false" >"$STUB/pods.1"
-echo "netra-new ImagePullBackOff false" >"$STUB/pods.2"
-echo "netra-new2  true" >"$STUB/pods.last"
-if out="$(deploy_wait_ready "$SEL" "$IMG" 5 2>&1)"; then rc=0; else rc=1; fi
+echo "netra-new ImagePullBackOff false" >"$STUB/pods.last"
+rollout 1 1; rollout 2 1; rollout last 0
+if out="$(deploy_wait_ready "$WL" "$SEL" "$IMG" 5 2>&1)"; then rc=0; else rc=1; fi
 check "ImagePullBackOff with the image GC'd: repaired and the wait succeeds" test "$rc" -eq 0
 check "the repair re-imported the image" test "$(imports)" -ge 1
 check "the repair deleted the stuck pod so it restarts at once" grep -q "delete .*netra-new" "$STUB/log"
 
-# Two pods, one Ready and one not: not done yet.
-reset
-printf 'netra-a  true\nnetra-b ContainerCreating false\n' >"$STUB/pods.last"
-if deploy_wait_ready "$SEL" "$IMG" 1 >/dev/null 2>&1; then rc=0; else rc=1; fi
-check "one ready pod among several is not success" test "$rc" -eq 1
-
-# Never ready: fails loudly, prints the pods.
-reset; echo "netra-x CrashLoopBackOff false" >"$STUB/pods.last"
-if out="$(deploy_wait_ready "$SEL" "$IMG" 1 2>&1)"; then rc=0; else rc=1; fi
-check "never ready: returns failure" test "$rc" -eq 1
-check "never ready: says so and shows the pods" bash -c 'grep -q "not Ready within" <<<"$0"' "$out"
+# Never rolls out: fails loudly and prints the pods.
+reset; echo "netra-x CrashLoopBackOff false" >"$STUB/pods.last"; rollout last 1
+if out="$(deploy_wait_ready "$WL" "$SEL" "$IMG" 1 2>&1)"; then rc=0; else rc=1; fi
+check "never rolls out: returns failure" test "$rc" -eq 1
+check "never rolls out: says so and shows the pods" bash -c 'grep -q "did not finish rolling out" <<<"$0"' "$out"
 # A non-pull failure must not be "repaired" by re-importing the image.
 check "a crash loop does not trigger an image re-import" test "$(imports)" -eq 0
-
-# No pods at all is not success.
-reset; : >"$STUB/pods.last"
-if deploy_wait_ready "$SEL" "$IMG" 1 >/dev/null 2>&1; then rc=0; else rc=1; fi
-check "no pods at all is not success" test "$rc" -eq 1
+check "a crash loop does not delete pods" test "$(deletes)" -eq 0
 
 # --- the generated remote script ------------------------------------------------
 # deploy-remote.sh assembles the script it runs on the host through several layers
@@ -161,10 +176,10 @@ check "both images are built before either is imported (the GC window)" \
   test "$(line '^ *build_agent_image$')" -lt "$(line '^  import_image$')"
 check "the images are ensured before helm upgrade" \
   test "$(line 'deploy_ensure_image "$CONTROLLER_IMAGE"')" -lt "$(line 'helm upgrade --install')"
-check "the controller is waited for by readiness, not a rollout-status timeout" \
-  grep -q 'deploy_wait_ready "app.kubernetes.io/name=netra" "$CONTROLLER_IMAGE"' "$rendered"
-check "the agent is waited for by readiness too" \
-  grep -q 'deploy_wait_ready "app.kubernetes.io/name=netra-agent" "$AGENT_IMAGE"' "$rendered"
+check "the controller is waited for until its rollout completes" \
+  grep -q 'deploy_wait_ready deployment/netra "app.kubernetes.io/name=netra" "$CONTROLLER_IMAGE"' "$rendered"
+check "the agent is waited for until its rollout completes too" \
+  grep -q 'deploy_wait_ready daemonset/netra-agent "app.kubernetes.io/name=netra-agent" "$AGENT_IMAGE"' "$rendered"
 check "the fragile 180 s rollout status command is gone" bash -c '! grep -q "kubectl .*rollout status" "$0"' "$rendered"
 
 echo

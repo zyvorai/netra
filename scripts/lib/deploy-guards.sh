@@ -88,23 +88,31 @@ deploy_ensure_image() {
   fi
 }
 
-# deploy_wait_ready <label selector> <image ref> [timeout seconds]
-# Waits until every pod matching the selector is Ready. If one is stuck pulling
-# the image, repairs it (re-import, then delete the pod so it is recreated
-# immediately rather than after kubelet's back-off) and keeps waiting. On timeout
-# it prints the pods and returns 1, so the deploy fails loudly instead of
-# reporting a success helm cannot vouch for.
+# deploy_wait_ready <workload> <label selector> <image ref> [timeout seconds]
+#   workload is what `kubectl rollout status` takes: deployment/netra, daemonset/netra-agent.
+#
+# Waits for the ROLLOUT to complete, not merely for pods to be Ready. Right after
+# `rollout restart` the previous pod is still Running and Ready and the replacement
+# has not been created yet, so "every matching pod is Ready" is already true and a
+# wait built on it returns at once (the first live use of this function did exactly
+# that and reported success while the new pods were still starting). `rollout status`
+# only succeeds once the new pods are available and the old ones are gone.
+#
+# It is polled in short slices so a pod stuck pulling its image can be repaired in
+# between: re-import the image, then delete only the stuck pod so it is recreated
+# immediately rather than after kubelet's back-off. On timeout it prints the pods
+# and returns 1, so the deploy fails loudly instead of reporting a success helm
+# cannot vouch for.
 deploy_wait_ready() {
-  local selector="$1" ref="$2" timeout="${3:-${NETRA_DEPLOY_READY_TIMEOUT:-600}}" poll="${NETRA_DEPLOY_POLL:-5}"
-  local start="$SECONDS" lines total ready
+  local workload="$1" selector="$2" ref="$3" timeout="${4:-${NETRA_DEPLOY_READY_TIMEOUT:-600}}"
+  local poll="${NETRA_DEPLOY_POLL:-5}" slice="${NETRA_DEPLOY_ROLLOUT_SLICE:-20}"
+  local start="$SECONDS" lines
   while (( SECONDS - start < timeout )); do
-    lines="$(kubectl -n "$DEPLOY_NAMESPACE" get pods -l "$selector" \
-      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.containerStatuses[0].state.waiting.reason}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null || true)"
-    total="$(grep -c . <<<"$lines" || true)"
-    ready="$(grep -c ' true$' <<<"$lines" || true)"
-    if (( total > 0 && ready == total )); then
+    if kubectl -n "$DEPLOY_NAMESPACE" rollout status "$workload" --timeout="${slice}s" >/dev/null 2>&1; then
       return 0
     fi
+    lines="$(kubectl -n "$DEPLOY_NAMESPACE" get pods -l "$selector" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.containerStatuses[0].state.waiting.reason}{" "}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null || true)"
     if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$lines"; then
       echo "[deploy-guard] a pod cannot pull ${ref}: repairing"
       if deploy_ensure_image "$ref"; then
@@ -116,7 +124,7 @@ deploy_wait_ready() {
     fi
     sleep "$poll"
   done
-  echo "[deploy-guard] pods for '${selector}' were not Ready within ${timeout}s:" >&2
+  echo "[deploy-guard] ${workload} did not finish rolling out within ${timeout}s:" >&2
   kubectl -n "$DEPLOY_NAMESPACE" get pods -l "$selector" >&2 || true
   return 1
 }
