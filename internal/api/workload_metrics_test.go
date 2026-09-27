@@ -98,8 +98,11 @@ func TestWorkloadSeriesOffByDefaultAndSLOOnlyModeExportsOnlySLOGauges(t *testing
 
 	defs, _ := workloadobs.ParseDefinitions(`[{"name":"web-up","sli":"http_5xx","targetPct":99.9,"window":"7d"}]`)
 	o := mustObserver(t, workloadobs.Config{SLOs: defs}) // PromSeries false
-	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {0, 0}})}, wt0, nil)
-	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {1000, 0}})}, wt0.Add(time.Minute), nil)
+	// SLOStatus windows off time.Now(), not a fixed test clock, so these ticks
+	// must stay within the 7d window regardless of when the test runs.
+	sloNow := time.Now()
+	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {0, 0}})}, sloNow, nil)
+	o.Tick([]models.AgentStatus{wlAgent("n1", map[string][2]uint64{"web": {1000, 0}})}, sloNow.Add(time.Minute), nil)
 	out := scrape(t, devServer(t, o))
 	if strings.Contains(out, "netra_workload_packets_total") {
 		t.Fatal("workload series must stay off unless NETRA_METRICS_WORKLOAD_LABELS is on")

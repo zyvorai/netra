@@ -27,7 +27,7 @@ const SEED_NODE = process.env.SEED_NODE || 'ci-web';
 const SEED_IP = process.env.SEED_IP || '203.0.113.5';
 fs.mkdirSync(OUT, { recursive: true });
 
-// Kept in step with web/src/components/Nav.tsx's Page type by a check below.
+// Kept in step with web/src/lib/investigation.ts's `pages` const by a check below.
 const PAGES = ['overview', 'connections', 'workloads', 'explain', 'pods', 'vms', 'health', 'path', 'drops', 'l7',
   'insights', 'topology', 'incidents', 'policies', 'flows', 'ebpf', 'audit', 'report', 'scorecard', 'talkers', 'fleet',
   'surfaces', 'features', 'traffic', 'capture', 'congestion', 'sysctl-audit', 'node-resources'];
@@ -41,10 +41,10 @@ const check = (cond, msg, failures) => { if (!cond) { failures.push(msg); consol
 (async () => {
   const failures = [];
   // The page list must match the navigation the UI ships.
-  const nav = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'Nav.tsx'), 'utf8');
-  const typeBlock = nav.slice(nav.indexOf('export type Page'), nav.indexOf('type NavLink'));
-  const declared = [...typeBlock.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).sort();
-  assert.deepEqual([...PAGES].sort(), declared, 'PAGES in this test no longer matches Nav.tsx; update it');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'investigation.ts'), 'utf8');
+  const pagesLine = src.slice(src.indexOf('export const pages ='), src.indexOf('\n', src.indexOf('export const pages =')));
+  const declared = [...pagesLine.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual([...PAGES].sort(), declared, 'PAGES in this test no longer matches investigation.ts; update it');
 
   const browser = await chromium.launch({ headless: true, executablePath: process.env.NETRA_CHROMIUM_EXECUTABLE || undefined, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
