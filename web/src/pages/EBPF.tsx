@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { ruleTypeClass } from '../lib/ebpfRules';
 import Reveal from '../components/Reveal';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
+
 import DenyCensus from '../components/DenyCensus';
 import LeaseClock from '../components/LeaseClock';
 import WatchlistMatch from '../components/WatchlistMatch';
@@ -362,7 +365,22 @@ export default function EBPF() {
     return <p className={count / limit > 0.9 ? 'warning' : ''}>{count} / {limit} rules</p>;
   }
 
+  const enforcing = cfg?.mode === 'enforce';
+  const leaseLeft = cfg?.enforceUntil ? Math.max(0, Math.round((new Date(cfg.enforceUntil).getTime() - Date.now()) / 60000)) : undefined;
   return <div className="grid">
+    <PagePulse
+      headline={cfg ? (enforcing ? `Enforcing ${rules.length} rule${rules.length === 1 ? '' : 's'} under a lease.` : rules.length ? `Observing — ${rules.length} rule${rules.length === 1 ? '' : 's'} staged, none blocking.` : 'Observing. No rules configured.') : undefined}
+      tone={cfg ? (enforcing ? 'warn' : undefined) : undefined}
+      tick={cfg}
+      error={err || undefined}
+      figures={[
+        { label: 'mode', value: cfg ? (cfg.mode || 'observe') : undefined, tone: cfg ? (enforcing ? 'warn' : 'ok') : undefined },
+        { label: 'lease left', value: cfg ? (leaseLeft !== undefined && enforcing ? `${leaseLeft} min` : '—') : undefined },
+        { label: 'rules', value: cfg ? rules.length : undefined },
+        { label: 'scope', value: cfg ? (cfg.scopeMode || 'all') : undefined, tone: cfg && cfg.scopeMode === 'selected' ? 'warn' : undefined },
+        { label: 'agents', value: cfg ? agents.length : undefined, tone: cfg ? countTone(agents.length === 0 ? 1 : 0) : undefined },
+      ]}
+    />
     {err && <p className="warning" style={{ gridColumn: '1 / -1' }}>{err}</p>}
     <section className="card span3">
       <p className="eyebrow">FIREWALL RULES</p>

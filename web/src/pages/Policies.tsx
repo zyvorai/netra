@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, authHeaders } from '../api';
 import Reveal from '../components/Reveal';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
+
 
 const sample = JSON.stringify(
   {
@@ -288,9 +291,25 @@ export default function Policies() {
     }
   }
 
+  const policyCount = list?.items?.length ?? 0;
+  const manifests = gitopsStatus?.manifests || [];
+  const drifted = manifests.filter((m) => m.drifted).length;
+  const gitopsErrors = manifests.filter((m) => m.error).length + (gitopsStatus?.loadErrors?.length || 0);
   return (
     <div className="grid">
-      <section className="card span2">
+      <PagePulse
+        headline={list ? (drifted ? `${drifted} GitOps manifest${drifted === 1 ? '' : 's'} drifted from the cluster.` : `${policyCount} polic${policyCount === 1 ? 'y' : 'ies'} in ${ns}.`) : undefined}
+        tone={drifted || gitopsErrors ? 'warn' : undefined}
+        tick={list ?? gitopsStatus}
+        figures={[
+          { label: `policies in ${ns}`, value: list ? policyCount : undefined },
+          { label: 'GitOps manifests', value: gitopsStatus ? manifests.length : '—' },
+          { label: 'drifted', value: gitopsStatus ? drifted : '—', tone: gitopsStatus ? countTone(drifted) : undefined },
+          { label: 'GitOps errors', value: gitopsStatus ? gitopsErrors : '—', tone: gitopsStatus ? (gitopsErrors ? 'bad' : 'ok') : undefined },
+          { label: 'auto-apply', value: gitopsStatus ? (gitopsStatus.autoApply ? 'on' : 'off') : '—' },
+        ]}
+      />
+      <section className="card span3">
         <p className="eyebrow">WORKBENCH</p>
         <h2 className="card-title">Plan, dry-run, apply</h2>
         <p className="warning">Selecting an endpoint with egress policy can place it into egress default-deny. Preflight compares the live policy, runs Kubernetes dry-run, then issues a five-minute one-shot receipt bound to the exact candidate.</p>
