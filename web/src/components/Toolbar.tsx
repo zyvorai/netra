@@ -1,6 +1,7 @@
 // Copyright 2026 Zyvor AI Labs · https://zyvor.dev
 // SPDX-License-Identifier: LicenseRef-Zyvor-Production-1.0
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 
 // Browse-tier primitives (docs/design/APPLE-UX-CONTRACT.md). Styling lives in
 // styles/apple-story.css; these are thin wrappers so pages share one shape.
@@ -35,11 +36,16 @@ export function TableWrap({ children, className }: { children: ReactNode; classN
   return <div className={className ? `table-wrap ${className}` : 'table-wrap'}>{children}</div>;
 }
 
-type ListEmptyProps = { title: string; description?: string; action?: ReactNode };
+type ListEmptyProps = { title: string; description?: string; action?: ReactNode; icon?: LucideIcon; compact?: boolean };
 
-export function ListEmpty({ title, description, action }: ListEmptyProps) {
+export function ListEmpty({ title, description, action, icon: Icon, compact }: ListEmptyProps) {
   return (
-    <div className="list-empty">
+    <div className={compact ? 'list-empty list-empty--compact' : 'list-empty'}>
+      {Icon && (
+        <span className="list-empty__icon" aria-hidden="true">
+          <Icon size={20} strokeWidth={1.75} />
+        </span>
+      )}
       <h3>{title}</h3>
       {description && <p>{description}</p>}
       {action}

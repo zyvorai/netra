@@ -6,7 +6,10 @@ import PodExec from '../components/PodExec';
 import PodLogs from '../components/PodLogs';
 import VMVnc from '../components/VMVnc';
 import { hasGlob, matchGlob } from '../lib/glob';
-import { Toolbar } from '../components/Toolbar';
+import { ListEmpty, Toolbar } from '../components/Toolbar';
+import PagePulse from '../components/kit/PagePulse';
+import { ToneDot } from '../components/kit/tone';
+import { Boxes, MousePointerClick } from 'lucide-react';
 
 type Kind = 'pod' | 'vm';
 type Detail = {
@@ -33,6 +36,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
   const [ns, setNs] = useState('');
   const [q, setQ] = useState('');
   const [items, setItems] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState<unknown>(undefined);
   const [selected, setSelected] = useState<any>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [msg, setMsg] = useState('');
@@ -59,6 +63,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
       const path = kind === 'pod' ? `/api/v1/pods${qs}` : `/api/v1/vms${qs}`;
       const x = await api<any>(path);
       setItems(x.items || []);
+      setLoaded(x);
     } catch (e) {
       setMsg(String(e));
     }
@@ -170,8 +175,29 @@ export default function Workloads({ kind }: { kind: Kind }) {
     await refresh();
   }
 
+  const isRunning = (x: any) => x.running || x.phase === 'Running';
+  const isDone = (x: any) => x.phase === 'Succeeded';
+  const running = items.filter(isRunning).length;
+  const unhealthy = items.filter((x) => !isRunning(x) && !isDone(x)).length;
+  const locked = items.filter((x) => x.lockedDown).length;
+  const namespaces = new Set(items.map((x) => x.namespace)).size;
+  const noun = kind === 'pod' ? 'pod' : 'VM';
+
   return (
     <div className="grid">
+      <PagePulse
+        headline={loaded ? (unhealthy ? `${unhealthy} of ${items.length} ${noun}s are pending or failing.` : `All ${items.length} ${noun}s healthy.`) : undefined}
+        tone={loaded && unhealthy ? 'warn' : undefined}
+        tick={loaded}
+        error={/^error/i.test(msg) ? msg : undefined}
+        figures={[
+          { label: `${noun}s`, value: loaded ? items.length : undefined },
+          { label: 'running', value: loaded ? running : undefined },
+          { label: 'pending or failing', value: loaded ? unhealthy : undefined, tone: loaded ? (unhealthy ? 'warn' : 'ok') : undefined },
+          { label: 'namespaces', value: loaded ? namespaces : undefined },
+          { label: 'locked down', value: loaded ? locked : undefined },
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">FILTERS</p>
         <h2 className="card-title">{title} inventory</h2>
@@ -228,7 +254,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
           )}
         </div>
         {pageItems.length === 0 && (
-          <p className="empty-state">No {kind === 'pod' ? 'pods' : 'VMs'} match these filters.</p>
+          <ListEmpty compact icon={Boxes} title={`No ${kind === 'pod' ? 'pods' : 'VMs'} match these filters.`} description="Clear the search or widen the namespace pattern." />
         )}
         <div className="list">
           {pageItems.map((x) => {
@@ -239,7 +265,10 @@ export default function Workloads({ kind }: { kind: Kind }) {
                   <b className="truncate" title={x.name} aria-label={x.name}>{x.name}</b>
                   <small className="truncate" title={subtitle} aria-label={subtitle}>{subtitle}</small>
                 </span>
-                <span>{x.lockedDown ? 'LOCKED' : x.phase || (x.running ? 'Running' : '—')}</span>
+                <span>
+                  <ToneDot tone={x.lockedDown ? 'bad' : isRunning(x) ? 'ok' : isDone(x) ? 'idle' : 'warn'} />
+                  {x.lockedDown ? 'LOCKED' : x.phase || (x.running ? 'Running' : '—')}
+                </span>
               </button>
             );
           })}
@@ -275,7 +304,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
             </div>
           </>
         ) : (
-          <p>Select a {kind}.</p>
+          <ListEmpty compact icon={MousePointerClick} title={`Select a ${kind}.`} description="Its identity, lockdown state and live flows appear here." />
         )}
       </section>
       {detail && consoleEnabled && kind === 'pod' && (

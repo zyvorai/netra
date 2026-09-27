@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import InvestigationFilters from '../components/InvestigationFilters';
 import ConnectionTable from '../components/ConnectionTable';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 import { navigate, useRoute, useSnapshot } from '../hooks/useInvestigation';
 import { eventRows, observedWorkloads, type Agent } from '../lib/investigation';
 export default function ObservedWorkloads() {
@@ -10,7 +12,25 @@ export default function ObservedWorkloads() {
   const workloads = useMemo(() => observedWorkloads(agents, scope), [snapshot.data, scope]);
   const rows = useMemo(() => eventRows(agents, scope), [snapshot.data, scope]);
   const selected = scope.namespace && scope.pod;
-  return <div className="investigation"><InvestigationFilters traffic={false} />
+  const namespaces = new Set(workloads.map((w) => w.namespace)).size;
+  const nodes = new Set(workloads.map((w) => w.node)).size;
+  const stale = agents.filter((a) => a.stale).length;
+  const unattributed = rows.filter((e) => !e.pod).length;
+  const have = snapshot.data !== undefined;
+  return <div className="investigation">
+    <PagePulse
+      headline={have ? `${workloads.length} workload${workloads.length === 1 ? '' : 's'} across ${namespaces} namespace${namespaces === 1 ? '' : 's'}.` : undefined}
+      tick={snapshot.data}
+      error={snapshot.error}
+      figures={[
+        { label: 'workloads', value: have ? workloads.length : undefined },
+        { label: 'namespaces', value: have ? namespaces : undefined },
+        { label: 'nodes', value: have ? nodes : undefined },
+        { label: 'stale agents', value: have ? stale : undefined, tone: have ? countTone(stale) : undefined },
+        { label: 'unattributed events', value: have ? unattributed : undefined, tone: have && unattributed ? 'warn' : undefined },
+      ]}
+    />
+    <InvestigationFilters traffic={false} />
     <section className="card"><div className="toolbar"><h2>{selected ? `${scope.namespace}/${scope.pod}` : 'Observed workloads'}</h2><button onClick={snapshot.refresh}>Refresh</button></div>
       <p>Identity from agent reports. This inventory includes observed pods and container cgroups; it does not establish guest-process identity inside VMs.</p>
       {snapshot.updatedAt && <p className="snapshot-time">Last successful fetch: {new Date(snapshot.updatedAt).toLocaleTimeString()}</p>}

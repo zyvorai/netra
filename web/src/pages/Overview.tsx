@@ -2,13 +2,15 @@ import type { ReactNode } from 'react';
 import AskNetra from '../components/AskNetra';
 import DatapathHero from '../components/DatapathHero';
 import Reveal from '../components/Reveal';
-import Sparkline from '../components/Sparkline';
 import type { Page } from '../components/Nav';
 import { useCountUp } from '../hooks/useCountUp';
+import { PulseFigure } from '../components/kit/PagePulse';
+import RankedList from '../components/kit/RankedList';
+import { ToneDot, type Tone } from '../components/kit/tone';
+import { bytesRate, compact } from '../components/kit/format';
 import { PULSE_INTERVAL_MS, useOverviewPulse } from '../hooks/useOverviewPulse';
 
 type Navigate = (page: Page) => void;
-type Tone = 'ok' | 'warn' | 'idle';
 
 function Metric({ value, label }: { value: number | string; label: string }) {
   const numeric = typeof value === 'number' && Number.isFinite(value);
@@ -21,39 +23,7 @@ function Metric({ value, label }: { value: number | string; label: string }) {
   );
 }
 
-export function compact(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (abs >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (abs >= 1e4) return (n / 1e3).toFixed(1) + 'K';
-  if (abs >= 100) return Math.round(n).toLocaleString();
-  return n.toFixed(abs < 10 && n !== 0 ? 1 : 0);
-}
-
-export function bytesRate(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-  let i = 0;
-  while (n >= 1000 && i < units.length - 1) {
-    n /= 1000;
-    i++;
-  }
-  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
-}
-
-function PulseFigure({ label, value, format, series, tone }: { label: string; value?: number; format: (n: number) => string; series: number[]; tone?: Tone }) {
-  const animated = useCountUp(value ?? 0);
-  return (
-    <div className={`overview-pulse__cell${tone ? ' tone-' + tone : ''}`}>
-      <span>{label}</span>
-      <b>{value === undefined ? '—' : format(animated)}</b>
-      <div className="overview-pulse__spark">
-        {series.length > 1 ? <Sparkline values={series} width={200} height={36} fill /> : <i>warming up…</i>}
-      </div>
-    </div>
-  );
-}
+export { bytesRate, compact };
 
 function StatusPill({ agents, stale, leaseUntil }: { agents: number; stale: number; leaseUntil?: string }) {
   if (leaseUntil) {
@@ -103,7 +73,7 @@ function Chapter({
       <section className={`overview-chapter${flip ? ' overview-chapter--flip' : ''}`}>
         <div className="overview-chapter__copy">
           <p className="apple-eyebrow">
-            <span className={`overview-tone tone-${tone}`} aria-hidden="true" />
+            <ToneDot tone={tone} />
             {eyebrow}
           </p>
           <h2>{title}</h2>
@@ -130,29 +100,6 @@ function Signals({ items }: { items: any[] }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-function Ranked({ title, items, empty, prefix }: { title: string; items: { name: string; count: number }[]; empty: string; prefix?: string }) {
-  const top = items.slice(0, 6);
-  const max = Math.max(1, ...top.map((x) => x.count || 0));
-  return (
-    <div className="overview-ranked">
-      <h3>{title}</h3>
-      {!top.length && <p className="overview-ranked__empty">{empty}</p>}
-      <ol>
-        {top.map((x) => (
-          <li key={x.name}>
-            <span className="overview-ranked__bar" style={{ width: `${Math.max(3, (x.count / max) * 100)}%` }} aria-hidden="true" />
-            <span className="overview-ranked__name" title={x.name}>
-              {prefix}
-              {x.name}
-            </span>
-            <span className="overview-ranked__count">{compact(x.count)}</span>
-          </li>
-        ))}
-      </ol>
-    </div>
   );
 }
 
@@ -354,9 +301,9 @@ export default function Overview({ onNavigate }: { onNavigate?: Navigate }) {
             )}
           </div>
           <div className="overview-talking__grid">
-            <Ranked title="Destinations" items={obs?.topDestinations || []} empty="No destinations observed yet." />
-            <Ranked title="DNS names" items={obs?.topDns || []} empty="No cleartext DNS observed yet." />
-            <Ranked title="Processes" items={obs?.topProcesses || []} empty="No socket processes observed yet." />
+            <RankedList title="Destinations" items={obs?.topDestinations || []} empty="No destinations observed yet." limit={6} />
+            <RankedList title="DNS names" items={obs?.topDns || []} empty="No cleartext DNS observed yet." limit={6} />
+            <RankedList title="Processes" items={obs?.topProcesses || []} empty="No socket processes observed yet." limit={6} />
           </div>
         </section>
       </Reveal>
