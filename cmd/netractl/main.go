@@ -763,6 +763,14 @@ func ebpf() error {
 			path += "?window=" + url.QueryEscape(os.Args[3])
 		}
 		return request("GET", path, nil)
+	case "attachments":
+		path := "/api/v1/ebpf/attachments"
+		if len(os.Args) >= 5 && os.Args[3] == "--node" {
+			path += "?node=" + url.QueryEscape(os.Args[4])
+		} else if len(os.Args) > 3 {
+			return fmt.Errorf("ebpf attachments [--node NODE]")
+		}
+		return request("GET", path, nil)
 	case "sysctl-audit":
 		return request("GET", "/api/v1/ebpf/sysctl-audit", nil)
 	case "dns-findings":

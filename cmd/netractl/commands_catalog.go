@@ -55,6 +55,7 @@ func allCLICommands() []cliCommand {
 		{Name: "node-resources", Args: []string{"node-resources"}},
 		{Name: "netlink-state", Args: []string{"netlink", "state"}},
 		{Name: "netlink-events", Args: []string{"netlink", "events", "--since", "30m", "--limit", "20"}},
+		{Name: "netlink-findings", Args: []string{"netlink", "findings"}},
 		{Name: "scorecard", Args: []string{"scorecard"}},
 		{Name: "talkers", Args: []string{"talkers"}},
 		{Name: "namespaces", Args: []string{"namespaces"}},
@@ -115,7 +116,7 @@ func ebpfReadCommands() []cliCommand {
 	names := []string{
 		"stats", "summary", "coverage", "reasons", "census", "health",
 		"capdrift", "nsdrift", "exehash", "path", "drops",
-		"kernel-network", "sysctl-audit", "dns-findings", "scan-findings",
+		"kernel-network", "attachments", "sysctl-audit", "dns-findings", "scan-findings",
 		"ai-destinations", "app-categories", "auto-mitigate",
 		"tls-fingerprints", "tls-fingerprint-risk", "encrypted-dns", "ipv6",
 		"shield", "interfaces", "diagnose", "l7", "capabilities", "workloads",

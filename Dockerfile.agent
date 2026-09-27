@@ -55,6 +55,14 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
 RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -c netra_ssl.c -o /out-ssl.o
+# Standalone rtnetlink requester attribution: an fentry on rtnetlink_rcv_msg that
+# records which process (comm, pid, cgroup) asked for each link/address/route/
+# neighbor change, so the netlink recorder can say who made it. Read-only; needs
+# kernel BTF at load time and is skipped, with the reason reported, without it
+# (docs/netlink-recorder.md).
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_rtnl.c -o /out-rtnl.o
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=go /out/netra-agent /netra-agent
@@ -66,4 +74,5 @@ COPY --from=bpf /out-tcpevents.o /opt/netra/bpf/netra_tcpevents.o
 COPY --from=bpf /out-dropinfo.o /opt/netra/bpf/netra_dropinfo.o
 COPY --from=bpf /out-l7sample.o /opt/netra/bpf/netra_l7sample.o
 COPY --from=bpf /out-ssl.o /opt/netra/bpf/netra_ssl.o
+COPY --from=bpf /out-rtnl.o /opt/netra/bpf/netra_rtnl.o
 ENTRYPOINT ["/netra-agent"]

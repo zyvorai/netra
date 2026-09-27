@@ -6,9 +6,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/zyvorai/netra/internal/bpfattachdiag"
 	"github.com/zyvorai/netra/internal/models"
+	"github.com/zyvorai/netra/internal/netlinkdiag"
 )
+
+// now is the clock netlink findings are evaluated against; a variable so tests
+// can pin it.
+var now = time.Now
 
 // Build derives low-noise network health signals from exact node-agent maps.
 // Thresholds are intentionally conservative heuristics, not statistical claims.
@@ -288,6 +295,16 @@ func anomalies(agents []models.AgentStatus) []models.NetworkHealthAnomaly {
 			}
 		}
 	}
+	// Host network changes (docs/netlink-recorder.md). Added before correlation so
+	// a removed route and, say, ICMP unreachables on the same node correlate. They
+	// carry no weight in the health score, which is driven by counters, but they
+	// reach the alert poller, incidents, the AI brief and the SIEM export because
+	// those all read this list.
+	out = append(out, netlinkdiag.Anomalies(netlinkdiag.Build(agents, now(), netlinkdiag.DefaultWindow).Findings)...)
+	// Netra hooks the agent believes it has but the kernel no longer shows
+	// (docs/bpf-attachments.md): the same route into alerts, incidents, the AI
+	// brief and SIEM.
+	out = append(out, bpfattachdiag.Anomalies(bpfattachdiag.Build(agents, now()).Findings)...)
 	out = correlateAnomalies(out)
 	order := map[string]int{"critical": 3, "warning": 2, "info": 1}
 	sort.SliceStable(out, func(i, j int) bool {

@@ -169,7 +169,7 @@ func TestNetlinkAggregateAndMetricsUseFreshReportingNodesOnly(t *testing.T) {
 	}
 	// Cardinality guard: no label other than the fixed kind set.
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "netra_netlink") && strings.Contains(line, "{") && !strings.Contains(line, "{kind=") {
+		if strings.HasPrefix(line, "netra_netlink") && strings.Contains(line, "{") && !strings.Contains(line, "{kind=") && !strings.Contains(line, "{severity=") {
 			t.Errorf("unexpected label on %q", line)
 		}
 	}
@@ -181,5 +181,200 @@ func TestNetlinkMetricsAreAbsentNotZeroWhenNothingReports(t *testing.T) {
 	out := rec.Body.String()
 	if !strings.Contains(out, "netra_netlink_nodes_not_reporting 1") || strings.Contains(out, "netra_netlink_overruns") {
 		t.Fatalf("metrics=%s", out)
+	}
+}
+
+func nlFindingsServer(now time.Time) *Server {
+	st := store.New()
+	gone := models.NetlinkEvent{Epoch: 1, Sequence: 1, Kind: "route", Action: "delete", Family: "ipv4", Destination: "default",
+		Gateway: "10.0.0.1", Interface: "eth0", Table: 254, ObservedAt: now.Add(-2 * time.Minute)}
+	st.Report(models.AgentReport{Node: "worker-1", ObservedAt: now, Netlink: &models.NetlinkReport{
+		Available: true, Epoch: 1, Sequence: 1, Cursor: 1, Events: []models.NetlinkEvent{gone}}})
+	st.Report(models.AgentReport{Node: "worker-2", ObservedAt: now, Netlink: &models.NetlinkReport{Available: true, Epoch: 2}})
+	st.Report(models.AgentReport{Node: "off-node", ObservedAt: now})
+	return &Server{store: st, agentStaleAfter: time.Minute}
+}
+
+func nlFindingsGet(t *testing.T, s *Server, query string) (int, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.netlinkFindings(rec, httptest.NewRequest("GET", "/api/v1/netlink/findings"+query, nil))
+	var body map[string]any
+	if rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("bad json: %v: %s", err, rec.Body.String())
+		}
+	}
+	return rec.Code, body
+}
+
+func TestNetlinkFindingsEndpointReportsWhatIsWrongAndWhatWasNotChecked(t *testing.T) {
+	s := nlFindingsServer(time.Now().UTC())
+	code, body := nlFindingsGet(t, s, "")
+	if code != 200 {
+		t.Fatalf("status=%d", code)
+	}
+	fs := body["findings"].([]any)
+	if len(fs) != 1 {
+		t.Fatalf("findings=%v", fs)
+	}
+	f := fs[0].(map[string]any)
+	if f["kind"] != "netlink-default-route-removed" || f["severity"] != "critical" || f["node"] != "worker-1" || f["subject"] != "worker-1" {
+		t.Fatalf("finding=%v", f)
+	}
+	if len(f["evidence"].([]any)) != 1 {
+		t.Fatalf("evidence=%v", f["evidence"])
+	}
+	// Two nodes recorded, one node has the recorder off: silence is not health.
+	if body["evaluated"].(float64) != 2 || body["skipped"].(float64) != 1 || body["window"] != "15m0s" {
+		t.Fatalf("evaluated=%v skipped=%v window=%v", body["evaluated"], body["skipped"], body["window"])
+	}
+}
+
+func TestNetlinkFindingsFiltersByNodeAndValidatesWindow(t *testing.T) {
+	s := nlFindingsServer(time.Now().UTC())
+	_, body := nlFindingsGet(t, s, "?node=worker-2")
+	if got := len(body["findings"].([]any)); got != 0 {
+		t.Fatalf("worker-2 has no findings, got %d", got)
+	}
+	// A window shorter than the change ends the finding.
+	_, body = nlFindingsGet(t, s, "?window=1m")
+	if got := len(body["findings"].([]any)); got != 0 {
+		t.Fatalf("a 1m window should not reach a change from 2m ago, got %d", got)
+	}
+	for _, q := range []string{"?window=30s", "?window=48h", "?window=soon"} {
+		if code, _ := nlFindingsGet(t, s, q); code != http.StatusBadRequest {
+			t.Errorf("%s: status=%d, want 400", q, code)
+		}
+	}
+}
+
+func TestNetlinkFindingsGaugeCountsBySeverityWithFixedLabels(t *testing.T) {
+	now := time.Now().UTC()
+	agents := nlFindingsServer(now).store.AgentStatuses(now, time.Minute)
+	rec := httptest.NewRecorder()
+	writeNetlinkMetrics(rec, agents)
+	out := rec.Body.String()
+	for _, want := range []string{
+		`netra_netlink_findings{severity="critical"} 1`,
+		`netra_netlink_findings{severity="warning"} 0`,
+		`netra_netlink_findings{severity="info"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func bpfServer(now time.Time) *Server {
+	st := store.New()
+	st.Report(models.AgentReport{
+		Node: "worker-1", ObservedAt: now, Hooks: []string{"tcx-ingress:eth0", "tcx-egress:eth0"}, Interfaces: []string{"eth0"},
+		BPFAttach: &models.BPFAttachReport{Available: true, TCXSupported: true, ObservedAt: now, Total: 1, Hash: "h",
+			Interfaces: []models.BPFInterfaceAttach{{Name: "eth0", Index: 2, TCXIngress: []models.BPFProgram{{ID: 1, Name: "cil_from_netdev", Owner: "cilium"}}}}},
+	})
+	st.Report(models.AgentReport{Node: "off-node", ObservedAt: now})
+	return &Server{store: st, agentStaleAfter: time.Minute}
+}
+
+func TestBPFAttachmentsShowsKernelStateAndDrift(t *testing.T) {
+	s := bpfServer(time.Now().UTC())
+	rec := httptest.NewRecorder()
+	s.bpfAttachments(rec, httptest.NewRequest("GET", "/api/v1/ebpf/attachments", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	nodes := body["nodes"].([]any)
+	byName := map[string]map[string]any{}
+	for _, n := range nodes {
+		m := n.(map[string]any)
+		byName[m["node"].(string)] = m
+	}
+	w1 := byName["worker-1"]
+	if w1["reporting"] != true || len(w1["attached"].([]any)) != 1 || len(w1["hooks"].([]any)) != 2 {
+		t.Fatalf("worker-1=%v", w1)
+	}
+	if byName["off-node"]["reporting"] != false || byName["off-node"]["unavailable"] == "" {
+		t.Fatalf("a node with the inventory off must say so: %v", byName["off-node"])
+	}
+	// The agent believes it has Netra's hooks on eth0; the kernel shows only Cilium's.
+	fs := body["findings"].([]any)
+	if len(fs) != 1 || fs[0].(map[string]any)["kind"] != "bpf-netra-hook-missing" {
+		t.Fatalf("findings=%v", fs)
+	}
+	if body["evaluated"].(float64) != 1 || body["skipped"].(float64) != 1 {
+		t.Fatalf("evaluated=%v skipped=%v", body["evaluated"], body["skipped"])
+	}
+}
+
+func TestBPFAttachmentsFiltersByNode(t *testing.T) {
+	s := bpfServer(time.Now().UTC())
+	rec := httptest.NewRecorder()
+	s.bpfAttachments(rec, httptest.NewRequest("GET", "/api/v1/ebpf/attachments?node=off-node", nil))
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body["nodes"].([]any)) != 1 || len(body["findings"].([]any)) != 0 {
+		t.Fatalf("body=%v", body)
+	}
+}
+
+func TestBPFAttachMetricsAreFixedCardinality(t *testing.T) {
+	now := time.Now().UTC()
+	agents := bpfServer(now).store.AgentStatuses(now, time.Minute)
+	rec := httptest.NewRecorder()
+	writeBPFAttachMetrics(rec, agents)
+	out := rec.Body.String()
+	for _, want := range []string{
+		"netra_bpf_attach_nodes_reporting 1", "netra_bpf_attach_nodes_not_reporting 1", "netra_bpf_attach_interfaces 1",
+		`netra_bpf_attach_findings{severity="warning"} 1`, `netra_bpf_attach_findings{severity="critical"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "netra_bpf_attach") && strings.Contains(line, "{") && !strings.Contains(line, "{severity=") {
+			t.Errorf("unexpected label on %q", line)
+		}
+	}
+	empty := httptest.NewRecorder()
+	writeBPFAttachMetrics(empty, []models.AgentStatus{{AgentReport: models.AgentReport{Node: "old"}}})
+	if strings.Contains(empty.Body.String(), "netra_bpf_attach_findings") {
+		t.Fatal("gauges must be absent, not zero, when nothing reports")
+	}
+}
+
+func TestNetlinkEventsCarryTheRequesterAndTheSensorStatus(t *testing.T) {
+	now := time.Now().UTC()
+	st := store.New()
+	st.Report(models.AgentReport{Node: "worker-1", ObservedAt: now, Netlink: &models.NetlinkReport{
+		Available: true, Epoch: 1, Sequence: 1, Cursor: 1,
+		Actor: &models.NetlinkActorStatus{Available: true, Records: 12},
+		Events: []models.NetlinkEvent{{
+			Epoch: 1, Sequence: 1, Kind: "route", Action: "delete", Destination: "default", ObservedAt: now.Add(-time.Minute),
+			Origin: models.NetlinkOriginProcess,
+			Actor:  &models.NetlinkActor{Confidence: "probable", Comm: "calico-node", PID: 42, Namespace: "kube-system", Pod: "calico-node-x"},
+		}},
+	}})
+	s := &Server{store: st, agentStaleAfter: time.Minute}
+	rec := httptest.NewRecorder()
+	s.netlinkChanges(rec, httptest.NewRequest("GET", "/api/v1/netlink?since=10m", nil))
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	ev := body["events"].([]any)[0].(map[string]any)
+	actor := ev["actor"].(map[string]any)
+	if ev["origin"] != "process" || actor["comm"] != "calico-node" || actor["pod"] != "calico-node-x" || actor["confidence"] != "probable" {
+		t.Fatalf("event=%v", ev)
+	}
+	node := body["nodes"].([]any)[0].(map[string]any)
+	status, ok := node["actor"].(map[string]any)
+	if !ok || status["available"] != true || status["records"].(float64) != 12 {
+		t.Fatalf("node=%v", node)
 	}
 }
