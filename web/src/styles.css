@@ -82,6 +82,15 @@
   --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.14);
   --focus-ring: 0 0 0 4px rgba(0, 113, 227, 0.3);
   --hit-min: 44px;
+  /* Type scale (docs/design/APPLE-UX-CONTRACT.md). Headings and figures read
+     from these instead of raw px so every page shrinks or grows together. */
+  --fs-body: 15px;
+  --fs-lede: 16px;
+  --fs-link: 15px;
+  --fs-h1: clamp(24px, 2.6vw, 34px);
+  --fs-h2: clamp(20px, 1.8vw, 24px);
+  --fs-h3: 17px;
+  --fs-figure: clamp(18px, 1.6vw, 24px);
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   /* Border-radius scale — theme-independent (not a color), defined once
@@ -188,6 +197,8 @@ body {
   background: var(--bg-page);
   min-height: 100vh;
   color: var(--text-primary);
+  font-size: var(--fs-body);
+  line-height: 1.5;
 }
 
 /* —— Apple.com button system —— */
@@ -195,13 +206,13 @@ button,
 .buttonlike,
 .buildbutton {
   font-family: inherit;
-  font-size: 18px;
+  font-size: var(--fs-body);
   font-weight: 400;
-  letter-spacing: -0.022em;
+  letter-spacing: -0.01em;
   line-height: 1.17648;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
-  padding: 12px 22px;
+  padding: 10px 18px;
   min-height: 44px;
   cursor: pointer;
   color: var(--text-primary);
@@ -609,22 +620,20 @@ main {
   overflow-x: clip;
 }
 
-/* Full marketing hero (Overview) */
+/* Overview hero: same compact scale as .page-hero; the live datapath visual
+   below it, not the headline, is the landing page's big moment. */
 .hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 36px;
-  align-items: end;
-  margin: 28px 0 48px;
-  padding: 48px 0 36px;
   position: relative;
+  margin: 8px 0 20px;
+  padding: 12px 0 4px;
+  max-width: 900px;
 }
 .hero::before,
 .page-hero::before {
   content: "";
   position: absolute;
   inset: -20px -8% auto;
-  height: 280px;
+  height: 140px;
   background:
     radial-gradient(ellipse at 30% 40%, var(--hero-glow-a), transparent 60%),
     radial-gradient(ellipse at 80% 20%, var(--hero-glow-b), transparent 55%);
@@ -632,22 +641,22 @@ main {
   z-index: -1;
   animation: heroDrift 22s ease-in-out infinite alternate;
 }
-.hero h1 {
-  font-size: clamp(38px, 4.6vw, 64px);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  max-width: 920px;
-  margin: 10px 0 18px;
-  color: var(--text-primary);
+.hero h1,
+.page-hero h1 {
+  font-size: var(--fs-h1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   font-weight: 600;
+  margin: 6px 0 8px;
+  color: var(--text-primary);
 }
-.hero p {
+.hero p,
+.page-hero p {
   color: var(--text-secondary);
-  max-width: 720px;
-  font-size: 20px;
-  line-height: 1.381;
-  font-weight: 400;
-  letter-spacing: 0.011em;
+  font-size: var(--fs-lede);
+  line-height: 1.45;
+  margin: 0;
+  max-width: 70ch;
 }
 
 /* The glow layer is clipped to its hero's box (max-width 900px on page heroes),
@@ -675,34 +684,14 @@ main {
   to { background-position: 6% 4%, -5% -3%; }
 }
 
-/* Page heroes carry their own glow layer as a "chapter opener" per page,
-   but at a page-title scale, not display/poster scale — kept a clear step
-   under .hero's ceiling (52px vs 64px) so Overview stays the single
-   biggest moment in the app. History: shrunk twice (an original
-   near-hero-scale 84px, then a still-oversized 48px ceiling), then raised
-   again to this larger, Apple-marketing-inspired scale on explicit
-   request. */
+/* Page heroes are compact page titles, not posters: the data should start
+   within the first screen. Scale comes from --fs-h1 / --fs-lede. */
 .page-hero {
   position: relative;
-  margin: 20px 0 36px;
-  padding: 28px 0 12px;
+  margin: 8px 0 20px;
+  padding: 12px 0 4px;
   max-width: 900px;
   animation: fadeRise 0.45s var(--ease-apple) both;
-}
-.page-hero h1 {
-  font-size: clamp(32px, 4vw, 52px);
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  font-weight: 600;
-  margin: 10px 0 12px;
-  color: var(--text-primary);
-}
-.page-hero p {
-  color: var(--text-secondary);
-  font-size: 19px;
-  line-height: 1.42;
-  margin: 0;
-  max-width: 640px;
 }
 
 /* Per-page tinted ambient glow — the app's stand-in for the imagery/photo
@@ -763,16 +752,16 @@ main {
   display: block;
 }
 .login-info h1 {
-  font-size: clamp(38px, 4.6vw, 56px);
-  line-height: 1.07;
-  letter-spacing: -0.02em;
+  font-size: var(--fs-h1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   font-weight: 600;
   margin: 8px 0 14px;
   color: var(--text-primary);
 }
 .login-info p {
   color: var(--text-secondary);
-  font-size: 19px;
+  font-size: var(--fs-lede);
   line-height: 1.5;
   max-width: 480px;
   margin-inline: auto;
@@ -795,8 +784,8 @@ main {
   text-align: left;
 }
 .login-card h1 {
-  font-size: clamp(32px, 3.5vw, 46px);
-  letter-spacing: -0.03em;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.01em;
   margin: 6px 0 4px;
   font-weight: 600;
   color: var(--text-primary);
@@ -896,23 +885,23 @@ main {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .card h2 {
-  font-size: clamp(32px, 3.5vw, 46px);
-  letter-spacing: -0.03em;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.01em;
   margin: 6px 0 12px;
   font-weight: 600;
   color: var(--text-primary);
 }
 .card h3 {
   margin-top: 0;
-  font-size: 24px;
-  letter-spacing: -0.02em;
+  font-size: var(--fs-h3);
+  letter-spacing: -0.01em;
   font-weight: 600;
   color: var(--text-primary);
 }
 .card p {
   color: var(--text-secondary);
-  line-height: 1.55;
-  font-size: 18px;
+  line-height: 1.5;
+  font-size: var(--fs-body);
 }
 
 .metrics {
@@ -935,14 +924,13 @@ main {
 }
 .metrics b {
   display: block;
-  /* Hero-scale numerals — Apple's "big number" stat treatment — rather
-     than a modest label-sized figure. Capped well under the .hero/.metrics
-     tile width: several pages embed a unit suffix directly in this text
+  /* Stat numerals on the shared --fs-figure scale. Capped well under the
+     .metrics tile width: several pages embed a unit suffix directly in this text
      (e.g. "12.4 ms"), and a too-large clamp wraps those mid-value inside a
      ~150px tile. clamp() also keeps it from overrunning at narrow widths. */
-  font-size: clamp(22px, 2.2vw, 32px);
+  font-size: var(--fs-figure);
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   /* break-word (not anywhere): it does not shrink min-content, so a number like
@@ -1973,15 +1961,12 @@ code {
   .mega-panel.open { transform: translateY(0); }
   .mega-grid { grid-template-columns: 1fr; }
   .brand small { display: none; }
-  .hero { display: block; padding-top: 24px; }
   .tokenbox { display: block; margin-top: 20px; }
   .grid { grid-template-columns: minmax(0, 1fr); }
   .span2,
   .span3 { grid-column: auto; }
   .metrics { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .filters { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-  .hero p { font-size: 19px; }
-  .page-hero p { font-size: 19px; }
   /* Keep all columns readable: scroll horizontally instead of hiding. */
   .terminalbody {
     overflow-x: auto;
@@ -2037,7 +2022,7 @@ code {
 .investigation-filters input, .investigation-filters select { width: 100%; min-width: 0; }
 .investigation-filters .toolbar { flex-basis: 100%; }
 .operations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.operations-grid h2 { font-size: 36px; text-transform: capitalize; }
+.operations-grid h2 { font-size: var(--fs-h2); text-transform: capitalize; }
 .operations-grid h2 small { font-size: 14px; font-weight: 400; }
 .investigation-table { overflow-x: auto; }
 .investigation-table table { border-collapse: collapse; width: 100%; font-size: 13px; }

@@ -31,6 +31,24 @@ Tokens live in `web/src/styles.css` (`:root` = Apple light, the default;
 | `--apple-blue` (CTA, focus) | `#0071e3` | `#0071e3` |
 | `--apple-link` | `#0066cc` | `#2997ff` |
 
+## Type scale
+
+Headings, figures and body copy read these tokens (`:root` in `web/src/styles.css`); do not
+add raw `px` font sizes above 17px.
+
+| Token | Value | Used by |
+|---|---|---|
+| `--fs-h1` | `clamp(24px, 2.6vw, 34px)` | `.hero h1`, `.page-hero h1`, `.apple-display`, login title |
+| `--fs-h2` | `clamp(20px, 1.8vw, 24px)` | `.card h2`, Overview chapter headings, login card |
+| `--fs-h3` | `17px` | `.card-title`, `.card h3`, `.list-empty h3` |
+| `--fs-figure` | `clamp(18px, 1.6vw, 24px)` | `.metrics b`, `.apple-metric-band b`, Overview pulse |
+| `--fs-lede` | `16px` | hero/page-hero/login lede, `.apple-lede` |
+| `--fs-body` | `15px` | `body`, `.card p`, buttons |
+| `--fs-link` | `15px` | `.apple-text-link`, Overview links |
+
+Page heroes are compact titles, not posters: the data starts within the first screen. On the
+Overview, the live datapath panel — not the headline — is the big moment.
+
 ## Laws
 
 1. **Elevation runs up.** Dark: page `#000` → panel `#1d1d1f` → card lighter → popover lightest. Light: white page, white card with a hairline, popover with a soft shadow. A grey panel on a white page is a bug.
