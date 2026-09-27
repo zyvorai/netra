@@ -43,6 +43,55 @@ type NetlinkEvent struct {
 	Priority       int       `json:"priority,omitempty"`
 	// Detail carries the reason for a synthetic overrun event.
 	Detail string `json:"detail,omitempty"`
+	// Origin says whether a process asked for this change: "process" (Actor names
+	// it), "kernel" (no process requested it: carrier loss, kernel timers, router
+	// advertisements) or empty when that is not known, which is the case whenever
+	// the attribution sensor is not running or dropped requests around this time.
+	Origin string `json:"origin,omitempty"`
+	// Actor is the process that requested the change, when Origin is "process".
+	Actor *NetlinkActor `json:"actor,omitempty"`
+}
+
+// Netlink change origins and actor confidences.
+const (
+	NetlinkOriginProcess = "process"
+	NetlinkOriginKernel  = "kernel"
+
+	NetlinkActorProbable  = "probable"  // exactly one requester matches
+	NetlinkActorAmbiguous = "ambiguous" // several requesters match; none is named
+)
+
+// NetlinkActor is the process behind a recorded change, joined to it by message
+// type, interface and time. It is a join, not proof: "probable" means exactly one
+// requester issued a matching request at that moment, and two requesters in the
+// same instant are reported as ambiguous rather than picked between. Only the
+// process name, ids and cgroup are captured; never argv, environment or message content.
+type NetlinkActor struct {
+	Confidence string `json:"confidence"`
+	Comm       string `json:"comm,omitempty"`
+	PID        uint32 `json:"pid,omitempty"`
+	CgroupID   uint64 `json:"cgroupId,omitempty"`
+	// Namespace, Pod and Workload are the requester's pod, when its cgroup is one
+	// the agent knows; empty for a host process.
+	Namespace string `json:"namespace,omitempty"`
+	Pod       string `json:"pod,omitempty"`
+	Workload  string `json:"workload,omitempty"`
+	// Candidates is how many distinct requesters matched; Alternatives names up to
+	// three of their processes when the match is ambiguous.
+	Candidates   int      `json:"candidates,omitempty"`
+	Alternatives []string `json:"alternatives,omitempty"`
+}
+
+// NetlinkActorStatus is the attribution sensor's state on one node. It is what
+// makes "origin: kernel" trustworthy: it is only claimed while Available.
+type NetlinkActorStatus struct {
+	Available   bool   `json:"available"`
+	Unavailable string `json:"unavailable,omitempty"`
+	// Dropped counts requests the kernel could not record because its ring
+	// buffer was full; changes near a drop are left unattributed, not "kernel".
+	Dropped uint64 `json:"dropped,omitempty"`
+	// Records is how many requests the sensor has seen since the agent started.
+	Records uint64 `json:"records,omitempty"`
 }
 
 type NetlinkLink struct {
@@ -144,4 +193,40 @@ type NetlinkReport struct {
 	// one forward, so nil here does not mean "empty".
 	Snapshot *NetlinkSnapshot `json:"snapshot,omitempty"`
 	Events   []NetlinkEvent   `json:"events,omitempty"`
+	// Actor is the requester-attribution sensor's state (bpf/netra_rtnl.c): nil
+	// when it is off, Unavailable when it could not start.
+	Actor *NetlinkActorStatus `json:"actor,omitempty"`
+}
+
+// NetlinkFinding is one evidence-backed observation derived from the recorded
+// changes. It is level-triggered: it is reported only while the latest snapshot
+// still shows the problem, so it clears itself when the network recovers. It
+// states what changed, not why; nothing here is a causal claim.
+type NetlinkFinding struct {
+	Severity string `json:"severity"` // critical|warning|info
+	Kind     string `json:"kind"`
+	Node     string `json:"node"`
+	// Subject is the node, never an interface or address: interfaces churn per
+	// pod, and the alert de-duplication key is built from it.
+	Subject       string    `json:"subject"`
+	Message       string    `json:"message"`
+	Value         float64   `json:"value,omitempty"`
+	FirstObserved time.Time `json:"firstObserved"`
+	LastObserved  time.Time `json:"lastObserved"`
+	// Evidence is the newest few underlying events, newest first. Neighbor
+	// events carry MAC addresses, so this stays in the authenticated API and is
+	// never copied into an alert, SIEM record or AI brief.
+	Evidence []NetlinkEvent `json:"evidence,omitempty"`
+}
+
+// NetlinkFindingsResponse is GET /api/v1/netlink/findings.
+type NetlinkFindingsResponse struct {
+	ObservedAt time.Time `json:"observedAt"`
+	Window     string    `json:"window"`
+	// Evaluated is the number of fresh nodes whose recorder was read; Skipped
+	// counts the rest (stale, recorder off, or unavailable), so "no findings"
+	// cannot be mistaken for "nothing was looked at".
+	Evaluated int              `json:"evaluated"`
+	Skipped   int              `json:"skipped"`
+	Findings  []NetlinkFinding `json:"findings"`
 }

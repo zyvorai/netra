@@ -81,6 +81,7 @@ NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
 NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
 NETRA_BPF_SSL_TEST_OBJECT="${OUT}/netra_ssl.o" \
+NETRA_BPF_RTNL_TEST_OBJECT="${OUT}/netra_rtnl.o" \
   "$BIN" -test.v
 
 # Sampled L7 protocol observer (docs/l7-sampling.md). These load the real object
@@ -118,6 +119,48 @@ if grep -q -- '^--- SKIP: TestSSL' "$ssl_log" || (( ssl_pass < 7 )); then
   exit 1
 fi
 echo "    ${ssl_pass} passed"
+
+# Who changed the network (bpf/netra_rtnl.c): the real object is loaded (an fentry on
+# rtnetlink_rcv_msg, resolved against the running kernel's BTF) and the network is
+# changed from this test process and from a child `ip`; the records must name each
+# requester (comm, pid, cgroup, message type, interface), a read-only dump must
+# record nothing, and nothing may be dropped. A second test runs the real netlink
+# recorder, the sensor and the joiner together and requires each recorded change to be
+# attributed: to `ip`, to this process, and, for a veth's carrier lost when its peer is
+# set down, to the kernel and NOT to the `ip link set` that happened at that moment. A
+# third checks that a change made in ANOTHER network namespace is not recorded at all.
+# Only the kernel decides who the requester is, so this cannot be checked anywhere
+# else. It must pass AND not skip.
+echo "==> rtnl actor: real fentry on rtnetlink_rcv_msg names the process that changed the network"
+rtnl_log="${OUT}/rtnl.log"
+NETRA_BPF_RTNL_TEST_OBJECT="${OUT}/netra_rtnl.o" \
+  "$BIN" -test.v -test.count=1 -test.run 'TestRTNLActor' >"$rtnl_log" 2>&1 || { cat "$rtnl_log"; exit 1; }
+rtnl_pass="$(grep -c -- '^--- PASS: TestRTNLActor' "$rtnl_log" || true)"
+if grep -q -- '^--- SKIP: TestRTNLActor' "$rtnl_log" || (( rtnl_pass < 3 )); then
+  cat "$rtnl_log"
+  echo "rtnl actor tests: ${rtnl_pass} passed (want 3) or some skipped" >&2
+  exit 1
+fi
+echo "    ${rtnl_pass} passed"
+
+# BPF attachment inventory (docs/bpf-attachments.md). Netra's real programs are
+# attached (TCX ingress and egress, XDP, and a classic cls_bpf filter on the peer)
+# to a scratch veth next to somebody else's program, and the real collector must
+# report each with the right owner and the kernel's execution order; then a hook is
+# detached and the interface deleted and recreated, and the drift diagnostic must
+# say so. They must pass AND not skip: a skip here (no TCX, no permission) means
+# the kernel half silently did not run.
+echo "==> BPF attachments: real TCX/XDP/cls_bpf inventory and hook drift on a real kernel"
+ba_log="${OUT}/bpfattach.log"
+NETRA_BPF_TEST_OBJECT="${OUT}/netra_tc.o" \
+  "$BIN" -test.v -test.count=1 -test.run 'TestBPFAttach' >"$ba_log" 2>&1 || { cat "$ba_log"; exit 1; }
+ba_pass="$(grep -c -- '^--- PASS: TestBPFAttach' "$ba_log" || true)"
+if grep -q -- '^--- SKIP: TestBPFAttach' "$ba_log" || (( ba_pass < 2 )); then
+  cat "$ba_log"
+  echo "BPF attachment tests: ${ba_pass} passed (want 2) or some skipped" >&2
+  exit 1
+fi
+echo "    ${ba_pass} passed"
 
 # Agent map reads. The agent reads several 131 072-entry LRU hash maps every few
 # seconds; it used to walk each entry with two syscalls, decode and format all of

@@ -189,6 +189,13 @@ func TestKernelSurvivesRouteStormOverrun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
+	defer func() {
+		if t.Failed() {
+			r := w.Report(1)
+			t.Logf("diagnostics: overruns=%d resubscribes=%d error=%q totals=%v counts=%+v",
+				r.Overruns, r.Resubscribes, r.Error, r.Totals, r.Counts)
+		}
+	}()
 
 	ipCmd(t, "link", "add", "nlst0", "type", "veth", "peer", "name", "nlst1")
 	defer func() { _ = exec.Command("ip", "link", "del", "nlst0").Run() }()
@@ -220,10 +227,21 @@ func TestKernelSurvivesRouteStormOverrun(t *testing.T) {
 		t.Fatal("no overrun event naming ENOBUFS")
 	}
 
-	// Let the storm drain, then prove the route subscription is alive again.
+	// Let the storm drain, then wait until the route subscription has been up
+	// and unbroken for a moment. Losses during the storm are expected and each
+	// one is a gap by design; a route added while the subscription is being
+	// re-established would be lost, which is the recorder working as documented
+	// and not what this test proves.
 	slow.Store(false)
-	waitFor(t, "the route subscription to be re-established", 30*time.Second, func() bool {
-		return !strings.Contains(w.Report(1).Error, "route-subscribe")
+	lastResub := ^uint64(0)
+	var stableSince time.Time
+	waitFor(t, "the route subscription to settle after the storm", 60*time.Second, func() bool {
+		rep := w.Report(1)
+		if rep.Resubscribes != lastResub || strings.Contains(rep.Error, "route-subscribe") {
+			lastResub, stableSince = rep.Resubscribes, time.Now()
+			return false
+		}
+		return time.Since(stableSince) >= 2*time.Second
 	})
 	ipCmd(t, "route", "add", "10.96.0.0/24", "dev", "nlst0")
 	waitFor(t, "a route added after the overrun to be recorded", 20*time.Second, func() bool {
