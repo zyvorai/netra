@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone, scoreTone } from '../components/kit/tone';
 
 type Snapshot = {
   generatedAt: string;
@@ -70,8 +72,23 @@ export default function Report() {
     return () => clearInterval(t);
   }, []);
 
+  const findings = snap ? snap.driftFindings + snap.rateDriftFindings + snap.highExposure : 0;
   return (
     <div className="grid">
+      <PagePulse
+        headline={snap?.headline}
+        tone={snap ? scoreTone(snap.healthScore) : undefined}
+        tick={snap}
+        error={msg || undefined}
+        figures={[
+          { label: 'health /100', value: snap?.healthScore, tone: snap ? scoreTone(snap.healthScore) : undefined },
+          { label: 'packets', value: snap?.packets },
+          { label: 'blocked', value: snap?.blocked },
+          { label: 'drift + exposure', value: snap ? findings : undefined, tone: snap ? countTone(findings) : undefined },
+          { label: 'incident clusters', value: snap?.incidentClusters, tone: snap ? countTone(snap.incidentClusters) : undefined },
+          { label: 'playbook steps', value: book?.count },
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">OPERATOR REPORT</p>
         <h2 className="card-title">{snap?.headline || 'Point-in-time briefing'}</h2>

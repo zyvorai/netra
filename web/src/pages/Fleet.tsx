@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 import { classifyMissingMaps } from '../lib/missingMaps';
 
 type FleetNode = {
@@ -28,8 +30,26 @@ export default function Fleet() {
   }).catch((e) => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
 
+  const agents = inv?.agentCount ?? 0;
+  const stale = inv?.staleAgents ?? 0;
+  const detached = cov?.detachedPrograms ?? 0;
+  const missing = cov?.missingMapEntries ?? 0;
+  const workloads = (inv?.nodes || []).reduce((n, x) => n + (x.workloads || 0), 0);
   return (
     <div className="grid">
+      <PagePulse
+        headline={inv ? (stale ? `${stale} of ${agents} agent${agents === 1 ? '' : 's'} stale.` : detached ? `${detached} program${detached === 1 ? '' : 's'} detached.` : agents ? `All ${agents} agent${agents === 1 ? '' : 's'} reporting.` : 'No agents reporting yet.') : undefined}
+        tone={inv ? (stale || !agents ? 'bad' : detached || missing ? 'warn' : undefined) : undefined}
+        tick={inv}
+        error={err || undefined}
+        figures={[
+          { label: 'agents', value: inv ? agents : undefined },
+          { label: 'stale', value: inv ? stale : undefined, tone: inv ? (stale ? 'bad' : 'ok') : undefined },
+          { label: 'detached programs', value: cov ? detached : undefined, tone: cov ? countTone(detached) : undefined },
+          { label: 'missing maps', value: cov ? missing : undefined, tone: cov ? countTone(missing) : undefined },
+          { label: 'workload cgroups', value: inv ? workloads : undefined },
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">FLEET</p>
         <h2 className="card-title">{inv?.agentCount ?? 0} agents · {inv?.staleAgents ?? 0} stale</h2>
