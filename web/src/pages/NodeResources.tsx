@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
+import { useSeries } from '../components/kit/useSeries';
 
 const gb = (b: number | undefined) => ((b || 0) / (1024 ** 3)).toFixed(1);
 const pct = (n: number | undefined) => `${(n || 0).toFixed(0)}%`;
@@ -16,22 +18,27 @@ export default function NodeResources() {
   const s = data?.summary || {};
   const nodes = data?.nodes || [];
   const topWorkloads = data?.topWorkloadsByCpu || [];
+  const memPct = s.totalMemoryBytes ? ((s.usedMemoryBytes || 0) * 100) / s.totalMemoryBytes : 0;
+  const cpuSeries = useSeries(data ? (s.avgCpuPercent || 0) : undefined, data);
+  const memSeries = useSeries(data ? memPct : undefined, data);
 
   return <div className="grid">
     {err && <section className="card span3"><p className="warning">{err}</p></section>}
 
-    <section className="card span3">
-      <p className="eyebrow">CLUSTER PULSE</p>
-      <div className="metrics">
-        <div><b>{s.nodes || 0}</b><span>nodes</span></div>
-        <div><b>{pct(s.avgCpuPercent)}</b><span>avg CPU</span></div>
-        <div><b>{gb(s.usedMemoryBytes)} / {gb(s.totalMemoryBytes)} GB</b><span>memory used/total</span></div>
-        <div><b>{s.totalCpuCores || 0}</b><span>total cores</span></div>
-        <div><b>{s.highestCpuNode || '—'}</b><span>highest CPU node</span></div>
-        <div><b>{s.highestMemoryNode || '—'}</b><span>highest memory node</span></div>
-      </div>
-      <p>A "top"-like snapshot: host CPU/memory/load average per node, plus per-workload cgroup v2 usage attributed to pods/containers rather than raw PIDs. {(data?.limitations || []).join(' ')}</p>
-    </section>
+    <PagePulse
+      headline={data ? `${pct(s.avgCpuPercent)} average CPU across ${s.nodes || 0} node${s.nodes === 1 ? '' : 's'}.` : undefined}
+      tone={data && (s.avgCpuPercent || 0) >= 85 ? 'warn' : undefined}
+      tick={data}
+      error={err || undefined}
+      figures={[
+        { label: 'avg CPU', value: data ? (s.avgCpuPercent || 0) : undefined, format: (n) => `${n.toFixed(0)}%`, tone: data && (s.avgCpuPercent || 0) >= 85 ? 'warn' : undefined, series: cpuSeries },
+        { label: 'memory used', value: data ? memPct : undefined, format: (n) => `${n.toFixed(0)}%`, tone: data && memPct >= 90 ? 'warn' : undefined, series: memSeries },
+        { label: 'memory used / total', value: data ? `${gb(s.usedMemoryBytes)} / ${gb(s.totalMemoryBytes)} GB` : undefined },
+        { label: 'nodes · cores', value: data ? `${s.nodes || 0} · ${s.totalCpuCores || 0}` : undefined },
+        { label: 'busiest CPU node', value: data ? (s.highestCpuNode || '—') : undefined },
+      ]}
+    />
+    <p className="kit-caption span3">A "top"-like snapshot: host CPU/memory/load average per node, plus per-workload cgroup v2 usage attributed to pods/containers rather than raw PIDs. {(data?.limitations || []).join(' ')}</p>
 
     <section className="card span3">
       <p className="eyebrow">PER-NODE</p>

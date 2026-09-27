@@ -723,3 +723,11 @@ button.overview-link:hover { background: none; text-decoration: underline; }
   .workload-card { transition: none; }
   .workload-card:hover { transform: none; }
 }
+
+.kit-ranked-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px 32px;
+  margin-top: 20px;
+}
+.kit-caption { margin: -8px 4px 0; font-size: 13px; color: var(--text-tertiary); }

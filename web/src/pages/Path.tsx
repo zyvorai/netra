@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
+import { useSeries } from '../components/kit/useSeries';
 
 const ms = (us:number|undefined) => ((us||0)/1000).toFixed((us||0)>=100000?0:1);
 const pct = (n:number,d:number) => d ? `${(n*100/d).toFixed(0)}%` : '0%';
@@ -28,18 +31,25 @@ export default function Path(){
   const edge=data?.edgeIntel||{}; const edgeCounts=edge.counts||{};
   const edgeHandshake=useMemo(()=>edgeBucketSummary(edge.handshake),[edge]);
   const edgeRTT=useMemo(()=>edgeBucketSummary(edge.rtt),[edge]);
+  const connectSeries=useSeries(data?(s.averageConnectUs||0)/1000:undefined,data);
+  const flightSeries=useSeries(data?(s.packetsOut||0):undefined,data);
+  const congested=s.congestedFlows||0;
   return <div className="grid">
+    <PagePulse
+      headline={data?(congested?`${congested} flow${congested===1?'':'s'} under congestion-window pressure.`:anomalies.length?`${anomalies.length} path signal${anomalies.length===1?'':'s'} raised.`:'Connects are clean — no transport pressure.'):undefined}
+      tone={data&&(congested||anomalies.length)?'warn':undefined}
+      tick={data}
+      error={err||undefined}
+      figures={[
+        {label:'connects timed',value:data?(s.connectionsMeasured||0):undefined},
+        {label:'avg connect',value:data?(s.averageConnectUs||0)/1000:undefined,format:(n)=>`${n.toFixed(n>=100?0:1)} ms`,series:connectSeries},
+        {label:'max connect',value:data?`${ms(s.maxConnectUs)} ms`:undefined},
+        {label:'cwnd-pressure flows',value:data?congested:undefined,tone:data?countTone(congested):undefined},
+        {label:'retrans / lost out',value:data?`${s.retransOut||0} / ${s.lostOut||0}`:undefined,tone:data&&((s.retransOut||0)+(s.lostOut||0))?'warn':undefined},
+        {label:'packets in flight',value:data?(s.packetsOut||0):undefined,series:flightSeries},
+      ]}
+    />
     {err&&<section className="card span3"><p className="warning">{err}</p></section>}
-    <section className="card span3"><p className="eyebrow">PATH PULSE</p><div className="metrics">
-      <div><b>{s.connectionsMeasured||0}</b><span>connects timed</span></div>
-      <div><b>{ms(s.averageConnectUs)} ms</b><span>avg connect</span></div>
-      <div><b>{ms(s.maxConnectUs)} ms</b><span>max connect</span></div>
-      <div><b>{s.congestedFlows||0}</b><span>cwnd-pressure flows</span></div>
-      <div><b>{s.retransOut||0}</b><span>retrans out</span></div>
-      <div><b>{s.lostOut||0}</b><span>lost out</span></div>
-      <div><b>{s.packetsOut||0}</b><span>packets in flight</span></div>
-      <div><b>{s.deliveredRatePps||0}</b><span>delivered pkt/s samples</span></div>
-    </div></section>
     <section className="card span3"><p className="eyebrow">PATH SIGNALS</p><h2 className="card-title">Transport-pressure findings</h2><p>Threshold-based diagnostics only. Netra does not infer router/interface drop reasons from these counters.</p><div className="list">{anomalies.length===0&&<p className="empty-state">No current path-pressure thresholds triggered.</p>}{anomalies.slice(0,25).map((a:any,i:number)=><div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small><ExplainFinding page="path" kind={a.kind} subject={a.subject} message={a.message} severity={a.severity} /></div>)}{anomalies.length>25&&<p className="empty-state">+{anomalies.length-25} more not shown.</p>}</div></section>
     <section className="card span3">
       <p className="eyebrow">TCP PRESSURE</p><h2 className="card-title">Exact sockops transport state</h2>

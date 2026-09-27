@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
 import { TableWrap } from '../components/Toolbar';
 
 type FeatureStatus = {
@@ -67,36 +68,32 @@ export default function Features() {
 
   const rows = data?.features || [];
 
+  const on = data?.summary?.on ?? 0;
+  const total = on + (data?.summary?.off ?? 0) + (data?.summary?.unknown ?? 0);
   return (
     <div className="grid">
-      <section className="card span2">
+      <PagePulse
+        headline={data ? `${on} of ${total} capabilities enabled.` : undefined}
+        tick={data}
+        error={err || undefined}
+        figures={[
+          { label: 'on', value: data ? on : undefined, tone: data ? 'ok' : undefined },
+          { label: 'off', value: data ? (data.summary?.off ?? 0) : undefined },
+          { label: 'unknown', value: data ? (data.summary?.unknown ?? 0) : undefined, tone: data && (data.summary?.unknown ?? 0) ? 'warn' : undefined },
+        ]}
+      />
+      <section className="card span3">
         <p className="eyebrow">CAPABILITY FLAGS</p>
         <h2 className="card-title">Install-time features</h2>
         <p>
           Toggle observe-only detectors, optional integrations, and agent coverage. This does not flip enforce mode or
           apply deny rules. Durable desired state: <code>netractl features enable NAME --yes</code> (Helm).
         </p>
-        {data?.summary && (
-          <div className="metrics">
-            <div>
-              <b>{data.summary.on}</b>
-              <span>on</span>
-            </div>
-            <div>
-              <b>{data.summary.off}</b>
-              <span>off</span>
-            </div>
-            <div>
-              <b>{data.summary.unknown}</b>
-              <span>unknown</span>
-            </div>
-          </div>
-        )}
         {err && <p className="warning">{err}</p>}
         {msg && <p className="warning">{msg}</p>}
       </section>
 
-      <section className="card span2">
+      <section className="card span3">
         <TableWrap><table className="table">
           <thead>
             <tr>

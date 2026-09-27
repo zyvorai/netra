@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 import Reveal from '../components/Reveal';
 import BaselineAge from '../components/BaselineAge';
 
@@ -97,19 +99,29 @@ export default function Insights() {
     } catch (e) { setBlastResult(null); setBlastMsg(String(e)); }
   }
 
+  const driftN = summary?.driftFindings ?? 0;
+  const rateN = summary?.rateDriftFindings ?? 0;
+  const expN = summary?.highExposure ?? 0;
   return <div className="grid">
-    <section className="card span3">
+    <PagePulse
+      headline={summary ? (driftN + rateN ? `${driftN + rateN} behavior change${driftN + rateN === 1 ? '' : 's'} to review.` : expN ? `${expN} workload${expN === 1 ? '' : 's'} highly exposed.` : 'Behavior matches the learned baseline.') : undefined}
+      tone={summary && (driftN + rateN || expN) ? 'warn' : undefined}
+      tick={summary}
+      error={msg && /error/i.test(msg) ? msg : undefined}
+      figures={[
+        { label: 'dependency edges', value: summary ? (summary.dependencyEdges ?? 0) : undefined },
+        { label: 'behavior drift', value: summary ? driftN : undefined, tone: summary ? countTone(driftN) : undefined },
+        { label: 'rate anomalies', value: summary ? rateN : undefined, tone: summary ? countTone(rateN) : undefined },
+        { label: 'high exposure', value: summary ? expN : undefined, tone: summary ? countTone(expN) : undefined },
+        { label: 'recommendations', value: summary ? recommendations.length : undefined },
+      ]}
+    />
+    <section className="card">
       <p className="eyebrow">CONTROLS</p>
       <h2 className="card-title">Rate window and baselines</h2>
       <div className="toolbar"><label>Rate window <select value={window} onChange={e => setWindow(e.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option></select></label><button className="btn-refresh" onClick={refresh}>Refresh</button></div>
       {msg && <p className="warning">{msg}</p>}
       {summary?.rateWarming && <p className="warning">Rate engine is warming up. At least two fresh agent reports are required before rate drift is evaluated.</p>}
-      <div className="metrics">
-        <div><b>{summary?.dependencyEdges ?? '—'}</b><span>dependency edges</span></div>
-        <div><b>{summary?.driftFindings ?? '—'}</b><span>behavior drift</span></div>
-        <div><b>{summary?.rateDriftFindings ?? '—'}</b><span>rate anomalies</span></div>
-        <div><b>{summary?.highExposure ?? '—'}</b><span>high exposure</span></div>
-      </div>
     </section>
 
     <section className="card">

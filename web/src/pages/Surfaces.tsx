@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
 
 type Board = {
   id: string;
@@ -136,6 +137,18 @@ export default function Surfaces() {
 
   return (
     <div className="grid">
+      <PagePulse
+        headline={active ? `${active.label}: ${list.length} row${list.length === 1 ? '' : 's'}.` : undefined}
+        tick={data}
+        error={err || undefined}
+        figures={[
+          { label: 'boards', value: BOARDS.length },
+          { label: 'rows on this board', value: data ? list.length : undefined },
+          ...(data?.uniqueJa3 != null ? [{ label: 'unique JA3', value: data.uniqueJa3 as number }] : []),
+          ...(data?.rare != null ? [{ label: 'rare', value: data.rare as number, tone: data.rare ? ('warn' as const) : undefined }] : []),
+          ...(data?.echSightings != null ? [{ label: 'ECH sightings', value: data.echSightings as number }] : []),
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">OBSERVE-ONLY SURFACES</p>
         <h2 className="card-title">P1–P5 metadata boards</h2>
