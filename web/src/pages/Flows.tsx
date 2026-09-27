@@ -116,7 +116,7 @@ export default function Flows() {
     <div className="grid">
       <section className="card span2">
         <p className="eyebrow">LIVE STREAM</p>
-        <h3>Filters</h3>
+        <h2 className="card-title">Filters</h2>
         <p>
           Optional Cilium/Hubble enrichment. When Hubble is disabled, use <b>eBPF</b>, <b>Network Health</b>, and{' '}
           <b>L7 Metadata</b> for Netra-native telemetry.
@@ -148,7 +148,7 @@ export default function Flows() {
 
       <section className="card">
         <p className="eyebrow">FLOW SUMMARY</p>
-        <h3>Window aggregate</h3>
+        <h2 className="card-title">Window aggregate</h2>
         {summaryError && <p className="warning">{summaryError}</p>}
         <div className="metrics">
           <div>
@@ -198,7 +198,7 @@ export default function Flows() {
 
       <section className="card span2">
         <p className="eyebrow">TOP DESTINATIONS</p>
-        <h3>From summary window</h3>
+        <h2 className="card-title">From summary window</h2>
         <div className="list">
           {(summary?.topDestinations || []).length === 0 && <p className="empty-state">No destination aggregate yet — reconnect or refresh summary.</p>}
           {(summary?.topDestinations || []).map((x: any) => (
@@ -214,7 +214,7 @@ export default function Flows() {
 
       <section className="card">
         <p className="eyebrow">PROTOCOLS</p>
-        <h3>Sample mix</h3>
+        <h2 className="card-title">Sample mix</h2>
         <div className="chips">
           {Object.entries(protocols).map(([name, count]) => (
             <span key={name}>
@@ -228,7 +228,7 @@ export default function Flows() {
 
       <section className="card span3">
         <p className="eyebrow">DROP EXPLAIN</p>
-        <h3>Recent drop findings</h3>
+        <h2 className="card-title">Recent drop findings</h2>
         {dropError && <p className="warning">{dropError}</p>}
         {drops.length === 0 && (
           <p className="empty-state">Use "Explain recent drops" to fetch recent denied flows for the current namespace/pod scope.</p>

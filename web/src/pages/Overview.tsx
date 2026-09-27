@@ -67,7 +67,7 @@ export default function Overview() {
       <AskNetra />
       <section className="card span2">
         <p className="eyebrow">NETRA DATAPATH</p>
-        <h3>Independent by default.</h3>
+        <h2 className="card-title">Independent by default.</h2>
         <p>
           Root-cgroup packet hooks and socket hooks give workload visibility without a CNI dependency. TCX and XDP can be
           layered on selected interfaces. Hubble remains optional.
@@ -91,7 +91,7 @@ export default function Overview() {
 
       <section className="card span2">
         <p className="eyebrow">STANDALONE / CAPABILITIES</p>
-        <h3>Datapath capabilities</h3>
+        <h2 className="card-title">Datapath capabilities</h2>
         {err && <p className="warning">{err}</p>}
         {!err && (
           <div className="metrics">
@@ -105,7 +105,7 @@ export default function Overview() {
 
       <section className="card span3">
         <p className="eyebrow">NETWORK HEALTH</p>
-        <h3>TCP / DNS score</h3>
+        <h2 className="card-title">TCP / DNS score</h2>
         <div className="metrics">
           <Metric value={hs.healthScore ?? '—'} label="health score /100" />
           <Metric value={hs.tcpConnections ?? 0} label="TCP connections" />
@@ -122,7 +122,7 @@ export default function Overview() {
 
       <section className="card span3">
         <p className="eyebrow">L7 METADATA</p>
-        <h3>TLS SNI · HTTP Host</h3>
+        <h2 className="card-title">TLS SNI · HTTP Host</h2>
         <div className="metrics">
           <Metric value={ls.tlsHandshakes ?? 0} label="TLS SNI" />
           <Metric value={ls.httpRequests ?? 0} label="HTTP/1 requests" />
@@ -133,7 +133,7 @@ export default function Overview() {
 
       <section className="card span3">
         <p className="eyebrow">PATH DIAGNOSTICS</p>
-        <h3>TCP connect · pressure</h3>
+        <h2 className="card-title">TCP connect · pressure</h2>
         <div className="metrics">
           <Metric value={path?.summary?.connectionsMeasured ?? 0} label="connects timed" />
           <Metric value={path?.summary?.congestedFlows ?? 0} label="cwnd-pressure flows" />
@@ -145,7 +145,7 @@ export default function Overview() {
 
       <section className="card span3">
         <p className="eyebrow">DROP DIAGNOSTICS</p>
-        <h3>Kernel · softnet · iface</h3>
+        <h2 className="card-title">Kernel · softnet · iface</h2>
         <div className="metrics">
           <Metric value={drops?.summary?.kernelDropEvents ?? 0} label="kernel drop events" />
           <Metric value={drops?.summary?.softnetDropped ?? 0} label="softnet dropped" />
@@ -157,7 +157,7 @@ export default function Overview() {
 
       <section className="card span3">
         <p className="eyebrow">BEHAVIOR INSIGHTS</p>
-        <h3>Dependencies · drift · exposure</h3>
+        <h2 className="card-title">Dependencies · drift · exposure</h2>
         <div className="metrics">
           <Metric value={ins.dependencyEdges ?? 0} label="dependency edges" />
           <Metric value={ins.driftFindings ?? 0} label="behavior drift" />
@@ -169,7 +169,7 @@ export default function Overview() {
 
       <section className="card span2">
         <p className="eyebrow">NETWORK PULSE</p>
-        <h3>Kernel-side telemetry</h3>
+        <h2 className="card-title">Kernel-side telemetry</h2>
         <div className="metrics">
           <Metric value={obs?.events ?? 0} label="recent events" />
           <Metric value={obs?.socketEvents ?? 0} label="socket/process events" />
@@ -186,7 +186,7 @@ export default function Overview() {
 
       <section className="card span2">
         <p className="eyebrow">TOP DESTINATIONS / DNS</p>
-        <h3>Kernel-observed identities</h3>
+        <h2 className="card-title">Kernel-observed identities</h2>
         {!topDestinations.length && !topDns.length && !topProcesses.length && (
           <p className="empty-state">No destination, DNS, or process breakdown yet.</p>
         )}
@@ -202,7 +202,7 @@ export default function Overview() {
       </section>
 
       <section className="card">
-        <h3>Cilium is an integration</h3>
+        <h2 className="card-title">Cilium is an integration</h2>
         <p>
           If Cilium/Hubble is installed, Netra can build CiliumNetworkPolicy and show Hubble data — the standalone
           eBPF engine never depends on it.

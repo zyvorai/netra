@@ -62,6 +62,14 @@ type Revision = {
   manifest: any;
 };
 
+const GITOPS_HINT = 'GitOps is not enabled (set NETRA_GITOPS_DIR)';
+
+/** The controller's own error often already says this; only append it when it adds something. */
+export function gitopsHint(raw: string): string {
+  const detail = raw.replace(/^Error:\s*/, '').trim();
+  return !detail || detail.includes(GITOPS_HINT) ? detail || GITOPS_HINT : `${GITOPS_HINT} — ${detail}`;
+}
+
 export default function Policies() {
   const [ns, setNs] = useState('default');
   const [list, setList] = useState<any>(undefined);
@@ -284,22 +292,22 @@ export default function Policies() {
     <div className="grid">
       <section className="card span2">
         <p className="eyebrow">WORKBENCH</p>
-        <h3>Plan, dry-run, apply</h3>
+        <h2 className="card-title">Plan, dry-run, apply</h2>
         <p className="warning">Selecting an endpoint with egress policy can place it into egress default-deny. Preflight compares the live policy, runs Kubernetes dry-run, then issues a five-minute one-shot receipt bound to the exact candidate.</p>
         <div className="toolbar">
-          <input value={ns} onChange={(e) => setNs(e.target.value)} />
+          <input aria-label="Namespace" value={ns} onChange={(e) => setNs(e.target.value)} />
           <button className="btn-refresh" onClick={refresh}>Refresh</button>
           <button className="btn-secondary" onClick={preflight}>Preflight</button>
           <button className="btn-secondary" onClick={simulate}>Simulate against observed traffic</button>
           <button className="btn-secondary" onClick={() => apply(true)}>Server dry-run</button>
           <button className="primary" onClick={() => apply(false)}>Apply CRD</button>
         </div>
-        {msg && <p>{msg}</p>}
+        {msg && <p className={/^error/i.test(msg) ? 'warning' : undefined}>{msg}</p>}
       </section>
 
       <section className="card span2">
         <p className="eyebrow">GUIDED BUILDER</p>
-        <h3>Common egress rule</h3>
+        <h2 className="card-title">Common egress rule</h2>
         <div className="buildergrid">
           <label>Name<input value={builder.name} onChange={(e) => setBuilder({ ...builder, name: e.target.value })} /></label>
           <label>Selector key<input value={builder.selectorKey} onChange={(e) => setBuilder({ ...builder, selectorKey: e.target.value })} /></label>
@@ -315,8 +323,9 @@ export default function Policies() {
 
       <section className="card">
         <p className="eyebrow">ADVANCED</p>
-        <h3>CiliumNetworkPolicy JSON</h3>
+        <h2 className="card-title">CiliumNetworkPolicy JSON</h2>
         <textarea
+          aria-label="CiliumNetworkPolicy JSON"
           className="codeedit"
           value={text}
           onChange={(e) => {
@@ -327,7 +336,7 @@ export default function Policies() {
       </section>
 
       <section className="card">
-        <h3>Preflight plan</h3>
+        <h2 className="card-title">Preflight plan</h2>
         {!plan && <p>Run Preflight to compare this candidate with the live CiliumNetworkPolicy.</p>}
         {plan && (
           <>
@@ -344,14 +353,14 @@ export default function Policies() {
 
       <section className="card span2">
         <p className="eyebrow">GITOPS</p>
-        <h3>Reconciler status</h3>
-        {gitopsMsg && !gitopsStatus && <p className="empty-state">GitOps is not enabled (set NETRA_GITOPS_DIR) — {gitopsMsg}</p>}
+        <h2 className="card-title">Reconciler status</h2>
+        {gitopsMsg && !gitopsStatus && <p className="empty-state">{gitopsHint(gitopsMsg)}</p>}
         {gitopsStatus && (
           <>
             <p><small>dir {gitopsStatus.dir} · auto-apply {gitopsStatus.autoApply ? 'on' : 'off'} · last run {gitopsStatus.lastRun ? new Date(gitopsStatus.lastRun).toLocaleString() : 'never'}</small></p>
             {(gitopsStatus.loadErrors || []).map((e, i) => <p className="warning" key={i}>{e}</p>)}
             <div className="list">
-              {gitopsStatus.manifests.map((m, i) => (
+              {(gitopsStatus.manifests || []).map((m, i) => (
                 <div className={`insightrow ${m.error ? 'warning' : m.drifted ? 'warning' : m.applied ? 'low' : 'info'}`} key={i}>
                   <b>{m.namespace}/{m.name}</b>
                   <span>{m.applied ? 'applied' : m.drifted ? 'drifted' : m.plan?.risk ? `${m.plan.risk} risk` : '—'}</span>
@@ -363,14 +372,14 @@ export default function Policies() {
                   )}
                 </div>
               ))}
-              {!gitopsStatus.manifests.length && <p className="empty-state">No manifests found under {gitopsStatus.dir}.</p>}
+              {!(gitopsStatus.manifests || []).length && <p className="empty-state">No manifests found under {gitopsStatus.dir}.</p>}
             </div>
           </>
         )}
       </section>
 
       <section className="card">
-        <h3>Simulation against observed traffic</h3>
+        <h2 className="card-title">Simulation against observed traffic</h2>
         {!simulation && <p>Run "Simulate against observed traffic" to check this candidate's egress rules against the live dependency graph — additive evidence alongside Preflight, not a replacement for it.</p>}
         {simulation && (
           <>
@@ -378,7 +387,7 @@ export default function Policies() {
             {simulation.note && <p className="empty-state">{simulation.note}</p>}
             {!simulation.note && (
               <div className="list">
-                {simulation.results.map((r, i) => (
+                {(simulation.results || []).map((r, i) => (
                   <div className={`insightrow ${r.verdict === 'denied' ? 'warning' : r.verdict === 'unverified' ? 'info' : 'low'}`} key={i}>
                     <b>{r.verdict}</b>
                     <span className="truncate" title={r.target} aria-label={r.target}>{r.target}</span>
@@ -386,7 +395,7 @@ export default function Policies() {
                     <small>{r.reason}</small>
                   </div>
                 ))}
-                {!simulation.results.length && <p className="empty-state">No observed edges from a workload this selector governs yet.</p>}
+                {!(simulation.results || []).length && <p className="empty-state">No observed edges from a workload this selector governs yet.</p>}
               </div>
             )}
           </>
@@ -394,7 +403,7 @@ export default function Policies() {
       </section>
 
       <section className="card">
-        <h3>Existing policies</h3>
+        <h2 className="card-title">Existing policies</h2>
         <div className="list">
           {list?.items?.length ? list.items.map((x: any) => (
             <div className="policyrow" key={x.metadata?.name}>
@@ -414,7 +423,7 @@ export default function Policies() {
           <button className="btn-secondary" onClick={exportHistory}>Export history</button>
           <label className="buttonlike btn-secondary">Import history<input type="file" accept="application/json,.json" hidden onChange={(e) => void importHistory(e.target.files?.[0])} /></label>
         </div>
-        <h3>{historyTarget ? `${historyTarget.namespace}/${historyTarget.name}` : 'Select a policy to inspect history'}</h3>
+        <h2 className="card-title">{historyTarget ? `${historyTarget.namespace}/${historyTarget.name}` : 'Select a policy to inspect history'}</h2>
         {!history.length && <p className="empty-state">No Netra-managed revisions recorded for this policy yet. History begins when Netra applies, deletes, or rolls back the policy.</p>}
         <div className="revisionlist">
           {history.map((r) => (

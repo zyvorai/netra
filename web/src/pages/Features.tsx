@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { TableWrap } from '../components/Toolbar';
 
 type FeatureStatus = {
   id: string;
@@ -70,7 +71,7 @@ export default function Features() {
     <div className="grid">
       <section className="card span2">
         <p className="eyebrow">CAPABILITY FLAGS</p>
-        <h3>Install-time features</h3>
+        <h2 className="card-title">Install-time features</h2>
         <p>
           Toggle observe-only detectors, optional integrations, and agent coverage. This does not flip enforce mode or
           apply deny rules. Durable desired state: <code>netractl features enable NAME --yes</code> (Helm).
@@ -96,7 +97,7 @@ export default function Features() {
       </section>
 
       <section className="card span2">
-        <table className="table">
+        <TableWrap><table className="table">
           <thead>
             <tr>
               <th>Feature</th>
@@ -140,7 +141,7 @@ export default function Features() {
               );
             })}
           </tbody>
-        </table>
+        </table></TableWrap>
       </section>
     </div>
   );

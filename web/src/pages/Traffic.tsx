@@ -27,7 +27,7 @@ export default function Traffic() {
 
       <section className="card span3">
         <p className="eyebrow">NAMESPACE HEAT</p>
-        <h3>Traffic by Kubernetes namespace</h3>
+        <h2 className="card-title">Traffic by Kubernetes namespace</h2>
         <p>Packets/bytes/blocked rolled up by namespace from current agent destination stats.</p>
         <div className="list">
           {(ns?.rows || []).length === 0 && <p className="empty-state">No namespace traffic observed yet.</p>}
@@ -41,7 +41,7 @@ export default function Traffic() {
 
       <section className="card span3">
         <p className="eyebrow">PROTOCOL MIX</p>
-        <h3>L4 protocol breakdown</h3>
+        <h2 className="card-title">L4 protocol breakdown</h2>
         <p>Protocol mix across current destination stats.</p>
         <div className="list">
           {(proto?.rows || []).length === 0 && <p className="empty-state">No protocol data yet.</p>}
@@ -55,7 +55,7 @@ export default function Traffic() {
 
       <section className="card span3">
         <p className="eyebrow">PORT HEAT</p>
-        <h3>Top destination ports</h3>
+        <h2 className="card-title">Top destination ports</h2>
         <p>Top destination ports by packet count.</p>
         <div className="list">
           {(ports?.rows || []).length === 0 && <p className="empty-state">No port data yet.</p>}
@@ -69,7 +69,7 @@ export default function Traffic() {
 
       <section className="card span3">
         <p className="eyebrow">DNS BOARD</p>
-        <h3>{dns?.queries ?? 0} queries · {dns?.failures ?? 0} failures</h3>
+        <h2 className="card-title">{dns?.queries ?? 0} queries · {dns?.failures ?? 0} failures</h2>
         <p>DNS names ranked by failure count from agent DNS health stats.</p>
         <div className="list">
           {(dns?.rows || []).length === 0 && <p className="empty-state">No DNS activity observed yet.</p>}

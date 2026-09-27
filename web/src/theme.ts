@@ -9,13 +9,13 @@ export function readStoredTheme(): Theme {
   } catch {
     /* ignore */
   }
-  return 'dark';
+  return 'light';
 }
 
 export function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#f5f5f7');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
   try {
     localStorage.setItem(STORAGE_KEY, theme);
   } catch {

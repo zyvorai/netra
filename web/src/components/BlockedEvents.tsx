@@ -15,7 +15,7 @@ export default function BlockedEvents() {
   return (
     <section className="card span3">
       <p className="eyebrow">BLOCKED / DROPPED EVENTS</p>
-      <h3>{data?.count ?? 0} recent</h3>
+      <h2 className="card-title">{data?.count ?? 0} recent</h2>
       <p>
         SIEM export of blocked/dropped events. Also available as CEF, RFC5424 syslog, OTLP logs, or OTLP traces (one span
         per event) via <code>netractl export blocks --format &lt;json|jsonl|cef|syslog|otlp|otlp-trace&gt;</code> or{' '}

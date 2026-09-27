@@ -32,7 +32,7 @@ export default function Fleet() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">FLEET</p>
-        <h3>{inv?.agentCount ?? 0} agents · {inv?.staleAgents ?? 0} stale</h3>
+        <h2 className="card-title">{inv?.agentCount ?? 0} agents · {inv?.staleAgents ?? 0} stale</h2>
         <p>Compact per-node agent inventory. Observe-only.</p>
         {err && <p className="warning">{err}</p>}
         <div className="list">
@@ -52,7 +52,7 @@ export default function Fleet() {
 
       <section className="card span3">
         <p className="eyebrow">PROGRAM COVERAGE</p>
-        <h3>{cov?.quiet ? 'All programs attached' : `${cov?.detachedPrograms ?? 0} detached · ${cov?.missingMapEntries ?? 0} missing maps`}</h3>
+        <h2 className="card-title">{cov?.quiet ? 'All programs attached' : `${cov?.detachedPrograms ?? 0} detached · ${cov?.missingMapEntries ?? 0} missing maps`}</h2>
         <p>Per-node hook/program coverage matrix: attached vs detached programs, missing maps, stale agents. Observe-only — never attaches or detaches anything itself.</p>
         <div className="list">
           {(cov?.nodes || []).length === 0 && <p className="empty-state">No coverage data yet.</p>}
@@ -84,7 +84,7 @@ export default function Fleet() {
 
       <section className="card span3">
         <p className="eyebrow">MULTI-CLUSTER</p>
-        <h3>{(clusters?.clusters || clusters?.items || []).length} clusters</h3>
+        <h2 className="card-title">{(clusters?.clusters || clusters?.items || []).length} clusters</h2>
         <p>Read-only aggregator via <code>NETRA_FLEET_PEERS</code>. Observe-only.</p>
         <div className="list">
           {(clusters?.clusters || clusters?.items || []).length === 0 && <p className="empty-state">Only the local cluster is visible (no peers configured).</p>}
@@ -103,7 +103,7 @@ export default function Fleet() {
 
       <section className="card span3">
         <p className="eyebrow">TENANTS</p>
-        <h3>{(tenants?.tenants || tenants?.items || []).length} tenant rollups</h3>
+        <h2 className="card-title">{(tenants?.tenants || tenants?.items || []).length} tenant rollups</h2>
         <p>MSSP-style risk rollup from local + peer clusters. Full board also under Surfaces → Fleet.</p>
         <div className="list">
           {(tenants?.tenants || tenants?.items || []).length === 0 && <p className="empty-state">No tenant labels yet — set <code>NETRA_CLUSTER_TENANT</code> on peers.</p>}

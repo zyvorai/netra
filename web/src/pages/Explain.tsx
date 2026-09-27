@@ -51,7 +51,7 @@ export default function Explain() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">EXPLAIN A CONNECTION</p>
-        <h3>Scope this check</h3>
+        <h2 className="card-title">Scope this check</h2>
         <p>
           Passive, read-only evidence from the same agent reports the controller already holds — no active probes, DNS
           lookups, or policy changes. Provide a selector, or explicitly check "examine every node."
@@ -97,7 +97,7 @@ export default function Explain() {
       {report && (
         <section className="card span3">
           <p className="eyebrow">RESULT</p>
-          <h3>{report.status === 'evidence-found' ? 'Evidence found' : 'No matching evidence'}</h3>
+          <h2 className="card-title">{report.status === 'evidence-found' ? 'Evidence found' : 'No matching evidence'}</h2>
           <p>
             Agents considered: <b>{report.agentsConsidered}</b> · excluded: <b>{report.agentsExcluded}</b> · findings:{' '}
             <b>{report.findingsTotal}</b> (showing {report.findings.length})

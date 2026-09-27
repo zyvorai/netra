@@ -85,9 +85,9 @@ export default function PodLogs({ namespace, name, containers = [], defaultConta
 
   return (
     <section className="card span3">
-      <h3>
+      <h2 className="card-title">
         Logs · {namespace}/{name}
-      </h3>
+      </h2>
       <div className="toolbar">
         {containers.length > 0 && (
           <label>

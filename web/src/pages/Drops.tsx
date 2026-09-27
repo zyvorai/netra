@@ -83,7 +83,7 @@ export default function Drops() {
       </section>
       <section className="card span3">
         <p className="eyebrow">KERNEL NETWORK PRESSURE</p>
-        <h3>Buffers, queues, and congestion</h3>
+        <h2 className="card-title">Buffers, queues, and congestion</h2>
         <div className="metrics">
           <div>
             <b>{ks.nodes || 0}</b>
@@ -200,7 +200,7 @@ export default function Drops() {
       ))}
       <section className="card span3">
         <p className="eyebrow">DROP DETECTIVE</p>
-        <h3>Policy-aware findings</h3>
+        <h2 className="card-title">Policy-aware findings</h2>
         <div className="list">
           {findings.length === 0 && <p className="empty-state">No Netra policy-drop findings.</p>}
           {findings.slice(0, 25).map((f: any, i: number) => (
@@ -237,7 +237,7 @@ export default function Drops() {
       </section>
       <section className="card span3">
         <p className="eyebrow">STACK SIGNALS</p>
-        <h3>Queue and interface findings</h3>
+        <h2 className="card-title">Queue and interface findings</h2>
         <div className="list">
           {anomalies.length === 0 && <p className="empty-state">No drop-pressure thresholds triggered.</p>}
           {anomalies.slice(0, 25).map((a: any, i: number) => (
@@ -255,7 +255,7 @@ export default function Drops() {
       {nodes.map((n: any) => (
         <section className="card span3" key={n.node}>
           <p className="eyebrow">KERNEL DROPS</p>
-          <h3>{n.node}</h3>
+          <h2 className="card-title">{n.node}</h2>
           {!(n.kernelDrops || []).length && (
             <p className="empty-state">No kfree_skb tracepoint data. The hook may be unavailable on this kernel.</p>
           )}

@@ -138,7 +138,7 @@ export default function Surfaces() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">OBSERVE-ONLY SURFACES</p>
-        <h3>P1–P5 metadata boards</h3>
+        <h2 className="card-title">P1–P5 metadata boards</h2>
         <p>Encrypted traffic, fit maps, threat heuristics, and fleet rollups — review-only, no decrypt, no payload export.</p>
         <div className="chips" role="tablist" aria-label="Surface groups">
           {GROUPS.map((g) => (
@@ -158,10 +158,10 @@ export default function Surfaces() {
 
       <section className="card span3">
         <p className="eyebrow">{active?.group?.toUpperCase()}</p>
-        <h3>
+        <h2 className="card-title">
           {active?.label}
           {statsBits.length > 0 && <small> · {statsBits.join(' · ')}</small>}
-        </h3>
+        </h2>
         {note && <p>{note}</p>}
         {loading && <p className="empty-state">Loading…</p>}
         {err && <p className="warning">{err}</p>}

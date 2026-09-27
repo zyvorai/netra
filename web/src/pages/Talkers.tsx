@@ -15,7 +15,7 @@ export default function Talkers() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">TALKERS</p>
-        <h3>Top destinations</h3>
+        <h2 className="card-title">Top destinations</h2>
         <p>Packet counts from current agent reports. Observe-only, no payloads.</p>
         {err && <p className="warning">{err}</p>}
         <div className="list">

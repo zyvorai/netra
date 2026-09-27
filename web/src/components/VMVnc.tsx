@@ -46,9 +46,9 @@ export default function VMVnc({ namespace, name }: Props) {
 
   return (
     <section className="card span3">
-      <h3>
+      <h2 className="card-title">
         VNC · {namespace}/{name}
-      </h3>
+      </h2>
       <div className="toolbar">
         {!connected ? (
           <button className="primary" onClick={() => void connect()}>

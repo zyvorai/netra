@@ -74,7 +74,7 @@ export default function CaptureHistory({ onRepeat }: { onRepeat: (e: HistoryEntr
   return (
     <section className="card span3">
       <p className="eyebrow">CAPTURE HISTORY</p>
-      <h3>{entries.length} past session{entries.length === 1 ? '' : 's'}</h3>
+      <h2 className="card-title">{entries.length} past session{entries.length === 1 ? '' : 's'}</h2>
       <div className="toolbar">
         <button className="btn-secondary" onClick={load}>Refresh</button>
         {entries.length > PAGE_SIZE && (

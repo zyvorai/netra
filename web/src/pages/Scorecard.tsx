@@ -24,7 +24,7 @@ export default function Scorecard() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">SCORECARD</p>
-        <h3>{card?.score ?? '—'} · {card?.band || 'unknown'}</h3>
+        <h2 className="card-title">{card?.score ?? '—'} · {card?.band || 'unknown'}</h2>
         <p>{card?.headline || 'Observe-only rollup of health, coverage, and blocked events.'}</p>
         {err && <p className="warning">{err}</p>}
         {card && (

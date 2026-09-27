@@ -14,7 +14,7 @@ export default function Audit() {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">INCIDENT TIMELINE</p>
-        <h3>What happened, in order</h3>
+        <h2 className="card-title">What happened, in order</h2>
         <p>Merges the audit log with cluster-health-signature transitions into plain sentences — never raw counters.</p>
         {timeline?.prose && <p>{timeline.prose}</p>}
         <div className="list">
@@ -31,7 +31,7 @@ export default function Audit() {
 
       <section className="card span3">
         <p className="eyebrow">CONTROL PLANE</p>
-        <h3>Netra control-plane audit</h3>
+        <h2 className="card-title">Netra control-plane audit</h2>
         {items.length === 0 && <p className="empty-state">No audit events recorded yet.</p>}
         {items.length > 0 && (
           <div className="datatable-scroll">

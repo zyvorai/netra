@@ -21,7 +21,7 @@ export default function DenyCensus() {
   return (
     <section className="card span3">
       <p className="eyebrow">DENY CENSUS</p>
-      <h3>{c?.totalDenied ?? 0} deny entries · {c?.totalAllowed ?? 0} allow entries</h3>
+      <h2 className="card-title">{c?.totalDenied ?? 0} deny entries · {c?.totalAllowed ?? 0} allow entries</h2>
       <p>Counts of deny/allow list entries only — never the entries themselves.</p>
       <div className="list">
         <div className="agent wide"><b>Blocked IPv4/IPv6</b><span>{c?.blockedIPv4 ?? 0} / {c?.blockedIPv6 ?? 0}</span></div>

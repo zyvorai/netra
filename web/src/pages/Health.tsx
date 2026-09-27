@@ -46,7 +46,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">TREND</p>
-      <h3>Health-score projection</h3>
+      <h2 className="card-title">Health-score projection</h2>
       <p>A linear heuristic over recent health-score samples — never a statistical guarantee. Confidence is at most "medium", never "high". History accumulates only while something polls the controller (this page, netra-mcp, or the alert poller).</p>
       {trend?.timeToBreachSeconds != null ? (
         <div className="metrics">
@@ -94,7 +94,7 @@ export default function Health() {
     {agents.some((a: any) => (a.missingMaps || []).length) && (
       <section className="card span3">
         <p className="eyebrow">BPF OBJECT</p>
-        <h3>Agent maps missing</h3>
+        <h2 className="card-title">Agent maps missing</h2>
         {agents.filter((a: any) => (a.missingMaps || []).length).map((a: any) => {
           const classified = classifyMissingMaps(a.missingMaps || []);
           const byKind = new Map<string, string[]>();
@@ -115,7 +115,7 @@ export default function Health() {
     )}
     <section className="card span3">
       <p className="eyebrow">RATE DROPS</p>
-      <h3>PPS ceilings that actually fired</h3>
+      <h2 className="card-title">PPS ceilings that actually fired</h2>
       <div className="list">
         {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No destination has been rate-dropped yet.</p>}
         {agents.flatMap((a: any) => (a.rateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
@@ -128,7 +128,7 @@ export default function Health() {
     </section>
     <section className="card span3">
       <p className="eyebrow">BYTE-RATE DROPS</p>
-      <h3>BPS ceilings that actually fired</h3>
+      <h2 className="card-title">BPS ceilings that actually fired</h2>
       <div className="list">
         {agents.flatMap((a: any) => (a.byteRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No destination has hit its byte-rate cap yet.</p>}
         {agents.flatMap((a: any) => (a.byteRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
@@ -140,7 +140,7 @@ export default function Health() {
     </section>
     <section className="card span3">
       <p className="eyebrow">CONNECTION-RATE DROPS</p>
-      <h3>New-TCP-connection caps that actually fired</h3>
+      <h2 className="card-title">New-TCP-connection caps that actually fired</h2>
       <div className="list">
         {agents.flatMap((a: any) => (a.connRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).length === 0 && <p className="empty-state">No workload has hit its connection-rate cap yet.</p>}
         {agents.flatMap((a: any) => (a.connRateDrops || []).map((c: any) => ({ ...c, node: a.node }))).sort((a: any, b: any) => (b.count || 0) - (a.count || 0)).slice(0, 16).map((c: any, i: number) => (
@@ -152,7 +152,7 @@ export default function Health() {
     </section>
     <section className="card span3">
       <p className="eyebrow">CAPABILITY DRIFT</p>
-      <h3>Effective-capability changes on tracked processes</h3>
+      <h2 className="card-title">Effective-capability changes on tracked processes</h2>
       <p>Agent-sourced from a periodic /proc scan (requires NETRA_PROCMETA_ENABLED) — not a live kernel credential read. A capability change during an agent restart window is a known blind spot, surfaced below as its own finding rather than silently missed.</p>
       <div className="list">
         {(capDrift?.anomalies || []).length === 0 && <p className="empty-state">No capability drift observed yet.</p>}
@@ -167,7 +167,7 @@ export default function Health() {
     <ExeHashDrift />
     <section className="card span3">
       <p className="eyebrow">ICMP PULSE</p>
-      <h3>Type histogram from the packet path</h3>
+      <h2 className="card-title">Type histogram from the packet path</h2>
       <p>Observe-only. Cumulative since the map was last created. No ICMP payload is exported.</p>
       <div className="list">
         {agents.flatMap((a: any) => [...(a.icmpTypes || []).map((c: any) => ({ ...c, node: a.node, fam: 'v4' })), ...(a.icmp6Types || []).map((c: any) => ({ ...c, node: a.node, fam: 'v6' }))]).length === 0 && (
@@ -189,7 +189,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">HEALTH SIGNALS</p>
-      <h3>Heuristic anomalies</h3>
+      <h2 className="card-title">Heuristic anomalies</h2>
       <p>These are deterministic operational thresholds, not ML/statistical anomaly claims.</p>
       <div className="list">
         {anomalies.length === 0 && <p className="empty-state">No threshold-based network health signals in the latest reports.</p>}
@@ -200,7 +200,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">TCP HEALTH</p>
-      <h3>Sockops exact state</h3>
+      <h2 className="card-title">Sockops exact state</h2>
       {(data?.tcp || []).length === 0 && <p className="empty-state">No TCP sockops samples yet.</p>}
       {(data?.tcp || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD / PROCESS</span><span>REMOTE</span><span>RTT</span><span>LOSS SIGNALS</span><span>CONNECTION</span></div>
@@ -219,7 +219,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">DNS HEALTH</p>
-      <h3>Matched UDP/53 transactions</h3>
+      <h2 className="card-title">Matched UDP/53 transactions</h2>
       {(data?.dns || []).length === 0 && <p className="empty-state">No DNS transactions matched yet.</p>}
       {(data?.dns || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>NAME</span><span>QUERIES</span><span>FAILURES</span><span>LATENCY</span></div>
@@ -238,7 +238,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">UDP FLOW HEALTH</p>
-      <h3>Packets/bytes per remote endpoint</h3>
+      <h2 className="card-title">Packets/bytes per remote endpoint</h2>
       {(data?.udp || []).length === 0 && <p className="empty-state">No cgroup-attributed UDP flows observed yet.</p>}
       {(data?.udp || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>PACKETS</span><span>BYTES</span></div>
@@ -256,7 +256,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">QUIC-OBSERVED FLOWS</p>
-      <h3>UDP/443 long-header packets by remote endpoint</h3>
+      <h2 className="card-title">UDP/443 long-header packets by remote endpoint</h2>
       {(data?.quic || []).length === 0 && <p className="empty-state">No QUIC-observed traffic yet.</p>}
       {(data?.quic || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>LONG-HEADER</span><span>TOTAL UDP/443</span></div>
@@ -274,7 +274,7 @@ export default function Health() {
 
     <section className="card span3">
       <p className="eyebrow">TCP RESET SIGNALS</p>
-      <h3>Handshake / reset counters</h3>
+      <h2 className="card-title">Handshake / reset counters</h2>
       {resetRows.length === 0 && <p className="empty-state">No TCP reset signals in the latest reports.</p>}
       {resetRows.length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>SYN</span><span>SYN-ACK</span><span>FIN</span><span>RST / PACKETS</span></div>
@@ -290,7 +290,7 @@ export default function Health() {
 
     <section className="card">
       <p className="eyebrow">KERNEL PULSE</p>
-      <h3>What Netra sees</h3>
+      <h2 className="card-title">What Netra sees</h2>
       <div className="metrics">
         <div><b>{summary?.packets ?? 0}</b><span>packets</span></div>
         <div><b>{summary?.blocked ?? 0}</b><span>blocked</span></div>
@@ -324,8 +324,8 @@ export default function Health() {
         <div className="chips">{summary.topBlockedWorkloads.slice(0, 12).map((x: any) => <span key={'blk-'+x.name}>{x.name} · {x.count}</span>)}</div>
       )}
     </section>
-    <section className="card span2"><p className="eyebrow">BPF PROGRAM HEALTH</p><h3>Attach state and run stats</h3><p>Per-node program attach flags plus kernel run counts when BPF stats are enabled. Use this when a hook is missing after upgrade or verifier load failures.</p>{agents.map(a => <div className="agent wide" key={'prog-'+a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : `${(a.programs || []).filter((p:any)=>p.attached).length}/${(a.programs || []).length} attached`}</span><small>{(a.programs || []).length === 0 ? 'no program report yet' : (a.programs || []).map((p:any) => `${p.name}${p.attached ? '' : ' (detached)'}: runs=${p.runCount || 0}`).join(' · ')}</small></div>)}</section>
-    <section className="card span3"><p className="eyebrow">NETWORK HISTOGRAMS</p><h3>Retransmit / RTT / connect buckets</h3><p>Agent-side histograms from existing sockops samples, plus listen overflow and softirq NET_RX counters. Softirq entry→exit latency remains deferred.</p>{agents.map(a => {
+    <section className="card span2"><p className="eyebrow">BPF PROGRAM HEALTH</p><h2 className="card-title">Attach state and run stats</h2><p>Per-node program attach flags plus kernel run counts when BPF stats are enabled. Use this when a hook is missing after upgrade or verifier load failures.</p>{agents.map(a => <div className="agent wide" key={'prog-'+a.node}><b>{a.node}</b><span>{a.stale ? 'stale' : `${(a.programs || []).filter((p:any)=>p.attached).length}/${(a.programs || []).length} attached`}</span><small>{(a.programs || []).length === 0 ? 'no program report yet' : (a.programs || []).map((p:any) => `${p.name}${p.attached ? '' : ' (detached)'}: runs=${p.runCount || 0}`).join(' · ')}</small></div>)}</section>
+    <section className="card span3"><p className="eyebrow">NETWORK HISTOGRAMS</p><h2 className="card-title">Retransmit / RTT / connect buckets</h2><p>Agent-side histograms from existing sockops samples, plus listen overflow and softirq NET_RX counters. Softirq entry→exit latency remains deferred.</p>{agents.map(a => {
       const h = a.histograms;
       if (!h) return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>—</span></div>;
       return <div className="agent wide" key={'hist-'+a.node}><b>{a.node}</b><span>retrans n={h.tcpRetransmissions?.count || 0} · srtt n={h.tcpSrttUs?.count || 0} · connect n={h.tcpConnectUs?.count || 0}</span><small>listen overflows={h.host?.listenOverflows || 0} · listen drops={h.host?.listenDrops || 0} · softirq NET_RX={h.host?.softirqNetRx || 0}</small></div>;

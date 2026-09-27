@@ -6,6 +6,7 @@ import PodExec from '../components/PodExec';
 import PodLogs from '../components/PodLogs';
 import VMVnc from '../components/VMVnc';
 import { hasGlob, matchGlob } from '../lib/glob';
+import { Toolbar } from '../components/Toolbar';
 
 type Kind = 'pod' | 'vm';
 type Detail = {
@@ -173,24 +174,28 @@ export default function Workloads({ kind }: { kind: Kind }) {
     <div className="grid">
       <section className="card span3">
         <p className="eyebrow">FILTERS</p>
-        <h3>{title} inventory</h3>
-        <div className="toolbar">
-          <input
-            value={ns}
-            placeholder="namespace (all, kube-*)"
-            onChange={(e) => setNs(e.target.value)}
-          />
-          <input
-            value={q}
-            placeholder="search name / node / IP"
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button className="btn-refresh" onClick={refresh}>Refresh</button>
-        </div>
-        {msg && <p>{msg}</p>}
+        <h2 className="card-title">{title} inventory</h2>
+        <Toolbar
+          search={q}
+          onSearchChange={setQ}
+          placeholder="search name / node / IP"
+          trailing={
+            <>
+              <input
+                className="input-field"
+                value={ns}
+                placeholder="namespace (all, kube-*)"
+                aria-label="namespace"
+                onChange={(e) => setNs(e.target.value)}
+              />
+              <button className="btn-refresh" onClick={refresh}>Refresh</button>
+            </>
+          }
+        />
+        {msg && <p className={/^error/i.test(msg) ? 'warning' : undefined}>{msg}</p>}
       </section>
       <section className="card span2">
-        <h3>{title}</h3>
+        <h2 className="card-title">{title}</h2>
         <div className="toolbar">
           <label>
             Per page{' '}
@@ -241,7 +246,7 @@ export default function Workloads({ kind }: { kind: Kind }) {
         </div>
       </section>
       <section className="card">
-        <h3>Entity</h3>
+        <h2 className="card-title">Entity</h2>
         {selected && <button onClick={() => navigate('workloads', { namespace: selected.namespace, pod: kind === 'pod' ? selected.name : (selected.podName || ''), node: selected.node || '', query: '' })}>Inspect native network evidence</button>}
         {detail ? (
           <>
@@ -294,9 +299,9 @@ export default function Workloads({ kind }: { kind: Kind }) {
       )}
       {detail && (
         <section className="card span3">
-          <h3>
+          <h2 className="card-title">
             Live flows for {detail.namespace}/{detail.name}
-          </h3>
+          </h2>
           <LiveFlowTerminal
             initial={{
               namespace: detail.namespace,

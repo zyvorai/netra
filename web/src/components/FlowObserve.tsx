@@ -78,7 +78,7 @@ export default function FlowObserve() {
   return (
     <section className="card span3">
       <p className="eyebrow">FLOW HISTORY</p>
-      <h3>Last hour, plus RED and inferred paths</h3>
+      <h2 className="card-title">Last hour, plus RED and inferred paths</h2>
       <p>
         In-memory deltas only. App protocol is a port hint. Process is comm and pid when TCP health matched. No
         payloads.

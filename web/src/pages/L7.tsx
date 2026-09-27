@@ -52,7 +52,7 @@ export default function L7() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">PROTOCOL DOWNGRADES</p><h3>TLS→cleartext correlation, baseline-relative</h3>
+      <p className="eyebrow">PROTOCOL DOWNGRADES</p><h2 className="card-title">TLS→cleartext correlation, baseline-relative</h2>
       <p>Workload/host pairs with TLS handshake history at baseline capture time that now also show cleartext HTTP to the same host. Coexistence-tolerant correlation, not a verdict — never read a finding here as a confirmed downgrade attack or MITM.</p>
       {downgrades?.l7Degraded && (
         <p className="warning">L7 visibility is degraded on {(downgrades.l7DegradedNodes || []).join(', ') || 'one or more nodes'} — the TLS/HTTP BPF programs failed to load there. An empty result below does not mean "no downgrades"; it may only mean Netra can't see that node's TLS/HTTP traffic right now.</p>
@@ -74,10 +74,10 @@ export default function L7() {
 
     <section className="card span3">
       <p className="eyebrow">TLS SNI CONTAINMENT</p>
-      <h3>Exact SNI deny</h3>
+      <h2 className="card-title">Exact SNI deny</h2>
       <p>This is a leased emergency control. A rule only blocks when Netra successfully parses the exact SNI from a ClientHello in the current skb; unparsed, fragmented, ECH, or QUIC traffic fails open for this rule.</p>
       <div className="toolbar">
-        <input value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com" />
+        <input aria-label="SNI to deny" value={sni} onChange={e => setSNI(e.target.value)} placeholder="telemetry.example.com" />
         <button className="primary" onClick={() => mutate('/api/v1/ebpf/sni', sni)} disabled={!sni.trim()}>Add SNI</button>
       </div>
       <div className="chips">{(cfg?.blockedSni || []).map((x: string) => <button key={x} aria-label={`Remove ${x}`} onClick={() => mutate('/api/v1/ebpf/sni/delete', x)}>{x} ×</button>)}</div>
@@ -85,7 +85,7 @@ export default function L7() {
 
     <section className="card span3">
       <p className="eyebrow">JA3 / JA4</p>
-      <h3>{tlsFP?.stats?.uniqueJa3 ?? 0} unique fingerprints</h3>
+      <h2 className="card-title">{tlsFP?.stats?.uniqueJa3 ?? 0} unique fingerprints</h2>
       <p>Always-on datapath ClientHello samples (and capture frames). Full boards under Diagnostics → Surfaces.</p>
       {(tlsFP?.fingerprints || []).length === 0 && <p className="empty-state">No JA3 samples yet.</p>}
       <div className="list">
@@ -100,7 +100,7 @@ export default function L7() {
 
     <section className="card span3">
       <p className="eyebrow">ENCRYPTED DNS</p>
-      <h3>DoT / DoH observe</h3>
+      <h2 className="card-title">DoT / DoH observe</h2>
       <p>Port 853 and known DoH hostnames via SNI/Host/DNS — no decryption. See Surfaces for the full board.</p>
       {(() => {
         const hits = encDNS?.result?.hits || encDNS?.hits || encDNS?.result?.items || [];
@@ -126,7 +126,7 @@ export default function L7() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">TLS CLIENTHELLO</p><h3>Parsed SNI metadata</h3>
+      <p className="eyebrow">TLS CLIENTHELLO</p><h2 className="card-title">Parsed SNI metadata</h2>
       {(data?.tls || []).length === 0 && <p className="empty-state">No TLS ClientHello samples yet.</p>}
       {(data?.tls || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>SNI</span><span>HANDSHAKES</span><span>BLOCKED</span><span>CGROUP</span></div>
@@ -141,7 +141,7 @@ export default function L7() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">CLEARTEXT HTTP/1</p><h3>Method + host only</h3>
+      <p className="eyebrow">CLEARTEXT HTTP/1</p><h2 className="card-title">Method + host only</h2>
       {(data?.http || []).length === 0 && <p className="empty-state">No cleartext HTTP/1 samples yet.</p>}
       {(data?.http || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>METHOD</span><span>HOST</span><span>REQUESTS</span><span>CGROUP</span></div>
@@ -156,7 +156,7 @@ export default function L7() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">HTTP/1 STATUS</p><h3>Status line at the start of the packet</h3>
+      <p className="eyebrow">HTTP/1 STATUS</p><h2 className="card-title">Status line at the start of the packet</h2>
       <p>Cleartext HTTP/1.0 and HTTP/1.1 only. A split status line, HTTP/2, and HTTP/3 are not counted. The reason phrase is not stored.</p>
       {(data?.httpStatus || []).length === 0 && <p className="empty-state">No HTTP/1 status lines yet.</p>}
       {(data?.httpStatus || []).length > 0 && <div className="datatable-scroll">
@@ -176,7 +176,7 @@ export default function L7() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">SOCKET ATTEMPTS</p><h3>Exact destination counters</h3>
+      <p className="eyebrow">SOCKET ATTEMPTS</p><h2 className="card-title">Exact destination counters</h2>
       {connections.length === 0 && <p className="empty-state">No socket attempt samples yet.</p>}
       {connections.length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>PROTO</span><span>REMOTE</span><span>ATTEMPTS</span><span>BLOCKED</span></div>

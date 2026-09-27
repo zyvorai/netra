@@ -1,0 +1,268 @@
+/* Copyright 2026 Zyvor AI Labs · https://zyvor.dev
+   SPDX-License-Identifier: LicenseRef-Zyvor-Production-1.0
+
+   apple.com UX contract primitives — see docs/design/APPLE-UX-CONTRACT.md.
+   Story tier: .apple-section / .apple-display / .apple-lede / .apple-metric-band.
+   Browse tier: .toolbar-pill / .table-wrap / .list-empty / .input-field.
+   Everything reads tokens from styles.css (:root and [data-theme="dark"]);
+   no hex values live here. */
+
+/* —— Story tier —— */
+.apple-section {
+  width: min(1120px, 100% - 48px);
+  margin: 0 auto;
+  padding: 56px 0 40px;
+}
+.apple-section--tight { padding: 32px 0 24px; }
+.apple-section--hero { padding: 88px 0 56px; text-align: center; }
+
+.apple-eyebrow {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--apple-link);
+}
+
+.apple-display {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5.4vw, 4rem);
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.apple-lede {
+  margin: 16px 0 0;
+  max-width: 44ch;
+  font-size: clamp(1.06rem, 1.7vw, 1.31rem);
+  line-height: 1.38;
+  letter-spacing: 0.005em;
+  color: var(--text-secondary);
+}
+.apple-section--hero .apple-lede { margin-inline: auto; }
+
+.apple-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-top: 28px;
+}
+.apple-section--hero .apple-cta-row { justify-content: center; }
+
+.apple-text-link {
+  color: var(--apple-link);
+  text-decoration: none;
+  font-size: 17px;
+}
+.apple-text-link:hover { text-decoration: underline; }
+
+.apple-story-stack { display: flex; flex-direction: column; gap: 40px; }
+
+/* Metric band: hairline-ruled figures instead of a wall of tiles. The child
+   structure <div><span>label</span><b>value</b></div> is load-bearing — the
+   browser smoke tests look values up as `div:has(> span) > b`. */
+.apple-metric-band {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--hairline-1);
+  border-bottom: 1px solid var(--hairline-1);
+}
+@media (min-width: 1024px) {
+  .apple-metric-band { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.apple-metric-band > div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 4px;
+  padding: 24px 20px;
+}
+.apple-metric-band > div > b {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3vw, 2.25rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.apple-metric-band > div > span {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* —— Browse tier —— */
+.toolbar-pill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline-1);
+  border-radius: var(--radius-pill);
+  background: var(--bg-glass);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+.toolbar-pill .input-field { flex: 1 1 220px; border-radius: var(--radius-pill); }
+.toolbar-pill__trailing { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--hairline-1);
+  border-radius: var(--radius-xl);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table-wrap th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--hairline-1);
+}
+.table-wrap td { padding: 12px 16px; border-bottom: 1px solid var(--hairline-1); }
+.table-wrap tr:last-child td { border-bottom: 0; }
+.table-wrap tbody tr:hover { background: var(--surface-hover); }
+
+/* Inside a .card the card is already the frame: no second border/shadow (no
+   card-in-card), just the hairline row rules. */
+.card .table-wrap {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.card .table-wrap th:first-child,
+.card .table-wrap td:first-child { padding-left: 0; }
+
+.list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.list-empty h3 { margin: 0; font-size: 19px; font-weight: 600; color: var(--text-primary); }
+.list-empty p { margin: 0; max-width: 40ch; }
+
+/* One input for every Browse/Work surface. */
+.input-field {
+  width: 100%;
+  min-height: var(--hit-min);
+  padding: 10px 14px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline-1);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s var(--ease-apple), box-shadow 0.2s var(--ease-apple);
+}
+.input-field::placeholder { color: var(--text-faint); }
+.input-field:focus-visible {
+  outline: none;
+  border-color: var(--apple-blue);
+  box-shadow: var(--focus-ring);
+}
+
+/* Form-control base (zero specificity via :where, so any container rule such as
+   .tokenbox input / .toolbar select still wins). Before this, only inputs inside
+   a handful of opted-in containers were styled; e.g. the Connections and
+   Workloads filter rows rendered as raw native controls. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"]), select, textarea) {
+  font: inherit;
+  font-size: 15px;
+  color: var(--text-primary);
+  min-height: var(--hit-min);
+  padding: 10px 14px;
+  background: var(--fill-tertiary);
+  border: 1px solid var(--hairline-1);
+  border-radius: var(--radius-md);
+}
+:where(textarea) { min-height: 0; }
+:where(input, select, textarea)::placeholder { color: var(--text-faint); }
+:where(input[type="checkbox"], input[type="radio"]) { accent-color: var(--apple-blue); width: 18px; height: 18px; margin: 0; }
+/* A label wrapping a checkbox/radio reads as one inline control, not a stray box
+   floating away from its text. */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--hit-min);
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+/* A label that wraps a select ("Diagnostic window [5 minutes]") sits on one row
+   with a gap instead of butting the control against its text. */
+label:has(> select) {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.toolbar label:has(> select) { flex-direction: column; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--text-tertiary); }
+
+/* Checkboxes/radios keep their natural size everywhere. Older container rules
+   (.toolbar input { flex: 1 }, .tokenbox input { width: 100% }) were written
+   for text fields and stretched them into wide boxes far from their labels;
+   :root raises specificity just enough to win without !important. */
+:root input[type="checkbox"],
+:root input[type="radio"] {
+  flex: 0 0 auto;
+  width: 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  display: inline-block;
+}
+
+/* `.card p` (color/size/line-height for body copy) out-ranks a bare class on a
+   <p> inside a card, so these purpose-built paragraph classes silently rendered
+   as 18px secondary body text. Raise them just enough to win. */
+.card p.login-error {
+  margin: 0;
+  color: var(--warning-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.card p.ask-netra-meta { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-tertiary); }
+.card p.snapshot-time { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+.card p.connection-tuple { font-size: 14px; line-height: 1.5; color: var(--text-primary); }
+
+/* Incident/insight rows: a compact Explain control and tighter row padding.
+   A page can hold dozens of signals; a full 44px pill on its own line made each
+   row ~140px tall. (The Explain popover still expands full width.) */
+.insightrow { padding: 10px 14px; gap: 4px 12px; }
+.insightrow .explain-finding { margin-top: 2px; }
+.insightrow .explain-finding button { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+
+/* Card titles are <h2> (page h1 -> card h2 -> sub-heading h3) so the document
+   outline has no skipped level. Styled exactly like the .card h3 they replaced;
+   the bare `.card h2` rule (display-size, used for "Native connections") is a
+   different treatment and keeps winning where no .card-title is set. */
+.card h2.card-title {
+  margin: 0 0 1em;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* The Incidents "Show N more signals" toggle sits under a .list; give it room. */
+.card .list + .toolbar { margin-top: 14px; }
+
+/* The "?" glossary triggers on the Congestion map are 20px circles. Keep the
+   look, but extend the touch area to 36px with an invisible ::after so they are
+   usable on a phone (the button is already position: absolute). */
+.stage-glossary-trigger::after { content: ""; position: absolute; inset: -8px; }

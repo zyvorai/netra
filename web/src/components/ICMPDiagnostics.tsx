@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LicenseRef-Zyvor-Production-1.0
 
 import { icmpFinding, type ICMPError } from '../lib/icmp';
+import { TableWrap } from './Toolbar';
 type Agent = { node: string; stale?: boolean; observedAt?: string; icmpErrors?: ICMPError[] };
 
 export default function ICMPDiagnostics({ agents, now = Date.now() }: { agents: Agent[]; now?: number }) {
@@ -13,10 +14,10 @@ export default function ICMPDiagnostics({ agents, now = Date.now() }: { agents: 
     .sort((a, b) => b.packets - a.packets || a.node.localeCompare(b.node) || a.interfaceIndex - b.interfaceIndex);
   return <section className="card span3" aria-labelledby="icmp-title">
     <p className="eyebrow">ICMP DIAGNOSTICS</p>
-    <h3 id="icmp-title">MTU, unreachable destinations, and routing errors</h3>
+    <h2 id="icmp-title" className="card-title">MTU, unreachable destinations, and routing errors</h2>
     <p>Cumulative observations from current node reports. A packet can appear on multiple interfaces; these counters do not identify a failing workload or connection. Advertised MTUs are unverified peer claims. Interface names reflect the current lookup; indices can be reused.</p>
     {rows.length === 0 ? <p className="empty-state">No ICMP error evidence in fresh reports. Check agent support and TC attachment before concluding the path is healthy.</p> : <div className="datatable-scroll investigation-table">
-      <table aria-label="ICMP error observations">
+      <TableWrap><table aria-label="ICMP error observations">
         <thead><tr><th scope="col">Node / interface</th><th scope="col">Signal</th><th scope="col">Observations</th><th scope="col">Last advertised MTU</th><th scope="col">Next check</th></tr></thead>
         <tbody>{rows.slice(0, 50).map((e, i) => {
           const { label, nextCheck } = icmpFinding(e)!;
@@ -27,7 +28,7 @@ export default function ICMPDiagnostics({ agents, now = Date.now() }: { agents: 
             <td>{nextCheck}</td>
           </tr>;
         })}</tbody>
-      </table>
+      </table></TableWrap>
       {rows.length > 50 && <p>Showing 50 of {rows.length} observations. Use <code>netractl explain --node NODE --limit 1000</code> to inspect more.</p>}
     </div>}
   </section>;

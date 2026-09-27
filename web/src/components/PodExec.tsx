@@ -89,9 +89,9 @@ export default function PodExec({ namespace, name, containers = [], defaultConta
 
   return (
     <section className="card span3">
-      <h3>
+      <h2 className="card-title">
         Shell · {namespace}/{name}
-      </h3>
+      </h2>
       <div className="toolbar">
         {containers.length > 0 && (
           <label>

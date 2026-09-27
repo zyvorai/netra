@@ -40,9 +40,9 @@ export default function Path(){
       <div><b>{s.packetsOut||0}</b><span>packets in flight</span></div>
       <div><b>{s.deliveredRatePps||0}</b><span>delivered pkt/s samples</span></div>
     </div></section>
-    <section className="card span3"><p className="eyebrow">PATH SIGNALS</p><h3>Transport-pressure findings</h3><p>Threshold-based diagnostics only. Netra does not infer router/interface drop reasons from these counters.</p><div className="list">{anomalies.length===0&&<p className="empty-state">No current path-pressure thresholds triggered.</p>}{anomalies.slice(0,25).map((a:any,i:number)=><div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small><ExplainFinding page="path" kind={a.kind} subject={a.subject} message={a.message} severity={a.severity} /></div>)}{anomalies.length>25&&<p className="empty-state">+{anomalies.length-25} more not shown.</p>}</div></section>
+    <section className="card span3"><p className="eyebrow">PATH SIGNALS</p><h2 className="card-title">Transport-pressure findings</h2><p>Threshold-based diagnostics only. Netra does not infer router/interface drop reasons from these counters.</p><div className="list">{anomalies.length===0&&<p className="empty-state">No current path-pressure thresholds triggered.</p>}{anomalies.slice(0,25).map((a:any,i:number)=><div className="agent wide" key={i}><b>{a.kind}</b><span className={`severity-badge ${a.severity}`}>{a.severity}</span><span>{a.subject}</span><small>{a.message}</small><ExplainFinding page="path" kind={a.kind} subject={a.subject} message={a.message} severity={a.severity} /></div>)}{anomalies.length>25&&<p className="empty-state">+{anomalies.length-25} more not shown.</p>}</div></section>
     <section className="card span3">
-      <p className="eyebrow">TCP PRESSURE</p><h3>Exact sockops transport state</h3>
+      <p className="eyebrow">TCP PRESSURE</p><h2 className="card-title">Exact sockops transport state</h2>
       {pressure.length===0 && <p className="empty-state">No TCP pressure samples yet.</p>}
       {pressure.length>0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>CWND / FLIGHT</span><span>LOSS</span><span>DELIVERY</span></div>
@@ -53,7 +53,7 @@ export default function Path(){
       </div>}
     </section>
     <section className="card span3">
-      <p className="eyebrow">TCP CONNECT</p><h3>Establishment latency</h3>
+      <p className="eyebrow">TCP CONNECT</p><h2 className="card-title">Establishment latency</h2>
       {connect.length===0 && <p className="empty-state">No TCP connect samples yet.</p>}
       {connect.length>0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>REMOTE</span><span>ESTABLISHED</span><span>AVG</span><span>MAX</span></div>
@@ -64,7 +64,7 @@ export default function Path(){
       </div>}
     </section>
     <section className="card span3">
-      <p className="eyebrow">EDGE TCP INTEL</p><h3>Edge-observed handshake &amp; RTT (TCX, pre-NAT-visible)</h3>
+      <p className="eyebrow">EDGE TCP INTEL</p><h2 className="card-title">Edge-observed handshake &amp; RTT (TCX, pre-NAT-visible)</h2>
       <p>Distinct from the socket-observed TCP pressure/connect data above (sockops, post-NAT): this comes from a passive TCX observer that also sees forwarded/NAT'd flows the local socket layer never attaches to. Off unless the agent's edge-intel BPF object attached (<code>NETRA_EDGE_INTEL</code>).</p>
       {!data?.edgeIntel && <p className="empty-state">No edge-intel data reported — likely off or unattached on every node.</p>}
       {data?.edgeIntel && <div className="metrics">

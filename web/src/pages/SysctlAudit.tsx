@@ -40,7 +40,7 @@ export default function SysctlAudit() {
       )}
       <section className="card span3">
         <p className="eyebrow">SYSCTL AUDIT</p>
-        <h3>Cluster hardening pulse</h3>
+        <h2 className="card-title">Cluster hardening pulse</h2>
         <div className="metrics">
           <div>
             <b>{s.nodes || 0}</b>
@@ -76,7 +76,7 @@ export default function SysctlAudit() {
 
       <section className="card span3">
         <p className="eyebrow">OUTLIERS</p>
-        <h3>Where nodes disagree</h3>
+        <h2 className="card-title">Where nodes disagree</h2>
         <div className="list">
           {!outliers.length && <p className="empty-state">No nodes disagree with the cluster baseline right now.</p>}
           {outliers.map((o: any, i: number) => (

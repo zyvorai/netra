@@ -35,7 +35,7 @@ export default function NodeResources() {
 
     <section className="card span3">
       <p className="eyebrow">PER-NODE</p>
-      <h3>Host CPU, memory, and load</h3>
+      <h2 className="card-title">Host CPU, memory, and load</h2>
       {nodes.length === 0 && <p className="empty-state">No agent reports yet.</p>}
       {nodes.length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>NODE</span><span>CPU</span><span>LOAD 1 / 5 / 15</span><span>MEMORY</span><span>UPTIME</span></div>
@@ -55,7 +55,7 @@ export default function NodeResources() {
 
     <section className="card span3">
       <p className="eyebrow">TOP WORKLOADS</p>
-      <h3>Highest CPU usage, cgroup v2-attributed</h3>
+      <h2 className="card-title">Highest CPU usage, cgroup v2-attributed</h2>
       {topWorkloads.length === 0 && <p className="empty-state">No workload resource samples yet.</p>}
       {topWorkloads.length > 0 && <div className="datatable-scroll">
         <div className="datahead obs"><span>WORKLOAD</span><span>NODE</span><span>CPU</span><span>MEMORY</span></div>

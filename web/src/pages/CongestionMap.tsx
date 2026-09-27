@@ -396,16 +396,16 @@ export default function CongestionMap() {
       {brief && (
         <section className="card span3">
           <p className="eyebrow">IN PLAIN ENGLISH</p>
-          <h3>
+          <h2 className="card-title">
             <span className={`severity-badge ${brief.severity === 'info' ? 'info' : brief.severity}`}>{brief.severity}</span>{' '}
             {brief.headline}
-          </h3>
+          </h2>
           <p>{brief.summary}</p>
         </section>
       )}
       <section className="card span3">
         <p className="eyebrow">CONGESTION MAP</p>
-        <h3>Where the stack is under pressure</h3>
+        <h2 className="card-title">Where the stack is under pressure</h2>
         <p>
           Every layer of the Linux network stack a packet can pass through, colored by the worst finding across the
           cluster right now. Ingress (receive) and egress (send) are genuinely different paths through the kernel —
@@ -502,7 +502,7 @@ export default function CongestionMap() {
       {selectedStage && selectedSummary && (
         <section className="card span3">
           <p className="eyebrow">STAGE DETAIL</p>
-          <h3>{selectedStage.title}</h3>
+          <h2 className="card-title">{selectedStage.title}</h2>
           {sparklineValues.length >= 2 && worstNode && (
             <p className="sparkline-row">
               <Sparkline values={sparklineValues} />

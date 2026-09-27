@@ -344,7 +344,7 @@ export default function Capture() {
       {visibleAlerts.length > 0 && (
         <section className="card span3">
           <p className="eyebrow">SUGGESTED CAPTURE</p>
-          <h3>Live critical finding{visibleAlerts.length === 1 ? '' : 's'} on the Congestion Map</h3>
+          <h2 className="card-title">Live critical finding{visibleAlerts.length === 1 ? '' : 's'} on the Congestion Map</h2>
           <div className="list">
             {visibleAlerts.map((a) => (
               <div className="agent wide" key={`${a.node}:${a.signal}`}>
@@ -363,7 +363,7 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">PACKET CAPTURE</p>
-        <h3>Start a capture</h3>
+        <h2 className="card-title">Start a capture</h2>
         <p>
           Full packet bytes by default, filtered and time-bounded (max 5 minutes).{' '}
           {backend === 'afpacket'
@@ -429,7 +429,7 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">ACTIVE SESSIONS</p>
-        <h3>{active.length} active</h3>
+        <h2 className="card-title">{active.length} active</h2>
         <div className="list">
           {active.length === 0 && <p className="empty-state">No capture sessions running.</p>}
           {active.map((c) => (
@@ -448,7 +448,7 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">LIVE VIEW</p>
-        <h3>{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h3>
+        <h2 className="card-title">{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h2>
         <p>Click Watch on an active session, or start one above, to stream packets here as they're captured. Endpoints matching a known pod or VM IP are labeled automatically — process/PID attribution isn't available (would need a kernel-side capture change, not client-side).</p>
         {active.length > 1 && (
           <div className="toolbar">

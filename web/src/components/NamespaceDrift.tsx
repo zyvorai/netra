@@ -14,7 +14,7 @@ export default function NamespaceDrift() {
   return (
     <section className="card span3">
       <p className="eyebrow">NAMESPACE DRIFT</p>
-      <h3>Network-namespace changes on tracked processes</h3>
+      <h2 className="card-title">Network-namespace changes on tracked processes</h2>
       <p>A live process moving network namespaces after start (setns) — agent-sourced from the same periodic /proc scan capability drift uses (requires NETRA_PROCMETA_ENABLED). A change during an agent restart window is a known blind spot, surfaced below as its own finding rather than silently missed.</p>
       <div className="list">
         {(data?.anomalies || []).length === 0 && <p className="empty-state">No namespace drift observed yet.</p>}

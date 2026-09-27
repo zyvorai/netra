@@ -25,6 +25,6 @@ export default function ObservedWorkloads() {
       </>}
     </section>
     {selected && <section className="card"><h2>Connection evidence</h2><p>Events for the selected identity. Traffic filters from Connections remain active when returning there.</p><div className="toolbar"><button onClick={() => navigate('connections')}>Open filtered connections</button><button onClick={() => navigate('ebpf')}>Review firewall</button></div><ConnectionTable rows={eventRows(agents, { ...scope, direction: '', protocol: '', action: '' })} /></section>}
-    {!selected && rows.some(e => !e.pod) && <section className="card"><h3>Unattributed traffic</h3><p>Some sampled events have no pod identity. Inspect them in Connections instead of assigning them to a workload by IP.</p><button onClick={() => navigate('connections')}>Inspect connections</button></section>}
+    {!selected && rows.some(e => !e.pod) && <section className="card"><h2 className="card-title">Unattributed traffic</h2><p>Some sampled events have no pod identity. Inspect them in Connections instead of assigning them to a workload by IP.</p><button onClick={() => navigate('connections')}>Inspect connections</button></section>}
   </div>;
 }
