@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api, authHeaders } from '../api';
 import FlowObserve from '../components/FlowObserve';
 import TerminalFrame from '../components/TerminalFrame';
+import PagePulse from '../components/kit/PagePulse';
+import RankedList from '../components/kit/RankedList';
+import { countTone } from '../components/kit/tone';
 import { endpointName, tuple, verdictClass } from '../lib/flow';
 
 type Filter = {
@@ -112,11 +115,25 @@ export default function Flows() {
   const verdicts = summary?.verdicts || {};
   const protocols = summary?.protocols || {};
 
+  const dropped = verdicts.DROPPED ?? 0;
   return (
     <div className="grid">
+      <PagePulse
+        headline={summary ? (dropped ? `${dropped} of ${summary.total ?? 0} sampled flows dropped.` : `${summary.total ?? 0} flows sampled, none dropped.`) : undefined}
+        tone={summary && dropped ? 'warn' : undefined}
+        tick={summary}
+        error={summaryError || undefined}
+        figures={[
+          { label: 'flows sampled', value: summary ? (summary.total ?? 0) : undefined },
+          { label: 'forwarded', value: summary ? (verdicts.FORWARDED ?? 0) : undefined },
+          { label: 'dropped', value: summary ? dropped : undefined, tone: summary ? countTone(dropped) : undefined },
+          { label: 'TCP+UDP', value: summary ? (protocols.TCP ?? 0) + (protocols.UDP ?? 0) : undefined },
+          { label: 'streamed rows', value: flows.length },
+        ]}
+      />
       <section className="card span2">
         <p className="eyebrow">LIVE STREAM</p>
-        <h3>Filters</h3>
+        <h2 className="card-title">Filters</h2>
         <p>
           Optional Cilium/Hubble enrichment. When Hubble is disabled, use <b>eBPF</b>, <b>Network Health</b>, and{' '}
           <b>L7 Metadata</b> for Netra-native telemetry.
@@ -148,31 +165,14 @@ export default function Flows() {
 
       <section className="card">
         <p className="eyebrow">FLOW SUMMARY</p>
-        <h3>Window aggregate</h3>
+        <h2 className="card-title">Why flows dropped</h2>
         {summaryError && <p className="warning">{summaryError}</p>}
-        <div className="metrics">
-          <div>
-            <b>{summary?.total ?? 0}</b>
-            <span>flows sampled</span>
-          </div>
-          <div>
-            <b>{verdicts.FORWARDED ?? 0}</b>
-            <span>forwarded</span>
-          </div>
-          <div>
-            <b>{verdicts.DROPPED ?? 0}</b>
-            <span>dropped</span>
-          </div>
-          <div>
-            <b>{(protocols.TCP ?? 0) + (protocols.UDP ?? 0)}</b>
-            <span>TCP+UDP</span>
-          </div>
-        </div>
-        {(summary?.dropReasons || []).slice(0, 4).map((x: any) => (
-          <p key={x.name}>
-            <b>{x.name}</b> · {x.count}
-          </p>
-        ))}
+        <RankedList
+          limit={4}
+          mono={false}
+          empty="No drop reasons in this window."
+          items={(summary?.dropReasons || []).map((x: any) => ({ name: x.name, count: x.count, tone: 'bad' as const }))}
+        />
       </section>
 
       <div className="span3">
@@ -198,7 +198,7 @@ export default function Flows() {
 
       <section className="card span2">
         <p className="eyebrow">TOP DESTINATIONS</p>
-        <h3>From summary window</h3>
+        <h2 className="card-title">From summary window</h2>
         <div className="list">
           {(summary?.topDestinations || []).length === 0 && <p className="empty-state">No destination aggregate yet — reconnect or refresh summary.</p>}
           {(summary?.topDestinations || []).map((x: any) => (
@@ -214,7 +214,7 @@ export default function Flows() {
 
       <section className="card">
         <p className="eyebrow">PROTOCOLS</p>
-        <h3>Sample mix</h3>
+        <h2 className="card-title">Sample mix</h2>
         <div className="chips">
           {Object.entries(protocols).map(([name, count]) => (
             <span key={name}>
@@ -228,7 +228,7 @@ export default function Flows() {
 
       <section className="card span3">
         <p className="eyebrow">DROP EXPLAIN</p>
-        <h3>Recent drop findings</h3>
+        <h2 className="card-title">Recent drop findings</h2>
         {dropError && <p className="warning">{dropError}</p>}
         {drops.length === 0 && (
           <p className="empty-state">Use "Explain recent drops" to fetch recent denied flows for the current namespace/pod scope.</p>

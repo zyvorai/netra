@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --bg-page: #f5f5f7;
+  --bg-page: #ffffff;
   --bg-elevated: #ffffff;
   /* Sub-card/toolbar-input fill, nested inside a --bg-elevated .card — in
      light mode this is the same value as --bg-page, which is fine (and not
@@ -50,16 +50,49 @@
   --warning-text: #8b3d00;
   --success-bg: #e8f8ec;
   --success-border: #b8ecc4;
+  --success-text: #1e7b34;
+  /* Text-safe accents: the bright --accent-* values are fills/strokes (~2:1 as
+     text on white). These reach >=4.5:1 on light surfaces; dark theme keeps the
+     bright originals. */
+  --accent-cyan-text: #0a6b99;
+  --accent-green-text: #1e7b34;
+  --accent-amber-text: #8b4b00;
+  --accent-purple-text: #8a3fb5;
   --info-bg: #eaf6fc;
   --info-border: #bfe6f5;
   --terminal-bg: #0d0d0f;
   --terminal-bar: #1b1b1e;
   --terminal-text: #f5f5f7;
   --terminal-text-dim: #86868b;
-  --card-shadow: 0 15px 50px rgba(0, 0, 0, 0.04);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   --hero-glow-a: rgba(0, 113, 227, 0.14);
   --hero-glow-b: rgba(50, 173, 230, 0.12);
-  --theme-color: #f5f5f7;
+  --theme-color: #ffffff;
+  /* apple.com contract tokens (docs/design/APPLE-UX-CONTRACT.md). Semantic
+     surface/hairline/shadow/text-faint/focus names shared with the docs site
+     so the two never drift. Existing --bg-* / --border tokens stay the
+     source for legacy rules; new code should prefer these. */
+  --surface-1: #ffffff;
+  --surface-hover: #f5f5f7;
+  --hairline-1: rgba(0, 0, 0, 0.1);
+  --fill-tertiary: rgba(0, 0, 0, 0.04);
+  --text-faint: #a1a1a6;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.14);
+  --focus-ring: 0 0 0 4px rgba(0, 113, 227, 0.3);
+  --hit-min: 44px;
+  /* Type scale (docs/design/APPLE-UX-CONTRACT.md). Headings and figures read
+     from these instead of raw px so every page shrinks or grows together. */
+  --fs-body: 15px;
+  --fs-lede: 16px;
+  --fs-link: 15px;
+  --fs-h1: clamp(24px, 2.6vw, 34px);
+  --fs-h2: clamp(20px, 1.8vw, 24px);
+  --fs-h3: 17px;
+  --fs-figure: clamp(18px, 1.6vw, 24px);
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   /* Border-radius scale — theme-independent (not a color), defined once
      here rather than repeated in [data-theme="dark"]. Every radius value
      used anywhere in this file is one of these steps, plus the 50%/0
@@ -122,6 +155,11 @@
   --warning-text: #ffd60a;
   --success-bg: rgba(48, 209, 88, 0.14);
   --success-border: rgba(48, 209, 88, 0.35);
+  --success-text: #30d158;
+  --accent-cyan-text: #64d2ff;
+  --accent-green-text: #30d158;
+  --accent-amber-text: #ff9f0a;
+  --accent-purple-text: #bf5af2;
   --info-bg: rgba(100, 210, 255, 0.14);
   --info-border: rgba(100, 210, 255, 0.35);
   --terminal-bg: #000000;
@@ -132,6 +170,15 @@
   --hero-glow-a: rgba(0, 113, 227, 0.18);
   --hero-glow-b: rgba(50, 173, 230, 0.16);
   --theme-color: #000000;
+  --surface-1: #1d1d1f;
+  --surface-hover: #2c2c2e;
+  --hairline-1: rgba(255, 255, 255, 0.12);
+  --fill-tertiary: rgba(255, 255, 255, 0.08);
+  --text-faint: #6e6e73;
+  --shadow-1: none;
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --focus-ring: 0 0 0 4px rgba(41, 151, 255, 0.4);
 }
 
 ::selection {
@@ -150,6 +197,8 @@ body {
   background: var(--bg-page);
   min-height: 100vh;
   color: var(--text-primary);
+  font-size: var(--fs-body);
+  line-height: 1.5;
 }
 
 /* —— Apple.com button system —— */
@@ -157,13 +206,13 @@ button,
 .buttonlike,
 .buildbutton {
   font-family: inherit;
-  font-size: 18px;
+  font-size: var(--fs-body);
   font-weight: 400;
-  letter-spacing: -0.022em;
+  letter-spacing: -0.01em;
   line-height: 1.17648;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
-  padding: 12px 22px;
+  padding: 10px 18px;
   min-height: 44px;
   cursor: pointer;
   color: var(--text-primary);
@@ -185,7 +234,7 @@ button:active,
 button:focus-visible,
 .buttonlike:focus-visible,
 .buildbutton:focus-visible {
-  outline: 2px solid rgba(0, 113, 227, 0.45);
+  outline: 2px solid var(--apple-blue);
   outline-offset: 2px;
 }
 
@@ -197,120 +246,105 @@ select:focus-visible,
 textarea:focus-visible,
 .navlinks button:focus-visible,
 .brand:focus-visible {
-  outline: 2px solid rgba(0, 113, 227, 0.45);
+  outline: 2px solid var(--apple-blue);
   outline-offset: 2px;
 }
 
-/* Every button — primary, danger, or plain — shares the base 44px/17px
-   pill size above; only color/border differ by variant, so nothing here
-   overrides sizing anymore (that's what caused inconsistent button sizes
-   across toolbars/pages previously). */
+/* Button variants — apple.com contract ("color is deviation").
+   Blue fill = the one primary action. Everything else is a quiet tinted or
+   neutral pill; solid red is reserved for destructive actions. The semantic
+   class names (btn-refresh/-next/-success/-warn/-secondary/-diag) predate the
+   contract and are kept so call sites don't change; they now map onto four
+   looks: primary, neutral, tinted-state and danger. All share the base
+   44px/17px pill, so nothing here changes sizing. No !important: variants
+   beat the base `button` rule on specificity, and the context rules
+   (.toolbar/.filters/.list button) only set layout. */
+button.primary,
 .primary,
-.toolbar .primary,
-.buildbutton.primary,
-button.primary {
-  background: var(--apple-blue) !important;
-  color: #fff !important;
-  border-color: transparent !important;
+button.btn-next,
+.btn-next {
+  background: var(--apple-blue);
+  color: #fff;
+  border-color: transparent;
 }
+button.primary:hover,
 .primary:hover,
-.toolbar .primary:hover,
-.buildbutton.primary:hover,
-button.primary:hover {
-  background: var(--apple-blue-hover) !important;
+button.btn-next:hover,
+.btn-next:hover {
+  background: var(--apple-blue-hover);
   filter: brightness(1.06);
 }
-/* Light mode's flat CTA already reads fine against a white/gray page —
-   the glow is reserved for dark mode, where --card-shadow is off
-   app-wide and a bit of light around the primary action reinforces it
-   as the one thing on a black page that's meant to be touched. */
-[data-theme="dark"] .primary:hover,
-[data-theme="dark"] .toolbar .primary:hover,
-[data-theme="dark"] .buildbutton.primary:hover,
-[data-theme="dark"] button.primary:hover {
+/* The glow is reserved for dark mode, where --card-shadow is off app-wide
+   and a bit of light around the primary action marks it as the one thing on
+   a black page that is meant to be touched. */
+[data-theme="dark"] button.primary:hover,
+[data-theme="dark"] .primary:hover {
   box-shadow: 0 8px 24px rgba(0, 113, 227, 0.35);
 }
 
-.danger,
-.policydelete,
-button.danger {
-  background: var(--danger) !important;
-  color: #fff !important;
-  border: 1px solid transparent !important;
-}
-.danger:hover,
-.policydelete:hover,
-button.danger:hover {
-  filter: brightness(1.08);
-}
-
-/* Semantic filled pills — Apple system colors by job. */
-.btn-refresh,
-button.btn-refresh {
-  background: var(--accent-cyan) !important;
-  color: #fff !important;
-  border-color: transparent !important;
-}
-.btn-refresh:hover,
-button.btn-refresh:hover {
-  background: var(--accent-cyan-hover) !important;
-}
-
-.btn-next,
-button.btn-next {
-  background: var(--apple-blue) !important;
-  color: #fff !important;
-  border-color: transparent !important;
-}
-.btn-next:hover,
-button.btn-next:hover {
-  background: var(--apple-blue-hover) !important;
-}
-
-.btn-success,
-button.btn-success {
-  background: var(--accent-green) !important;
-  color: #fff !important;
-  border-color: transparent !important;
-}
-.btn-success:hover,
-button.btn-success:hover {
-  background: var(--accent-green-hover) !important;
-}
-
-.btn-warn,
-button.btn-warn {
-  background: var(--accent-amber) !important;
-  color: #1d1d1f !important;
-  border-color: transparent !important;
-}
-.btn-warn:hover,
-button.btn-warn:hover {
-  background: var(--accent-amber-hover) !important;
-}
-
-.btn-secondary,
+/* Neutral: secondary actions, refresh. */
 button.btn-secondary,
-.buttonlike.btn-secondary {
-  background: var(--btn-secondary) !important;
-  color: #fff !important;
-  border-color: transparent !important;
+.btn-secondary,
+.buttonlike.btn-secondary,
+button.btn-refresh,
+.btn-refresh {
+  background: var(--fill-tertiary);
+  color: var(--text-primary);
+  border-color: var(--hairline-1);
 }
-.btn-secondary:hover,
 button.btn-secondary:hover,
-.buttonlike.btn-secondary:hover {
-  background: var(--btn-secondary-hover) !important;
+.btn-secondary:hover,
+.buttonlike.btn-secondary:hover,
+button.btn-refresh:hover,
+.btn-refresh:hover {
+  background: var(--surface-hover);
 }
 
-.btn-diag,
-button.btn-diag {
-  background: var(--accent-purple) !important;
-  color: #fff !important;
-  border-color: transparent !important;
+/* Intent, not primary: explain / history / diagnose. */
+button.btn-diag,
+.btn-diag {
+  background: color-mix(in srgb, var(--apple-blue) 10%, transparent);
+  color: var(--apple-link);
+  border-color: transparent;
 }
-.btn-diag:hover,
-button.btn-diag:hover {
-  background: var(--accent-purple-hover) !important;
+button.btn-diag:hover,
+.btn-diag:hover {
+  background: color-mix(in srgb, var(--apple-blue) 18%, transparent);
+}
+
+/* State pills — these mark a real state (observing / enforcing / rollback),
+   so they keep a semantic tint, but as a tint, never a solid fill. */
+button.btn-success,
+.btn-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+  border-color: var(--success-border);
+}
+button.btn-warn,
+.btn-warn {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+}
+button.btn-success:hover,
+.btn-success:hover,
+button.btn-warn:hover,
+.btn-warn:hover {
+  filter: brightness(0.97);
+}
+
+/* Destructive: the only solid non-blue fill. */
+button.danger,
+.danger,
+.policydelete {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+}
+button.danger:hover,
+.danger:hover,
+.policydelete:hover {
+  filter: brightness(1.08);
 }
 
 /* Disabled buttons get one solid, theme-aware muted look regardless of
@@ -331,8 +365,10 @@ button:disabled,
   transform: none;
 }
 
-/* Chip remove controls — compact Apple red. */
-.chips button {
+/* Chip remove controls — compact Apple red. Scoped to buttons labelled
+   "Remove …": other buttons inside .chips (tabs, filters) are navigation, and
+   red is reserved for deviation. */
+.chips button[aria-label^="Remove"] {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
   border-color: var(--danger) !important;
@@ -342,7 +378,7 @@ button:disabled,
   line-height: 1.25;
   height: auto;
 }
-.chips button:hover {
+.chips button[aria-label^="Remove"]:hover {
   filter: brightness(0.97);
   background: var(--danger-bg) !important;
 }
@@ -370,7 +406,7 @@ button:disabled,
   background: var(--nav-bg);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hairline-1);
 }
 .nav-inner {
   width: 100%;
@@ -398,8 +434,10 @@ button:disabled,
   text-decoration: none;
   border: 0;
   background: transparent;
-  padding: 0;
-  min-height: 0;
+  padding: 0 6px;
+  margin-left: -6px;
+  /* 44px hit area (the bar is 48px tall) — the mark itself stays 22px. */
+  min-height: var(--hit-min);
   cursor: pointer;
 }
 .brand:hover { background: transparent; opacity: 0.8; }
@@ -489,16 +527,21 @@ button:disabled,
   transform: translateX(-50%) translateY(-6px);
   min-width: 480px;
   max-width: 720px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  /* The panel sits inside a sticky nav, so page scroll can't reach what falls
+     below the fold: cap it to the viewport and scroll inside it. */
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline-1);
   border-top: none;
-  border-radius: 0 0 var(--radius-md, 12px) var(--radius-md, 12px);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   padding: 28px 32px;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.22s var(--ease-apple), transform 0.22s var(--ease-apple), visibility 0.22s;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-3);
 }
 .mega-panel.open {
   opacity: 1;
@@ -577,22 +620,20 @@ main {
   overflow-x: clip;
 }
 
-/* Full marketing hero (Overview) */
+/* Overview hero: same compact scale as .page-hero; the live datapath visual
+   below it, not the headline, is the landing page's big moment. */
 .hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 36px;
-  align-items: end;
-  margin: 28px 0 48px;
-  padding: 48px 0 36px;
   position: relative;
+  margin: 8px 0 20px;
+  padding: 12px 0 4px;
+  max-width: 900px;
 }
 .hero::before,
 .page-hero::before {
   content: "";
   position: absolute;
   inset: -20px -8% auto;
-  height: 280px;
+  height: 140px;
   background:
     radial-gradient(ellipse at 30% 40%, var(--hero-glow-a), transparent 60%),
     radial-gradient(ellipse at 80% 20%, var(--hero-glow-b), transparent 55%);
@@ -600,22 +641,37 @@ main {
   z-index: -1;
   animation: heroDrift 22s ease-in-out infinite alternate;
 }
-.hero h1 {
-  font-size: clamp(38px, 4.6vw, 64px);
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  max-width: 920px;
-  margin: 10px 0 18px;
-  color: var(--text-primary);
+.hero h1,
+.page-hero h1 {
+  font-size: var(--fs-h1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   font-weight: 600;
+  margin: 6px 0 8px;
+  color: var(--text-primary);
 }
-.hero p {
+.hero p,
+.page-hero p {
   color: var(--text-secondary);
-  max-width: 720px;
-  font-size: 20px;
-  line-height: 1.381;
-  font-weight: 400;
-  letter-spacing: 0.011em;
+  font-size: var(--fs-lede);
+  line-height: 1.45;
+  margin: 0;
+  max-width: 70ch;
+}
+
+/* The glow layer is clipped to its hero's box (max-width 900px on page heroes),
+   which left a hard vertical edge in dark mode; fade the trailing edge instead. */
+.hero::before,
+.page-hero::before {
+  -webkit-mask-image: linear-gradient(to right, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 45%, transparent 100%);
+}
+
+/* Contract: light theme has no ambient page gradient — the tinted glow is a
+   dark-theme-only treatment (color is deviation, not decoration). */
+:root:not([data-theme="dark"]) .hero::before,
+:root:not([data-theme="dark"]) .page-hero::before {
+  display: none;
 }
 
 /* Slow, GPU-cheap drift of the hero glow's radial-gradient position — a
@@ -628,34 +684,14 @@ main {
   to { background-position: 6% 4%, -5% -3%; }
 }
 
-/* Page heroes carry their own glow layer as a "chapter opener" per page,
-   but at a page-title scale, not display/poster scale — kept a clear step
-   under .hero's ceiling (52px vs 64px) so Overview stays the single
-   biggest moment in the app. History: shrunk twice (an original
-   near-hero-scale 84px, then a still-oversized 48px ceiling), then raised
-   again to this larger, Apple-marketing-inspired scale on explicit
-   request. */
+/* Page heroes are compact page titles, not posters: the data should start
+   within the first screen. Scale comes from --fs-h1 / --fs-lede. */
 .page-hero {
   position: relative;
-  margin: 20px 0 36px;
-  padding: 28px 0 12px;
+  margin: 8px 0 20px;
+  padding: 12px 0 4px;
   max-width: 900px;
   animation: fadeRise 0.45s var(--ease-apple) both;
-}
-.page-hero h1 {
-  font-size: clamp(32px, 4vw, 52px);
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  font-weight: 600;
-  margin: 10px 0 12px;
-  color: var(--text-primary);
-}
-.page-hero p {
-  color: var(--text-secondary);
-  font-size: 19px;
-  line-height: 1.42;
-  margin: 0;
-  max-width: 640px;
 }
 
 /* Per-page tinted ambient glow — the app's stand-in for the imagery/photo
@@ -683,14 +719,18 @@ main {
 .login-shell {
   min-height: 100vh;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 64px;
-  padding: 48px 24px;
+  gap: 40px;
+  padding: 64px 24px;
   position: relative;
   overflow: hidden;
+  text-align: center;
 }
+/* Single Account-style composition (apple.com contract): no ambient glow in
+   the light theme. */
+:root:not([data-theme="dark"]) .login-shell::before { display: none; }
 .login-shell::before {
   content: "";
   position: absolute;
@@ -702,28 +742,29 @@ main {
   z-index: -1;
 }
 .login-info {
-  max-width: 440px;
+  max-width: 640px;
 }
 .login-logo {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-sm);
-  margin-bottom: 18px;
+  margin: 0 auto 18px;
   display: block;
 }
 .login-info h1 {
-  font-size: clamp(38px, 4.6vw, 56px);
-  line-height: 1.04;
-  letter-spacing: -0.04em;
+  font-size: var(--fs-h1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   font-weight: 600;
   margin: 8px 0 14px;
   color: var(--text-primary);
 }
 .login-info p {
   color: var(--text-secondary);
-  font-size: 19px;
+  font-size: var(--fs-lede);
   line-height: 1.5;
-  max-width: 420px;
+  max-width: 480px;
+  margin-inline: auto;
 }
 .login-host {
   margin-top: 20px !important;
@@ -740,10 +781,11 @@ main {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  text-align: left;
 }
 .login-card h1 {
-  font-size: clamp(32px, 3.5vw, 46px);
-  letter-spacing: -0.03em;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.01em;
   margin: 6px 0 4px;
   font-weight: 600;
   color: var(--text-primary);
@@ -779,17 +821,10 @@ main {
   width: 100%;
   margin-top: 6px;
   padding: 11px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hairline-1);
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background: var(--fill-tertiary);
   color: var(--text-primary);
-}
-[data-theme="dark"] .tokenbox input,
-[data-theme="dark"] .toolbar input,
-[data-theme="dark"] .filters input,
-[data-theme="dark"] .buildergrid input,
-[data-theme="dark"] .buildergrid select {
-  background: var(--bg-elevated-2);
 }
 .tokenbox input::placeholder,
 .toolbar input::placeholder {
@@ -798,10 +833,15 @@ main {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr), so one wide child
+     (a nowrap toolbar, a 640px data row) stretched the track past the viewport
+     and the overflow was then clipped, hiding the card's right edge on phones. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   animation: fadeRise 0.4s ease 0.05s both;
 }
+.grid > *,
+.investigation > * { min-width: 0; }
 .span2 { grid-column: span 2; }
 .span3 { grid-column: 1 / -1; }
 
@@ -831,83 +871,71 @@ main {
 
 .card {
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-3xl);
-  padding: 28px;
+  border: 1px solid var(--hairline-1);
+  border-radius: var(--radius-xl);
+  padding: 24px;
   box-shadow: var(--card-shadow);
   position: relative;
   /* visible so metric/toolbar labels are not clipped at the card edge */
   overflow: visible;
 }
-/* Dark mode has no shadow to read depth from (--card-shadow: none), so a
-   lift + border brighten on hover stands in for it — light mode's static
-   shadow already reads fine without one. Also gets a faint inset top
-   highlight (a hairline "light catching an edge" effect) alongside the
-   existing blue/cyan gradient hairline below, for a glass/metal read. */
+/* Flat hairline card (apple.com contract): no hover lift, no gradient edge.
+   Dark mode has no shadow, so a faint inset top highlight stands in for it. */
 [data-theme="dark"] .card {
-  transition: transform 0.25s var(--ease-apple), border-color 0.25s var(--ease-apple), box-shadow 0.25s var(--ease-apple);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
-[data-theme="dark"] .card:hover {
-  transform: translateY(-4px);
-  border-color: var(--border-strong);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-.card::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 113, 227, 0.25), rgba(50, 173, 230, 0.2), transparent);
-  pointer-events: none;
-}
 .card h2 {
-  font-size: clamp(32px, 3.5vw, 46px);
-  letter-spacing: -0.03em;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.01em;
   margin: 6px 0 12px;
   font-weight: 600;
   color: var(--text-primary);
 }
 .card h3 {
   margin-top: 0;
-  font-size: 24px;
-  letter-spacing: -0.02em;
+  font-size: var(--fs-h3);
+  letter-spacing: -0.01em;
   font-weight: 600;
   color: var(--text-primary);
 }
 .card p {
   color: var(--text-secondary);
-  line-height: 1.55;
-  font-size: 18px;
+  line-height: 1.5;
+  font-size: var(--fs-body);
 }
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 4px 12px;
   margin-top: 24px;
+  /* Metric band (apple.com contract): figures ruled by hairlines top and
+     bottom instead of a wall of nested tiles. The <div><b/><span/></div>
+     cell structure is unchanged — the browser smoke tests locate values
+     through it. */
+  border-top: 1px solid var(--hairline-1);
+  border-bottom: 1px solid var(--hairline-1);
 }
 .metrics div {
-  background: var(--bg-elevated-2);
-  padding: 18px;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--border);
-  border-top: 2px solid rgba(0, 113, 227, 0.45);
+  background: transparent;
+  padding: 18px 8px 18px 0;
+  border: 0;
   min-width: 0;
 }
 .metrics b {
   display: block;
-  /* Hero-scale numerals — Apple's "big number" stat treatment — rather
-     than a modest label-sized figure. Capped well under the .hero/.metrics
-     tile width: several pages embed a unit suffix directly in this text
+  /* Stat numerals on the shared --fs-figure scale. Capped well under the
+     .metrics tile width: several pages embed a unit suffix directly in this text
      (e.g. "12.4 ms"), and a too-large clamp wraps those mid-value inside a
      ~150px tile. clamp() also keeps it from overrunning at narrow widths. */
-  font-size: clamp(22px, 2.6vw, 40px);
+  font-size: var(--fs-figure);
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  /* break-word (not anywhere): it does not shrink min-content, so a number like
+     75,371,874 keeps its column wide enough instead of splitting mid-digit. */
+  overflow-wrap: break-word;
 }
 .metrics span {
   display: block;
@@ -932,7 +960,7 @@ main {
   border-radius: var(--radius-2xl);
   overflow: hidden;
   border: 1px solid var(--border);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-2);
   min-height: 280px;
   color: var(--terminal-text);
 }
@@ -1012,17 +1040,35 @@ main {
   gap: 6px;
 }
 .toolbar select {
+  min-height: var(--hit-min);
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated-2);
+  border: 1px solid var(--hairline-1);
+  background: var(--fill-tertiary);
   color: var(--text-primary);
   font-size: 15px;
 }
+/* Loose text in a toolbar row ("Showing 1–20 of 84", "Page 1 / 4") centers on
+   the 44px control row instead of hanging off the bottom edge, where it read
+   as overlapping the neighbouring select. */
+.toolbar > span {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--hit-min);
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+/* Inline code: neutral ink on a faint fill (apple.com docs treatment). The
+   old light-cyan text was ~2.5:1 on white, below the 3:1 floor for UI text. */
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
-  color: var(--accent-cyan);
+  color: var(--text-primary);
+  background: var(--fill-tertiary);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
 }
 .toolbar {
   display: flex;
@@ -1261,12 +1307,12 @@ code {
    same lesson as .flowrow's .proto-* fix — so these are scoped through
    .datarow to actually win. Firewall Rules table (EBPF.tsx), by ruleTypeClass. */
 .datarow .rule-deny { color: var(--danger); }
-.datarow .rule-allow { color: var(--accent-green); }
-.datarow .rule-rate { color: var(--accent-amber); }
+.datarow .rule-allow { color: var(--accent-green-text); }
+.datarow .rule-rate { color: var(--accent-amber-text); }
 /* Audit log action verb, by auditActionClass(). */
 .datarow .action-destructive { color: var(--danger); }
-.datarow .action-mutating { color: var(--accent-amber); }
-.datarow .action-lifecycle { color: var(--accent-cyan); }
+.datarow .action-mutating { color: var(--accent-amber-text); }
+.datarow .action-lifecycle { color: var(--accent-cyan-text); }
 
 /* Truncate a single long identifier instead of letting it wrap 3 lines;
    pair with a title="" attribute on the same element for a hover tooltip. */
@@ -1281,16 +1327,22 @@ code {
 /* One-line "nothing here" message — replaces ad hoc <p>/<span>/bare-text
    empty states so every table/list reads the same way when its data is
    empty. Render this INSTEAD OF the header+rows, not alongside them. */
-.empty-state {
+.empty-state,
+.card .empty-state {
   color: var(--text-tertiary);
-  font-size: 14px;
-  padding: 18px 4px;
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 12px 0;
+  margin: 0;
 }
 
 /* Severity pill covering the full status range (critical/high/medium/low/
    warning/info) — .blocked stays separate, it's a boolean flag, not a
    severity spectrum. */
 .severity-badge {
+  /* grid children stretch by default; keep the pill its natural width */
+  justify-self: start;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
@@ -1317,7 +1369,7 @@ code {
   border: 1px solid var(--warning-border);
 }
 .severity-badge.low {
-  color: var(--accent-cyan-hover);
+  color: var(--accent-cyan-text);
   background: rgba(50, 173, 230, 0.1);
   border: 1px solid rgba(50, 173, 230, 0.3);
 }
@@ -1527,6 +1579,13 @@ code {
   color: var(--text-primary);
 }
 .chips button {
+  white-space: normal;
+  max-width: 100%;
+  text-align: left;
+  line-height: 1.25;
+  height: auto;
+}
+.chips button[aria-label^="Remove"] {
   background: var(--danger-bg) !important;
   color: var(--danger) !important;
   border-color: var(--danger) !important;
@@ -1536,7 +1595,7 @@ code {
   line-height: 1.25;
   height: auto;
 }
-.chips button:hover {
+.chips button[aria-label^="Remove"]:hover {
   background: var(--danger-bg) !important;
   filter: brightness(0.97);
 }
@@ -1577,13 +1636,17 @@ code {
 }
 /* Same .proto-* class family Capture/Flows use for their .flowrow rows,
    scoped to .agent instead so Traffic.tsx's plain card rows can reuse it. */
-.agent .proto-tcp { color: var(--accent-green); }
-.agent .proto-udp { color: var(--accent-cyan); }
+.agent .proto-tcp { color: var(--accent-green-text); }
+.agent .proto-udp { color: var(--accent-cyan-text); }
 .agent .proto-icmp,
-.agent .proto-icmpv6 { color: var(--accent-amber); }
+.agent .proto-icmpv6 { color: var(--accent-amber-text); }
 .agent .proto-other { color: var(--text-tertiary); }
 .terminalbody .agent { color: var(--terminal-text); }
 .terminalbody .agent small { color: var(--terminal-text-dim); }
+/* The terminal panel is dark in both themes, so protocol tags there keep the
+   bright accents rather than the light-surface text-safe variants above. */
+.terminalbody .agent .proto-tcp { color: var(--accent-green); }
+.terminalbody .agent .proto-udp { color: var(--accent-cyan); }
 
 .risk {
   display: flex;
@@ -1730,7 +1793,7 @@ code {
   border-color: var(--border);
 }
 .insightrow code {
-  color: var(--accent-cyan);
+  color: var(--accent-cyan-text);
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -1874,6 +1937,11 @@ code {
     justify-content: flex-start;
     overflow-x: auto;
     min-width: 0;
+    scrollbar-width: none;
+    /* Six groups don't fit in ~200px; fade the right edge so the strip reads
+       as scrollable instead of as a two-item menu. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   }
   .navlinks button,
   .nav .navlinks > button {
@@ -1893,15 +1961,12 @@ code {
   .mega-panel.open { transform: translateY(0); }
   .mega-grid { grid-template-columns: 1fr; }
   .brand small { display: none; }
-  .hero { display: block; padding-top: 24px; }
   .tokenbox { display: block; margin-top: 20px; }
-  .grid { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
   .span2,
   .span3 { grid-column: auto; }
   .metrics { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .filters { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-  .hero p { font-size: 19px; }
-  .page-hero p { font-size: 19px; }
   /* Keep all columns readable: scroll horizontally instead of hiding. */
   .terminalbody {
     overflow-x: auto;
@@ -1951,13 +2016,13 @@ code {
    Reuses the app's existing .empty-state/.card/.toolbar/.warning patterns
    rather than redefining them, so these new pages match the rest of the
    app's look instead of introducing a second visual language. */
-.investigation { display: grid; gap: 22px; }
+.investigation { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 .investigation-filters { display: flex; flex-wrap: wrap; gap: 14px; padding: 22px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 18px; }
 .investigation-filters label { display: grid; gap: 7px; font-size: 12px; color: var(--text-secondary); flex: 1 1 145px; }
 .investigation-filters input, .investigation-filters select { width: 100%; min-width: 0; }
 .investigation-filters .toolbar { flex-basis: 100%; }
 .operations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.operations-grid h2 { font-size: 36px; text-transform: capitalize; }
+.operations-grid h2 { font-size: var(--fs-h2); text-transform: capitalize; }
 .operations-grid h2 small { font-size: 14px; font-weight: 400; }
 .investigation-table { overflow-x: auto; }
 .investigation-table table { border-collapse: collapse; width: 100%; font-size: 13px; }

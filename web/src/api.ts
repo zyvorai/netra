@@ -47,6 +47,21 @@ function headers(extra: Record<string, string> = {}) {
   return { ...extra };
 }
 
+/** The controller answers failures as {"error":"…"}; show the message, not the JSON envelope. */
+export function errorMessage(body: string): string {
+  const text = body.trim();
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text);
+      const msg = typeof parsed?.error === 'string' ? parsed.error : typeof parsed?.message === 'string' ? parsed.message : '';
+      if (msg) return msg;
+    } catch {
+      /* not JSON after all — fall through to the raw text */
+    }
+  }
+  return text;
+}
+
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const r = await fetch(path, { ...init, headers: headers((init.headers as Record<string, string>) || {}) });
   if (!r.ok) {
@@ -54,7 +69,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
       clearSession();
       window.dispatchEvent(new Event('netra-auth-expired'));
     }
-    throw new Error((await r.text()) || r.statusText);
+    throw new Error(errorMessage(await r.text()) || r.statusText);
   }
   return r.json();
 }

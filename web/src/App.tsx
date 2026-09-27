@@ -257,7 +257,7 @@ export default function App() {
   }
 
   const body = {
-    overview: <Overview />,
+    overview: <Overview onNavigate={goPage} />,
     connections: <Connections />,
     workloads: <ObservedWorkloads />,
     explain: <Explain />,
@@ -308,20 +308,7 @@ export default function App() {
             the same component type at the same tree position across page
             switches, would just update props with no visible transition. */}
         <div key={page}>
-          {page === 'overview' ? (
-            <header className="hero">
-              <div>
-                <p className="eyebrow">STANDALONE eBPF DATAPATH</p>
-                <h1>See the network. Diagnose it. Contain it.</h1>
-                <p>
-                  Netra runs its own eBPF datapath for workload flows, TCP health, DNS timing, socket identity, and leased
-                  emergency controls.
-                </p>
-              </div>
-            </header>
-          ) : (
-            hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} tint={hero.tint} />
-          )}
+          {hero && <PageHero eyebrow={hero.eyebrow} title={hero.title} lede={hero.lede} tint={hero.tint} />}
           {body}
         </div>
       </main>

@@ -47,6 +47,20 @@ type AIStatus = {
   mutations: string;
 };
 
+/**
+ * One readable line for the AI status strip. The server's `mutations` text is a
+ * whole clause ("never — AI endpoints are read-only"), so it gets a label instead
+ * of being glued on after a bare "·". Missing fields are omitted rather than
+ * printed as "undefined".
+ */
+export function aiStatusLine(status: AIStatus): string {
+  const engine = status.heuristicOnly
+    ? 'Heuristic engine only'
+    : ['Optional rewrite on', status.model || status.provider].filter(Boolean).join(' · ');
+  const mutations = status.mutations?.trim();
+  return mutations ? `${engine} · Mutations: ${mutations}` : engine;
+}
+
 export const ASK_SUGGESTIONS = [
   'What looks unhealthy?',
   'Why are packets being dropped?',
@@ -165,7 +179,7 @@ export default function AskNetra() {
   return (
     <section className="card span3 ask-netra">
       <p className="eyebrow">ASK NETRA</p>
-      <h3>Read-only brief from live aggregates.</h3>
+      <h2 className="card-title">Read-only brief from live aggregates.</h2>
       <p>
         Answers come from agent, health, and insights counters Netra already computed.
         The question runs a read-only graph (classify → optional draft preview → synthesize).
@@ -217,11 +231,7 @@ export default function AskNetra() {
         ))}
       </div>
       {status && (
-        <p className="ask-netra-meta">
-          {status.heuristicOnly ? 'Heuristic engine only.' : `Optional rewrite on · ${status.model || status.provider}`}
-          {' · '}
-          {status.mutations}
-        </p>
+        <p className="ask-netra-meta">{aiStatusLine(status)}</p>
       )}
       {err && <p className="warning">{err}</p>}
       {shown.map((ex, i) => {

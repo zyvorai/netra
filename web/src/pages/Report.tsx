@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone, scoreTone } from '../components/kit/tone';
 
 type Snapshot = {
   generatedAt: string;
@@ -70,11 +72,26 @@ export default function Report() {
     return () => clearInterval(t);
   }, []);
 
+  const findings = snap ? snap.driftFindings + snap.rateDriftFindings + snap.highExposure : 0;
   return (
     <div className="grid">
+      <PagePulse
+        headline={snap?.headline}
+        tone={snap ? scoreTone(snap.healthScore) : undefined}
+        tick={snap}
+        error={msg || undefined}
+        figures={[
+          { label: 'health /100', value: snap?.healthScore, tone: snap ? scoreTone(snap.healthScore) : undefined },
+          { label: 'packets', value: snap?.packets },
+          { label: 'blocked', value: snap?.blocked },
+          { label: 'drift + exposure', value: snap ? findings : undefined, tone: snap ? countTone(findings) : undefined },
+          { label: 'incident clusters', value: snap?.incidentClusters, tone: snap ? countTone(snap.incidentClusters) : undefined },
+          { label: 'playbook steps', value: book?.count },
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">OPERATOR REPORT</p>
-        <h3>{snap?.headline || 'Point-in-time briefing'}</h3>
+        <h2 className="card-title">{snap?.headline || 'Point-in-time briefing'}</h2>
         <p>Observe-only. This page never applies policy or extends an enforce lease.</p>
         {msg && <p className="warning">{msg}</p>}
         {snap && (
@@ -104,7 +121,7 @@ export default function Report() {
 
       <section className="card span3">
         <p className="eyebrow">PLAYBOOK</p>
-        <h3>Review-only next steps</h3>
+        <h2 className="card-title">Review-only next steps</h2>
         <p>Auto-apply is always off. Copy a command only after you agree with the rationale.</p>
         {!book?.steps?.length && <p className="empty-state">No playbook steps yet.</p>}
         <div className="list">
@@ -121,7 +138,7 @@ export default function Report() {
 
       <section className="card span3">
         <p className="eyebrow">ATTENTION</p>
-        <h3>What the briefing called out</h3>
+        <h2 className="card-title">What the briefing called out</h2>
         {!(snap?.attention || []).length && <p className="empty-state">No attention items.</p>}
         <div className="list">
           {(snap?.attention || []).map((a, i) => (
@@ -134,9 +151,9 @@ export default function Report() {
 
       <section className="card span3">
         <p className="eyebrow">PREVENTION</p>
-        <h3>
+        <h2 className="card-title">
           {prevention?.coverageScore != null ? `Coverage ${prevention.coverageScore}` : 'Prevention report'}
-        </h3>
+        </h2>
         <p>{prevention?.note || 'Observe-only prevention rollup (TLSFP, intel, detectors, lease posture).'}</p>
         <div className="list">
           {prevention?.tlsFingerprints != null && (
@@ -173,7 +190,7 @@ export default function Report() {
 
       <section className="card span3">
         <p className="eyebrow">AUDIT ROLLUP</p>
-        <h3>{sum?.total ?? 0} events</h3>
+        <h2 className="card-title">{sum?.total ?? 0} events</h2>
         <div className="list">
           {(sum?.byActor || []).slice(0, 8).map((r) => (
             <div className="agent wide" key={r.key}>

@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
+import PagePulse from '../components/kit/PagePulse';
+import Section from '../components/kit/Section';
+import { ToneDot, type Tone } from '../components/kit/tone';
+import { ListEmpty } from '../components/Toolbar';
+import { SearchX } from 'lucide-react';
 import {
   buildExplainReport,
   emptyExplainScope,
@@ -9,6 +14,8 @@ import {
   type ExplainReport,
   type ExplainScope,
 } from '../lib/explain';
+
+const KIND_TONE: Record<string, Tone> = { 'observed-block': 'bad', 'tcp-loss-signal': 'warn' };
 
 const KIND_LABEL: Record<string, string> = {
   'observed-block': 'Observed block',
@@ -49,13 +56,12 @@ export default function Explain() {
 
   return (
     <div className="grid">
-      <section className="card span3">
-        <p className="eyebrow">EXPLAIN A CONNECTION</p>
-        <h3>Scope this check</h3>
-        <p>
-          Passive, read-only evidence from the same agent reports the controller already holds — no active probes, DNS
-          lookups, or policy changes. Provide a selector, or explicitly check "examine every node."
-        </p>
+      <Section
+        reveal={false}
+        eyebrow="Explain a connection"
+        title="Scope this check"
+        lede={'Passive, read-only evidence from the same agent reports the controller already holds — no active probes, DNS lookups, or policy changes. Provide a selector, or explicitly check "examine every node."'}
+      >
         <div className="ruleform">
           <input aria-label="Namespace" value={form.namespace} onChange={(e) => set('namespace', e.target.value)} placeholder="namespace" />
           <input aria-label="Pod" value={form.pod} onChange={(e) => set('pod', e.target.value)} placeholder="pod, or namespace/pod" />
@@ -92,29 +98,43 @@ export default function Explain() {
           </button>
         </div>
         {error && <p className="warning">{error}</p>}
-      </section>
+      </Section>
 
       {report && (
-        <section className="card span3">
-          <p className="eyebrow">RESULT</p>
-          <h3>{report.status === 'evidence-found' ? 'Evidence found' : 'No matching evidence'}</h3>
-          <p>
-            Agents considered: <b>{report.agentsConsidered}</b> · excluded: <b>{report.agentsExcluded}</b> · findings:{' '}
-            <b>{report.findingsTotal}</b> (showing {report.findings.length})
-          </p>
+        <PagePulse
+          live={false}
+          headline={report.status === 'evidence-found' ? 'Evidence found' : 'No matching evidence'}
+          tone={report.findings.some((f) => f.kind === 'observed-block') ? 'bad' : undefined}
+          figures={[
+            { label: 'agents considered', value: report.agentsConsidered },
+            { label: 'agents excluded', value: report.agentsExcluded, tone: report.agentsExcluded ? 'warn' : undefined },
+            { label: 'findings', value: report.findingsTotal },
+            { label: 'showing', value: report.findings.length },
+          ]}
+        />
+      )}
+
+      {report && (
+        <Section
+          eyebrow="Result"
+          title={`${report.findingsTotal} finding${report.findingsTotal === 1 ? '' : 's'}`}
+          about={report.limitations.map((l) => <p key={l}>{l}</p>)}
+        >
           {report.truncated && <p className="warning">Output truncated; narrow the scope or increase the limit.</p>}
           {report.findingsTotal === 0 && (
-            <p className="empty-state">
-              No matching evidence. Check selectors, agent freshness, hook coverage, and whether the application attempted a
-              connection.
-            </p>
+            <ListEmpty
+              compact
+              icon={SearchX}
+              title="No matching evidence."
+              description="Check selectors, agent freshness, hook coverage, and whether the application attempted a connection."
+            />
           )}
           {report.findings.length > 0 && (
             <div className="recommendations">
               {report.findings.map((f, i) => (
                 <details key={`${f.kind}-${f.node}-${i}`} className="recommendation">
                   <summary>
-                    <b>{KIND_LABEL[f.kind] || f.kind}</b>
+                    <b><ToneDot tone={KIND_TONE[f.kind] || 'ok'} />{KIND_LABEL[f.kind] || f.kind}</b>
                     <span>
                       {f.node} · {f.namespace || '—'}/{f.pod || '—'}
                     </span>
@@ -131,13 +151,7 @@ export default function Explain() {
               ))}
             </div>
           )}
-          <p className="eyebrow" style={{ marginTop: 20 }}>
-            LIMITATIONS
-          </p>
-          {report.limitations.map((l) => (
-            <p key={l}>{l}</p>
-          ))}
-        </section>
+        </Section>
       )}
     </div>
   );

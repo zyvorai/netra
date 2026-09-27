@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 
 const CATEGORY_LABELS: Record<string, string> = {
   security: 'Security',
@@ -38,45 +40,29 @@ export default function SysctlAudit() {
           <p className="warning">{err}</p>
         </section>
       )}
-      <section className="card span3">
-        <p className="eyebrow">SYSCTL AUDIT</p>
-        <h3>Cluster hardening pulse</h3>
-        <div className="metrics">
-          <div>
-            <b>{s.nodes || 0}</b>
-            <span>fresh nodes</span>
-          </div>
-          <div>
-            <b>{s.findings || 0}</b>
-            <span>findings</span>
-          </div>
-          <div>
-            <b>{s.critical || 0}</b>
-            <span>critical</span>
-          </div>
-          <div>
-            <b>{s.warnings || 0}</b>
-            <span>warnings</span>
-          </div>
-          <div>
-            <b>{s.informational || 0}</b>
-            <span>informational</span>
-          </div>
-          <div>
-            <b>{s.outliers || 0}</b>
-            <span>outliers</span>
-          </div>
-        </div>
-        <p>
-          A flat, baseline-checked inventory of network hardening and tuning sysctls — separate from Congestion Map's evidence-correlated
-          findings. Most sysctls outside core hardening/TCP-lifecycle have no universal "correct" value and are reported informationally,
-          never forced into a false pass/fail. Netra never writes sysctls.
-        </p>
-      </section>
+      <PagePulse
+        headline={data ? ((s.critical || 0) ? `${s.critical} critical hardening finding${s.critical === 1 ? '' : 's'}.` : (s.warnings || 0) ? `${s.warnings} sysctl warning${s.warnings === 1 ? '' : 's'}, nothing critical.` : 'Hardening baseline holds on every node.') : undefined}
+        tone={data ? ((s.critical || 0) ? 'bad' : (s.warnings || 0) ? 'warn' : 'ok') : undefined}
+        tick={data}
+        error={err || undefined}
+        figures={[
+          { label: 'fresh nodes', value: data ? (s.nodes || 0) : undefined },
+          { label: 'critical', value: data ? (s.critical || 0) : undefined, tone: data ? ((s.critical || 0) ? 'bad' : 'ok') : undefined },
+          { label: 'warnings', value: data ? (s.warnings || 0) : undefined, tone: data ? countTone(s.warnings || 0) : undefined },
+          { label: 'informational', value: data ? (s.informational || 0) : undefined },
+          { label: 'outliers', value: data ? (s.outliers || 0) : undefined, tone: data ? countTone(s.outliers || 0) : undefined },
+          { label: 'findings', value: data ? (s.findings || 0) : undefined },
+        ]}
+      />
+      <p className="kit-caption span3">
+        A flat, baseline-checked inventory of network hardening and tuning sysctls — separate from Congestion Map's evidence-correlated
+        findings. Most sysctls outside core hardening/TCP-lifecycle have no universal "correct" value and are reported informationally,
+        never forced into a false pass/fail. Netra never writes sysctls.
+      </p>
 
       <section className="card span3">
         <p className="eyebrow">OUTLIERS</p>
-        <h3>Where nodes disagree</h3>
+        <h2 className="card-title">Where nodes disagree</h2>
         <div className="list">
           {!outliers.length && <p className="empty-state">No nodes disagree with the cluster baseline right now.</p>}
           {outliers.map((o: any, i: number) => (

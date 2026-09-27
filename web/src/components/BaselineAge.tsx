@@ -23,7 +23,7 @@ export default function BaselineAge() {
   return (
     <section className="card span3">
       <p className="eyebrow">BASELINE AGE</p>
-      <h3>Whether baselines exist and how old they are</h3>
+      <h2 className="card-title">Whether baselines exist and how old they are</h2>
       {b?.note && <p>{b.note}</p>}
       <div className="list">
         <div className="agent wide">

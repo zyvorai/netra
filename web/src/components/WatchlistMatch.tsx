@@ -26,9 +26,10 @@ export default function WatchlistMatch() {
   return (
     <section className="card span3">
       <p className="eyebrow">WATCHLIST MATCH</p>
-      <h3>Check a list against current traffic</h3>
+      <h2 className="card-title">Check a list against current traffic</h2>
       <p>Paste IPs, CIDRs, DNS names, or SNI hosts (JSON, CSV, or one per line) and check them against current agent state. Observe-only — this applies nothing.</p>
       <textarea
+        aria-label="Watchlist entries"
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={'1.2.3.4\n10.0.0.0/8\nexample.com'}

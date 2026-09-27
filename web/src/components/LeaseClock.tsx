@@ -16,7 +16,7 @@ export default function LeaseClock() {
   return (
     <section className="card span3">
       <p className="eyebrow">LEASE CLOCK</p>
-      <h3>{l?.active ? `Enforce lease: ${dur(l.remainingSeconds || 0)} remaining` : l?.expired ? 'Enforce lease expired' : 'No enforce lease'}</h3>
+      <h2 className="card-title">{l?.active ? `Enforce lease: ${dur(l.remainingSeconds || 0)} remaining` : l?.expired ? 'Enforce lease expired' : 'No enforce lease'}</h2>
       <p>{l?.note || 'Observe-only. All custom enforcement auto-reverts to observe when its lease expires.'}</p>
       <div className="list">
         <div className="agent wide"><b>Mode</b><span>{l?.mode || 'observe'}</span><small>{l?.scopeMode || 'scope n/a'}</small></div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import PagePulse from '../components/kit/PagePulse';
 
 type Board = {
   id: string;
@@ -136,9 +137,21 @@ export default function Surfaces() {
 
   return (
     <div className="grid">
+      <PagePulse
+        headline={active ? `${active.label}: ${list.length} row${list.length === 1 ? '' : 's'}.` : undefined}
+        tick={data}
+        error={err || undefined}
+        figures={[
+          { label: 'boards', value: BOARDS.length },
+          { label: 'rows on this board', value: data ? list.length : undefined },
+          ...(data?.uniqueJa3 != null ? [{ label: 'unique JA3', value: data.uniqueJa3 as number }] : []),
+          ...(data?.rare != null ? [{ label: 'rare', value: data.rare as number, tone: data.rare ? ('warn' as const) : undefined }] : []),
+          ...(data?.echSightings != null ? [{ label: 'ECH sightings', value: data.echSightings as number }] : []),
+        ]}
+      />
       <section className="card span3">
         <p className="eyebrow">OBSERVE-ONLY SURFACES</p>
-        <h3>P1–P5 metadata boards</h3>
+        <h2 className="card-title">P1–P5 metadata boards</h2>
         <p>Encrypted traffic, fit maps, threat heuristics, and fleet rollups — review-only, no decrypt, no payload export.</p>
         <div className="chips" role="tablist" aria-label="Surface groups">
           {GROUPS.map((g) => (
@@ -158,10 +171,10 @@ export default function Surfaces() {
 
       <section className="card span3">
         <p className="eyebrow">{active?.group?.toUpperCase()}</p>
-        <h3>
+        <h2 className="card-title">
           {active?.label}
           {statsBits.length > 0 && <small> · {statsBits.join(' · ')}</small>}
-        </h3>
+        </h2>
         {note && <p>{note}</p>}
         {loading && <p className="empty-state">Loading…</p>}
         {err && <p className="warning">{err}</p>}

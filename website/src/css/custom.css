@@ -29,6 +29,20 @@
   --ifm-heading-font-weight: 600;
   --ifm-line-height-base: 1.65;
 
+  /* Same values as the dashboard's tokens (web/src/styles.css, contract in
+     docs/design/APPLE-UX-CONTRACT.md) so the site and the app never drift:
+     white page, #1d1d1f / #6e6e73 text, #0066cc link. */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-font-color-base: #1d1d1f;
+  --ifm-font-color-secondary: #6e6e73;
+  --ifm-link-color: #0066cc;
+  --ifm-link-hover-color: #0071e3;
+  --ifm-toc-border-color: rgba(0, 0, 0, 0.1);
+  --ifm-color-emphasis-300: rgba(0, 0, 0, 0.1);
+  /* Docusaurus's default footer is blue-grey (#303846); use the contract's graphite. */
+  --ifm-footer-background-color: #1d1d1f;
+
   /* Generous, Apple-esque section rhythm — used by hero/section wrappers
      in src/pages, not by Infima directly. */
   --zv-section-space: clamp(4rem, 9vw, 9rem);
@@ -44,6 +58,14 @@
   --ifm-color-primary-light: #3399ff;
   --ifm-color-primary-lighter: #52a6ff;
   --ifm-color-primary-lightest: #85c0ff;
+  --ifm-background-color: #000000;
+  --ifm-background-surface-color: #1d1d1f;
+  --ifm-font-color-base: #f5f5f7;
+  --ifm-font-color-secondary: #a1a1a6;
+  --ifm-link-color: #2997ff;
+  --ifm-link-hover-color: #0a84ff;
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.12);
+  --ifm-color-emphasis-300: rgba(255, 255, 255, 0.12);
   --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.1);
 }
 

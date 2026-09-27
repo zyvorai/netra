@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 import Reveal from '../components/Reveal';
 import BaselineAge from '../components/BaselineAge';
 
@@ -97,61 +99,71 @@ export default function Insights() {
     } catch (e) { setBlastResult(null); setBlastMsg(String(e)); }
   }
 
+  const driftN = summary?.driftFindings ?? 0;
+  const rateN = summary?.rateDriftFindings ?? 0;
+  const expN = summary?.highExposure ?? 0;
   return <div className="grid">
-    <section className="card span3">
+    <PagePulse
+      headline={summary ? (driftN + rateN ? `${driftN + rateN} behavior change${driftN + rateN === 1 ? '' : 's'} to review.` : expN ? `${expN} workload${expN === 1 ? '' : 's'} highly exposed.` : 'Behavior matches the learned baseline.') : undefined}
+      tone={summary && (driftN + rateN || expN) ? 'warn' : undefined}
+      tick={summary}
+      error={msg && /error/i.test(msg) ? msg : undefined}
+      figures={[
+        { label: 'dependency edges', value: summary ? (summary.dependencyEdges ?? 0) : undefined },
+        { label: 'behavior drift', value: summary ? driftN : undefined, tone: summary ? countTone(driftN) : undefined },
+        { label: 'rate anomalies', value: summary ? rateN : undefined, tone: summary ? countTone(rateN) : undefined },
+        { label: 'high exposure', value: summary ? expN : undefined, tone: summary ? countTone(expN) : undefined },
+        { label: 'recommendations', value: summary ? recommendations.length : undefined },
+      ]}
+    />
+    <section className="card">
       <p className="eyebrow">CONTROLS</p>
-      <h3>Rate window and baselines</h3>
+      <h2 className="card-title">Rate window and baselines</h2>
       <div className="toolbar"><label>Rate window <select value={window} onChange={e => setWindow(e.target.value)}><option>1m</option><option>5m</option><option>15m</option><option>30m</option><option>1h</option></select></label><button className="btn-refresh" onClick={refresh}>Refresh</button></div>
       {msg && <p className="warning">{msg}</p>}
       {summary?.rateWarming && <p className="warning">Rate engine is warming up. At least two fresh agent reports are required before rate drift is evaluated.</p>}
-      <div className="metrics">
-        <div><b>{summary?.dependencyEdges ?? '—'}</b><span>dependency edges</span></div>
-        <div><b>{summary?.driftFindings ?? '—'}</b><span>behavior drift</span></div>
-        <div><b>{summary?.rateDriftFindings ?? '—'}</b><span>rate anomalies</span></div>
-        <div><b>{summary?.highExposure ?? '—'}</b><span>high exposure</span></div>
-      </div>
     </section>
 
     <section className="card">
-      <p className="eyebrow">KNOWN GOOD</p><h3>Behavior inventory</h3>
+      <p className="eyebrow">KNOWN GOOD</p><h2 className="card-title">Behavior inventory</h2>
       <p>{baseline?.captured ? `Captured ${new Date(baseline.baseline?.capturedAt).toLocaleString()} · ${baseline.baseline?.entries?.length ?? 0} entries` : 'No behavior baseline captured.'}</p>
       <div className="toolbar"><button className="primary" onClick={captureBehavior}>{baseline?.captured ? 'Recapture' : 'Capture'}</button><button className="btn-secondary" onClick={clearBehavior} disabled={!baseline?.captured}>Clear</button></div>
     </section>
 
     <section className="card">
-      <p className="eyebrow">TRAFFIC RATE</p><h3>Window baseline</h3>
+      <p className="eyebrow">TRAFFIC RATE</p><h2 className="card-title">Window baseline</h2>
       <p>{rateBaseline?.captured ? `Captured ${new Date(rateBaseline.baseline?.capturedAt).toLocaleString()} · ${rateBaseline.baseline?.entries?.length ?? 0} metric rates` : 'No traffic-rate baseline captured.'}</p>
       <div className="toolbar"><button className="primary" onClick={captureRate} disabled={Boolean(rateDrift?.window?.warming)}>{rateBaseline?.captured ? 'Recapture' : 'Capture'}</button><button className="btn-secondary" onClick={clearRate} disabled={!rateBaseline?.captured}>Clear</button></div>
     </section>
 
     <section className="card span2">
-      <p className="eyebrow">RATE WINDOW</p><h3>Current deltas</h3>
+      <p className="eyebrow">RATE WINDOW</p><h2 className="card-title">Current deltas</h2>
       {rates?.warming && <p className="warning">Warming up — waiting for consecutive agent reports.</p>}
       <div className="list">{(rates?.metrics || []).slice(0, 12).map((m:any, i:number) => { const src = m.source || m.workload || '—'; return <div className="insightrow" key={`${m.source}-${m.metric}-${i}`}><b>{m.metric || m.name || 'rate'}</b><span className="truncate" title={src} aria-label={src}>{src}</span><small>{Number(m.rate ?? m.value ?? 0).toFixed(2)}/s</small></div>; })}</div>
       {!rates?.warming && !(rates?.metrics || []).length && <p className="empty-state">No rate samples in this window yet.</p>}
     </section>
 
     <section className="card">
-      <p className="eyebrow">EXPOSURE</p><h3>Highest-ranked workloads</h3>
+      <p className="eyebrow">EXPOSURE</p><h2 className="card-title">Highest-ranked workloads</h2>
       {(exposure || []).slice(0, 8).map(x => <div className={`insightrow ${x.severity}`} key={x.source}><b>{x.score}/100 · {x.severity}</b><span className="truncate" title={x.source} aria-label={x.source}>{x.source}</span><small>{(x.reasons || []).join(' · ')}</small><ExplainFinding page="insights" kind="exposure" subject={x.source} message={(x.reasons || []).join(' · ')} severity={x.severity} /></div>)}
       {!exposure.length && <p className="empty-state">No exposure signals yet.</p>}
     </section>
 
     <section className="card span2">
-      <p className="eyebrow">RATE DRIFT</p><h3>Time-window anomalies</h3>
+      <p className="eyebrow">RATE DRIFT</p><h2 className="card-title">Time-window anomalies</h2>
       {!rateDrift?.baselineCapturedAt && <p>Capture a rate baseline after warm-up to compare current traffic rates.</p>}
       {(rateDrift?.findings || []).slice(0, 30).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.metric}-${i}`}><b>{f.metric}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.ratio ? `${f.ratio.toFixed(1)}×` : 'new'}</code><small>{(f.currentRate ?? 0).toFixed(2)}/s current · {(f.baselineRate ?? 0).toFixed(2)}/s baseline</small><ExplainFinding page="insights" kind={`rate-drift:${f.metric}`} subject={f.source} message={f.message || `${f.metric} rate drift`} severity={f.severity} /></div>)}
       {rateDrift?.baselineCapturedAt && !(rateDrift.findings || []).length && !rateDrift.window?.warming && <p className="empty-state">No rate changes crossed the deterministic thresholds.</p>}
     </section>
 
     <section className="card">
-      <p className="eyebrow">BEHAVIOR DRIFT</p><h3>New inventory</h3>
+      <p className="eyebrow">BEHAVIOR DRIFT</p><h2 className="card-title">New inventory</h2>
       {(drift?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${f.value}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code><ExplainFinding page="insights" kind={f.kind} subject={f.source} message={f.message || f.value} severity={f.severity} /></div>)}
       {drift?.baselineCapturedAt && !(drift.findings || []).length && <p className="empty-state">No new behavior crossed noise thresholds.</p>}
     </section>
 
     <section className="card">
-      <p className="eyebrow">NEW SINCE START</p><h3>First-egress-after-start correlation</h3>
+      <p className="eyebrow">NEW SINCE START</p><h2 className="card-title">First-egress-after-start correlation</h2>
       <p><small>{newSinceStart?.limitation || 'Baseline-relative correlation only — not a precise "N ms after first packet" claim.'}</small></p>
       {newSinceStartMsg && <p className="warning">{newSinceStartMsg}</p>}
       {!newSinceStartMsg && (newSinceStart?.findings || []).slice(0, 20).map((f, i) => <div className={`insightrow ${f.severity}`} key={`${f.source}-${f.kind}-${i}`}><b>{f.kind}</b><span className="truncate" title={f.source} aria-label={f.source}>{f.source}</span><code>{f.value}</code><ExplainFinding page="insights" kind={`new-since-start:${f.kind}`} subject={f.source} message={f.message || f.value} severity={f.severity} /></div>)}
@@ -159,7 +171,7 @@ export default function Insights() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">DEPENDENCY GRAPH</p><h3>Workload → workload/service/external</h3>
+      <p className="eyebrow">DEPENDENCY GRAPH</p><h2 className="card-title">Workload → workload/service/external</h2>
       {(graph?.edges || []).length === 0 && <p className="empty-state">No dependency edges observed yet.</p>}
       {(graph?.edges || []).length > 0 && <div className="datatable-scroll">
         <div className="datahead deps"><span>SOURCE</span><span>TARGET</span><span>NETWORK</span><span>PACKETS / BYTES</span></div>
@@ -168,7 +180,7 @@ export default function Insights() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">BLAST RADIUS</p><h3>Multi-hop observed-traffic reachability from one node</h3>
+      <p className="eyebrow">BLAST RADIUS</p><h2 className="card-title">Multi-hop observed-traffic reachability from one node</h2>
       <p>Traces packets Netra has actually seen leaving the chosen node, hop by hop — not a policy allow/deny determination. A node showing no further hops here may still be permitted to reach destinations Netra simply hasn't observed traffic for.</p>
       <div className="toolbar">
         <label>Root <select value={blastRoot} onChange={e => setBlastRoot(e.target.value)}>
@@ -196,13 +208,13 @@ export default function Insights() {
     </section>
 
     <section className="card span3">
-      <p className="eyebrow">REMEDIATION PROPOSALS</p><h3>Review-only containment and investigation drafts</h3>
+      <p className="eyebrow">REMEDIATION PROPOSALS</p><h2 className="card-title">Review-only containment and investigation drafts</h2>
       <p>Netra does not auto-execute these. A proposal is evidence plus a suggested next action, not authorization to block traffic.</p>
       <div className="recommendations">{remediations.map(r => <details key={r.id} className="recommendation"><summary><b>{r.title}</b><span>{r.severity} · {r.source}</span></summary>{r.rationale.map(x => <p key={x}>• {x}</p>)}<pre>{JSON.stringify(r.action, null, 2)}</pre></details>)}{!remediations.length && <p className="empty-state">No remediation draft currently meets the thresholds.</p>}</div>
     </section>
 
     <Reveal className="card span3">
-      <p className="eyebrow">POLICY RECOMMENDATIONS</p><h3>Observed-traffic CiliumNetworkPolicy drafts</h3>
+      <p className="eyebrow">POLICY RECOMMENDATIONS</p><h2 className="card-title">Observed-traffic CiliumNetworkPolicy drafts</h2>
       {!ciliumEnabled && <p className="warning">Cilium integration is disabled. Drafts remain export/review only.</p>}
       <div className="recommendations">{recommendations.map(r => {
         const review = reviews[r.id];

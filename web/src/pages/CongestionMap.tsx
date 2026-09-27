@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
 import Sparkline from '../components/Sparkline';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
 import { navigate } from '../hooks/useInvestigation';
 
 type KernelFinding = {
@@ -386,8 +388,23 @@ export default function CongestionMap() {
       .map((w) => stageRateForWindow(w, selectedStage.key)?.perSecond ?? 0);
   }, [sparkline, selectedStage]);
 
+  const ks = kernel?.summary || {};
+  const hot = [...summaries.values()].filter((x: any) => x.severity === 'critical' || x.severity === 'warning').length;
   return (
     <div className="grid">
+      <PagePulse
+        headline={kernel ? ((ks.critical || 0) ? `${ks.critical} critical pressure point${ks.critical === 1 ? '' : 's'} in the stack.` : (ks.warnings || 0) ? `${ks.warnings} stack warning${ks.warnings === 1 ? '' : 's'}, nothing critical.` : 'No layer of the stack is under pressure.') : undefined}
+        tone={kernel ? ((ks.critical || 0) ? 'bad' : (ks.warnings || 0) ? 'warn' : 'ok') : undefined}
+        tick={kernel}
+        error={err || undefined}
+        figures={[
+          { label: 'fresh nodes', value: kernel ? (ks.nodes || 0) : undefined },
+          { label: 'critical', value: kernel ? (ks.critical || 0) : undefined, tone: kernel ? ((ks.critical || 0) ? 'bad' : 'ok') : undefined },
+          { label: 'warnings', value: kernel ? (ks.warnings || 0) : undefined, tone: kernel ? countTone(ks.warnings || 0) : undefined },
+          { label: 'stages under pressure', value: kernel ? hot : undefined, tone: kernel ? countTone(hot) : undefined },
+          { label: 'warming nodes', value: kernel ? (ks.warming || 0) : undefined },
+        ]}
+      />
       {err && (
         <section className="card span3">
           <p className="warning">{err}</p>
@@ -396,16 +413,16 @@ export default function CongestionMap() {
       {brief && (
         <section className="card span3">
           <p className="eyebrow">IN PLAIN ENGLISH</p>
-          <h3>
+          <h2 className="card-title">
             <span className={`severity-badge ${brief.severity === 'info' ? 'info' : brief.severity}`}>{brief.severity}</span>{' '}
             {brief.headline}
-          </h3>
+          </h2>
           <p>{brief.summary}</p>
         </section>
       )}
       <section className="card span3">
         <p className="eyebrow">CONGESTION MAP</p>
-        <h3>Where the stack is under pressure</h3>
+        <h2 className="card-title">Where the stack is under pressure</h2>
         <p>
           Every layer of the Linux network stack a packet can pass through, colored by the worst finding across the
           cluster right now. Ingress (receive) and egress (send) are genuinely different paths through the kernel —
@@ -502,7 +519,7 @@ export default function CongestionMap() {
       {selectedStage && selectedSummary && (
         <section className="card span3">
           <p className="eyebrow">STAGE DETAIL</p>
-          <h3>{selectedStage.title}</h3>
+          <h2 className="card-title">{selectedStage.title}</h2>
           {sparklineValues.length >= 2 && worstNode && (
             <p className="sparkline-row">
               <Sparkline values={sparklineValues} />

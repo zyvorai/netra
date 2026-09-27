@@ -3,6 +3,10 @@ import { api, wsURL } from '../api';
 import CaptureHistory from '../components/CaptureHistory';
 import TerminalFrame from '../components/TerminalFrame';
 import Sparkline from '../components/Sparkline';
+import PagePulse from '../components/kit/PagePulse';
+import { bytesRate } from '../components/kit/format';
+import { ListEmpty } from '../components/Toolbar';
+import { Radio, Waves } from 'lucide-react';
 import { useRoute } from '../hooks/useInvestigation';
 import { decodeDetailed, decodeL3L4, hexDump, layerClass } from '../lib/packetDecode';
 import { buildIPIndex, labelForIP } from '../lib/workloadAttribution';
@@ -334,6 +338,18 @@ export default function Capture() {
 
   return (
     <div className="grid">
+      <PagePulse
+        headline={active.length ? `Capturing on ${active.length} node${active.length === 1 ? '' : 's'}${watching ? ` · watching ${watching}` : ''}.` : 'No capture running.'}
+        tone={active.length ? 'warn' : undefined}
+        tick={status}
+        error={err || undefined}
+        figures={[
+          { label: 'active sessions', value: status ? active.length : undefined, tone: active.length ? 'warn' : undefined },
+          { label: 'packets streamed', value: rows.length },
+          { label: 'packets / s', value: rates.packetsPerSec.length ? rates.packetsPerSec[rates.packetsPerSec.length - 1] : live ? 0 : undefined, series: rates.packetsPerSec },
+          { label: 'throughput', value: rates.bytesPerSec.length ? rates.bytesPerSec[rates.bytesPerSec.length - 1] : live ? 0 : undefined, format: bytesRate, series: rates.bytesPerSec },
+        ]}
+      />
       {err && <section className="card span3"><p className="warning">{err}</p></section>}
       {active.length > 0 && (
         <section className="card span3">
@@ -344,7 +360,7 @@ export default function Capture() {
       {visibleAlerts.length > 0 && (
         <section className="card span3">
           <p className="eyebrow">SUGGESTED CAPTURE</p>
-          <h3>Live critical finding{visibleAlerts.length === 1 ? '' : 's'} on the Congestion Map</h3>
+          <h2 className="card-title">Live critical finding{visibleAlerts.length === 1 ? '' : 's'} on the Congestion Map</h2>
           <div className="list">
             {visibleAlerts.map((a) => (
               <div className="agent wide" key={`${a.node}:${a.signal}`}>
@@ -363,7 +379,7 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">PACKET CAPTURE</p>
-        <h3>Start a capture</h3>
+        <h2 className="card-title">Start a capture</h2>
         <p>
           Full packet bytes by default, filtered and time-bounded (max 5 minutes).{' '}
           {backend === 'afpacket'
@@ -429,9 +445,9 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">ACTIVE SESSIONS</p>
-        <h3>{active.length} active</h3>
+        <h2 className="card-title">{active.length} active</h2>
         <div className="list">
-          {active.length === 0 && <p className="empty-state">No capture sessions running.</p>}
+          {active.length === 0 && <ListEmpty compact icon={Radio} title="No capture sessions running." description="Pick a node and filters above, then start a time-bounded capture." />}
           {active.map((c) => (
             <div className="agent wide" key={c.node}>
               <b>{c.node}</b>
@@ -448,7 +464,7 @@ export default function Capture() {
 
       <section className="card span3">
         <p className="eyebrow">LIVE VIEW</p>
-        <h3>{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h3>
+        <h2 className="card-title">{live ? 'Connected' : 'Not connected'}{watching ? ` · ${watching}` : ''} · {filteredIdx.length} of {rows.length} packets shown (last {MAX_LIVE_ROWS})</h2>
         <p>Click Watch on an active session, or start one above, to stream packets here as they're captured. Endpoints matching a known pod or VM IP are labeled automatically — process/PID attribution isn't available (would need a kernel-side capture change, not client-side).</p>
         {active.length > 1 && (
           <div className="toolbar">
@@ -484,7 +500,7 @@ export default function Capture() {
           <button className="btn-secondary" disabled={filteredIdx.length === 0} onClick={exportJSON}>Export JSON</button>
           <button className="btn-secondary" disabled={filteredIdx.length === 0} onClick={exportCSV}>Export CSV</button>
         </div>
-        {rows.length === 0 && <p className="empty-state">No packets yet.</p>}
+        {rows.length === 0 && <ListEmpty compact icon={Waves} title="No packets yet." description="Click Watch on an active session to stream its packets here." />}
         {rows.length > 0 && filteredIdx.length === 0 && <p className="empty-state">No packets match this filter.</p>}
         {rows.length > 0 && filteredIdx.length > 0 && (
           <TerminalFrame title={`capture · ${watching || 'no session'}`}>

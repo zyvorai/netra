@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ExplainFinding from '../components/ExplainFinding';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
+import { useSeries } from '../components/kit/useSeries';
 
 export default function Drops() {
   const [data, setData] = useState<any>();
@@ -32,6 +35,8 @@ export default function Drops() {
   const findings = diag?.findings || [];
   const ds = diag?.summary || {};
   const ks = kernel?.summary || {};
+  const totalDrops = (s.kernelDropEvents || 0) + (s.softnetDropped || 0) + (s.rxDropped || 0) + (s.txDropped || 0) + (s.qdiscDrops || 0);
+  const kernelSeries = useSeries(data ? (s.kernelDropEvents || 0) : undefined, data);
   return (
     <div className="grid">
       {err && (
@@ -39,51 +44,25 @@ export default function Drops() {
           <p className="warning">{err}</p>
         </section>
       )}
-      <section className="card span3">
-        <p className="eyebrow">DROP PULSE</p>
-        <div className="metrics">
-          <div>
-            <b>{s.kernelDropEvents || 0}</b>
-            <span>kernel skb drops</span>
-          </div>
-          <div>
-            <b>{s.softnetDropped || 0}</b>
-            <span>softnet dropped</span>
-          </div>
-          <div>
-            <b>{ds.policyDropPackets || 0}</b>
-            <span>policy-drop packets</span>
-          </div>
-          <div>
-            <b>{ds.conntrackEntries || 0}</b>
-            <span>conntrack entries</span>
-          </div>
-          <div>
-            <b>{ds.exactFindings || 0}</b>
-            <span>exact findings</span>
-          </div>
-          <div>
-            <b>{ds.probableFindings || 0}</b>
-            <span>probable findings</span>
-          </div>
-          <div>
-            <b>{s.rxDropped || 0}</b>
-            <span>interface rx dropped</span>
-          </div>
-          <div>
-            <b>{s.txDropped || 0}</b>
-            <span>interface tx dropped</span>
-          </div>
-          <div>
-            <b>{s.qdiscDrops || 0}</b>
-            <span>qdisc drops</span>
-          </div>
-        </div>
-        <p>{ds.text || ''}</p>
-      </section>
+      <PagePulse
+        headline={data ? (totalDrops ? `${totalDrops.toLocaleString()} packets dropped across the stack.` : 'No packets going missing.') : undefined}
+        tone={data && totalDrops ? 'warn' : undefined}
+        tick={data}
+        error={err || undefined}
+        figures={[
+          { label: 'kernel skb drops', value: data ? (s.kernelDropEvents || 0) : undefined, tone: data ? countTone(s.kernelDropEvents || 0) : undefined, series: kernelSeries },
+          { label: 'softnet dropped', value: data ? (s.softnetDropped || 0) : undefined, tone: data ? countTone(s.softnetDropped || 0) : undefined },
+          { label: 'policy-drop packets', value: diag ? (ds.policyDropPackets || 0) : undefined, tone: diag ? countTone(ds.policyDropPackets || 0) : undefined },
+          { label: 'iface rx / tx dropped', value: data ? `${s.rxDropped || 0} / ${s.txDropped || 0}` : undefined, tone: data && ((s.rxDropped || 0) + (s.txDropped || 0)) ? 'warn' : undefined },
+          { label: 'qdisc drops', value: data ? (s.qdiscDrops || 0) : undefined, tone: data ? countTone(s.qdiscDrops || 0) : undefined },
+          { label: 'conntrack entries', value: diag ? (ds.conntrackEntries || 0) : undefined },
+          { label: 'exact / probable findings', value: diag ? `${ds.exactFindings || 0} / ${ds.probableFindings || 0}` : undefined },
+        ]}
+      />
+      {ds.text && <p className="kit-caption span3">{ds.text}</p>}
       <section className="card span3">
         <p className="eyebrow">KERNEL NETWORK PRESSURE</p>
-        <h3>Buffers, queues, and congestion</h3>
+        <h2 className="card-title">Buffers, queues, and congestion</h2>
         <div className="metrics">
           <div>
             <b>{ks.nodes || 0}</b>
@@ -200,7 +179,7 @@ export default function Drops() {
       ))}
       <section className="card span3">
         <p className="eyebrow">DROP DETECTIVE</p>
-        <h3>Policy-aware findings</h3>
+        <h2 className="card-title">Policy-aware findings</h2>
         <div className="list">
           {findings.length === 0 && <p className="empty-state">No Netra policy-drop findings.</p>}
           {findings.slice(0, 25).map((f: any, i: number) => (
@@ -237,7 +216,7 @@ export default function Drops() {
       </section>
       <section className="card span3">
         <p className="eyebrow">STACK SIGNALS</p>
-        <h3>Queue and interface findings</h3>
+        <h2 className="card-title">Queue and interface findings</h2>
         <div className="list">
           {anomalies.length === 0 && <p className="empty-state">No drop-pressure thresholds triggered.</p>}
           {anomalies.slice(0, 25).map((a: any, i: number) => (
@@ -255,7 +234,7 @@ export default function Drops() {
       {nodes.map((n: any) => (
         <section className="card span3" key={n.node}>
           <p className="eyebrow">KERNEL DROPS</p>
-          <h3>{n.node}</h3>
+          <h2 className="card-title">{n.node}</h2>
           {!(n.kernelDrops || []).length && (
             <p className="empty-state">No kfree_skb tracepoint data. The hook may be unavailable on this kernel.</p>
           )}

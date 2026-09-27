@@ -14,7 +14,7 @@ export default function ExeHashDrift() {
   return (
     <section className="card span3">
       <p className="eyebrow">EXE-HASH DRIFT</p>
-      <h3>Executable-content changes on tracked processes</h3>
+      <h2 className="card-title">Executable-content changes on tracked processes</h2>
       <p>Observe-only half of exe-hash leased deny — no lease map or enforcement exists yet. A change means a process's own backing binary content changed while it was running; reading the magic /proc/PID/exe symlink directly avoids false-flagging a routine package upgrade replacing the on-disk file at that path. Requires NETRA_PROCMETA_ENABLED.</p>
       <div className="list">
         {(data?.anomalies || []).length === 0 && <p className="empty-state">No executable-content drift observed yet.</p>}

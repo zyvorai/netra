@@ -39,13 +39,13 @@ describe('theme', () => {
     attrs.clear();
   });
 
-  it('defaults to dark when unset', () => {
-    expect(readStoredTheme()).toBe('dark');
+  it('defaults to light when unset', () => {
+    expect(readStoredTheme()).toBe('light');
   });
 
-  it('respects an explicitly stored light preference', () => {
-    store.set('netra-theme', 'light');
-    expect(readStoredTheme()).toBe('light');
+  it('respects an explicitly stored dark preference', () => {
+    store.set('netra-theme', 'dark');
+    expect(readStoredTheme()).toBe('dark');
   });
 
   it('applies dark and persists', () => {

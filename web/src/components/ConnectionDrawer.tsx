@@ -1,9 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { endpoint, explainEvent, type EventRow } from '../lib/investigation';
 import { navigate } from '../hooks/useInvestigation';
 export default function ConnectionDrawer({ event, close }: { event: EventRow; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => { const previous = document.activeElement as HTMLElement | null; dialog.current?.showModal(); return () => { dialog.current?.close(); previous?.focus(); }; }, []);
+  // Capture the trigger during the first render. Reading document.activeElement inside the effect
+  // was too late: the Close button's autoFocus is applied at commit, before effects run, so
+  // "previous" was the Close button itself and focus fell to <body> when the dialog closed.
+  const [previous] = useState<HTMLElement | null>(() => document.activeElement as HTMLElement | null);
+  useEffect(() => { dialog.current?.showModal(); return () => { dialog.current?.close(); previous?.focus(); }; }, [previous]);
   const explanation = explainEvent(event);
   return <dialog ref={dialog} className="connection-drawer" onCancel={e => { e.preventDefault(); close(); }} aria-labelledby="connection-title">
     <div className="toolbar"><p className="eyebrow">CONNECTION EVIDENCE</p><button autoFocus onClick={close} aria-label="Close connection details">Close</button></div>

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { ruleTypeClass } from '../lib/ebpfRules';
 import Reveal from '../components/Reveal';
+import PagePulse from '../components/kit/PagePulse';
+import { countTone } from '../components/kit/tone';
+
 import DenyCensus from '../components/DenyCensus';
 import LeaseClock from '../components/LeaseClock';
 import WatchlistMatch from '../components/WatchlistMatch';
@@ -362,11 +365,26 @@ export default function EBPF() {
     return <p className={count / limit > 0.9 ? 'warning' : ''}>{count} / {limit} rules</p>;
   }
 
+  const enforcing = cfg?.mode === 'enforce';
+  const leaseLeft = cfg?.enforceUntil ? Math.max(0, Math.round((new Date(cfg.enforceUntil).getTime() - Date.now()) / 60000)) : undefined;
   return <div className="grid">
+    <PagePulse
+      headline={cfg ? (enforcing ? `Enforcing ${rules.length} rule${rules.length === 1 ? '' : 's'} under a lease.` : rules.length ? `Observing — ${rules.length} rule${rules.length === 1 ? '' : 's'} staged, none blocking.` : 'Observing. No rules configured.') : undefined}
+      tone={cfg ? (enforcing ? 'warn' : undefined) : undefined}
+      tick={cfg}
+      error={err || undefined}
+      figures={[
+        { label: 'mode', value: cfg ? (cfg.mode || 'observe') : undefined, tone: cfg ? (enforcing ? 'warn' : 'ok') : undefined },
+        { label: 'lease left', value: cfg ? (leaseLeft !== undefined && enforcing ? `${leaseLeft} min` : '—') : undefined },
+        { label: 'rules', value: cfg ? rules.length : undefined },
+        { label: 'scope', value: cfg ? (cfg.scopeMode || 'all') : undefined, tone: cfg && cfg.scopeMode === 'selected' ? 'warn' : undefined },
+        { label: 'agents', value: cfg ? agents.length : undefined, tone: cfg ? countTone(agents.length === 0 ? 1 : 0) : undefined },
+      ]}
+    />
     {err && <p className="warning" style={{ gridColumn: '1 / -1' }}>{err}</p>}
     <section className="card span3">
       <p className="eyebrow">FIREWALL RULES</p>
-      <h3>All configured rules</h3>
+      <h2 className="card-title">All configured rules</h2>
       {rules.length === 0 && <p className="empty-state">No firewall rules configured.</p>}
       {rules.length > 0 && <div className="datatable-scroll">
         <div className="datahead rules"><span>TYPE</span><span>VALUE</span><span>DETAIL</span><span>CREATED</span><span>ACTIONS</span></div>
@@ -408,9 +426,9 @@ export default function EBPF() {
       </div>}
     </section>
 
-    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h3>Observe or time-boxed enforce</h3><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'btn-success' : 'btn-secondary'} onClick={() => mode('observe')}>Observe</button><input aria-label="Enforcement lease duration" value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : 'btn-warn'} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}</section>
+    <section className="card span3"><p className="eyebrow">ENFORCEMENT LEASE</p><h2 className="card-title">Observe or time-boxed enforce</h2><p>Blocking requires an explicit lease. Netra owns only <code>/sys/fs/bpf/netra</code>.</p><div className="toolbar"><button className={cfg?.mode === 'observe' ? 'btn-success' : 'btn-secondary'} onClick={() => mode('observe')}>Observe</button><input aria-label="Enforcement lease duration" value={lease} onChange={e => setLease(e.target.value)} title="1m–24h"/><button className={cfg?.mode === 'enforce' ? 'danger' : 'btn-warn'} onClick={() => mode('enforce')}>Enforce lease</button></div>{cfg?.enforceUntil && <p className="warning">Lease expires: {new Date(cfg.enforceUntil).toLocaleString()}</p>}</section>
 
-    <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h3>Observe the node. Enforce only the workloads you choose.</h3><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input aria-label="Namespace" value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input aria-label="Pod" value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input aria-label="Owner kind" value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input aria-label="Owner name" value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input aria-label="Label selector" value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-secondary" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
+    <section className="card span3"><p className="eyebrow">WORKLOAD SCOPE</p><h2 className="card-title">Observe the node. Enforce only the workloads you choose.</h2><p>In <b>selected</b> mode, blocking runs only on cgroup/socket hooks whose cgroup resolves to a matching Kubernetes pod. TCX/XDP remain observation-only because they do not carry a reliable workload cgroup identity.</p><div className="ruleform"><input aria-label="Namespace" value={scopeNS} onChange={e => setScopeNS(e.target.value)} placeholder="namespace, e.g. payments"/><input aria-label="Pod" value={scopePod} onChange={e => setScopePod(e.target.value)} placeholder="pod (optional)"/><input aria-label="Owner kind" value={scopeKind} onChange={e => setScopeKind(e.target.value)} placeholder="owner kind, e.g. ReplicaSet"/><input aria-label="Owner name" value={scopeWorkload} onChange={e => setScopeWorkload(e.target.value)} placeholder="owner name (optional)"/><input aria-label="Label selector" value={scopeLabel} onChange={e => setScopeLabel(e.target.value)} placeholder="label key=value (optional)"/><button className="btn-secondary" onClick={previewScope}>Preview</button><button className={cfg?.scopeMode !== 'selected' ? 'btn-success' : 'btn-secondary'} onClick={() => applyScope(false)}>All cgroups</button><button className={cfg?.scopeMode === 'selected' ? 'danger' : 'btn-warn'} onClick={() => applyScope(true)}>Selected workloads</button></div>{scopePreview && <p><b>{scopePreview.count}</b> of {scopePreview.totalPods} pods match this preview.</p>}<p className={cfg?.scopeMode === 'selected' ? 'warning' : ''}>Current: <b>{cfg?.scopeMode || 'all'}</b> · {(cfg?.workloadScopes || []).length} configured scope(s) · {workloads.length} pods discovered.</p><div className="chips">{(cfg?.workloadScopes || []).map((x:any, i:number) => <span key={i}>{x.namespace || '*'} / {x.pod || x.workloadName || '*'} {x.labels && Object.keys(x.labels).length ? JSON.stringify(x.labels) : ''}</span>)}</div></section>
 
     <Reveal className="section-divider">
       <h2>Deny rules</h2>

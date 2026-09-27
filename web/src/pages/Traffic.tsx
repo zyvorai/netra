@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { protoNameClass } from '../lib/flow';
+import PagePulse from '../components/kit/PagePulse';
+import RankedList from '../components/kit/RankedList';
+import Section from '../components/kit/Section';
+import { countTone } from '../components/kit/tone';
+import { useSeries } from '../components/kit/useSeries';
+import { bytes, compact } from '../components/kit/format';
 
 type NSRow = { namespace: string; packets: number; bytes: number; blocked: number; destinations: number };
 type ProtoRow = { protocol: string; packets: number; bytes: number; blocked: number; flows: number };
@@ -21,65 +27,84 @@ export default function Traffic() {
   ]).then(([n, p, po, d]) => { setNs(n); setProto(p); setPorts(po); setDns(d); setErr(''); }).catch((e) => setErr(String(e)));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
 
+  const nsRows = ns?.rows || [];
+  const totalPackets = nsRows.reduce((n, r) => n + (r.packets || 0), 0);
+  const totalBytes = nsRows.reduce((n, r) => n + (r.bytes || 0), 0);
+  const totalBlocked = nsRows.reduce((n, r) => n + (r.blocked || 0), 0);
+  const dnsFail = dns?.failures ?? 0;
+  const packetSeries = useSeries(ns ? totalPackets : undefined, ns);
+  const top = nsRows[0];
+
   return (
     <div className="grid">
-      {err && <section className="card span3"><p className="warning">{err}</p></section>}
+      <PagePulse
+        headline={ns ? (top ? `${top.namespace} carries ${totalPackets ? Math.round((top.packets / totalPackets) * 100) : 0}% of observed packets.` : 'No namespace traffic observed yet.') : undefined}
+        tick={ns}
+        error={err || undefined}
+        figures={[
+          { label: 'packets observed', value: ns ? totalPackets : undefined, series: packetSeries },
+          { label: 'bytes observed', value: ns ? totalBytes : undefined, format: bytes },
+          { label: 'blocked packets', value: ns ? totalBlocked : undefined, tone: ns ? countTone(totalBlocked) : undefined },
+          { label: 'DNS failures', value: dns ? dnsFail : undefined, tone: dns ? countTone(dnsFail) : undefined },
+        ]}
+      />
 
-      <section className="card span3">
-        <p className="eyebrow">NAMESPACE HEAT</p>
-        <h3>Traffic by Kubernetes namespace</h3>
-        <p>Packets/bytes/blocked rolled up by namespace from current agent destination stats.</p>
-        <div className="list">
-          {(ns?.rows || []).length === 0 && <p className="empty-state">No namespace traffic observed yet.</p>}
-          {(ns?.rows || []).map((r) => (
-            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.namespace}>
-              <b>{r.namespace}</b><span>{r.packets} pkts</span><small>{r.destinations} destinations · {r.blocked} blocked</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      <Section eyebrow="Namespace heat" title="Traffic by Kubernetes namespace" span={2} lede="Packets rolled up by namespace from current agent destination stats.">
+        <RankedList
+          mono={false}
+          empty="No namespace traffic observed yet."
+          items={nsRows.map((r) => ({
+            name: r.namespace,
+            count: r.packets,
+            tone: r.blocked ? 'bad' : undefined,
+            detail: `${bytes(r.bytes || 0)} · ${r.destinations} destinations · ${r.blocked} blocked`,
+          }))}
+        />
+      </Section>
 
-      <section className="card span3">
-        <p className="eyebrow">PROTOCOL MIX</p>
-        <h3>L4 protocol breakdown</h3>
-        <p>Protocol mix across current destination stats.</p>
-        <div className="list">
-          {(proto?.rows || []).length === 0 && <p className="empty-state">No protocol data yet.</p>}
-          {(proto?.rows || []).map((r) => (
-            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.protocol}>
-              <b className={protoNameClass(r.protocol)}>{r.protocol}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      <Section eyebrow="Protocol mix" title="L4 protocol breakdown" span={1} lede="Protocol mix across current destination stats.">
+        <RankedList
+          mono={false}
+          empty="No protocol data yet."
+          items={(proto?.rows || []).map((r) => ({
+            name: r.protocol,
+            count: r.packets,
+            tone: r.blocked ? 'bad' : undefined,
+            detail: <><span className={protoNameClass(r.protocol)}>{r.protocol}</span> · {compact(r.flows)} flows · {r.blocked} blocked</>,
+          }))}
+        />
+      </Section>
 
-      <section className="card span3">
-        <p className="eyebrow">PORT HEAT</p>
-        <h3>Top destination ports</h3>
-        <p>Top destination ports by packet count.</p>
-        <div className="list">
-          {(ports?.rows || []).length === 0 && <p className="empty-state">No port data yet.</p>}
-          {(ports?.rows || []).map((r) => (
-            <div className={`agent wide${r.blocked ? ' row-blocked' : ''}`} key={r.key}>
-              <b><span className={protoNameClass(r.protocol)}>{r.protocol}</span>/{r.port}</b><span>{r.packets} pkts</span><small>{r.flows} flows · {r.blocked} blocked</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      <Section eyebrow="Port heat" title="Top destination ports" span={2} lede="Top destination ports by packet count.">
+        <RankedList
+          empty="No port data yet."
+          items={(ports?.rows || []).map((r) => ({
+            key: r.key,
+            name: `${r.protocol}/${r.port}`,
+            count: r.packets,
+            tone: r.blocked ? 'bad' : undefined,
+            detail: `${compact(r.flows)} flows · ${r.blocked} blocked`,
+          }))}
+        />
+      </Section>
 
-      <section className="card span3">
-        <p className="eyebrow">DNS BOARD</p>
-        <h3>{dns?.queries ?? 0} queries · {dns?.failures ?? 0} failures</h3>
-        <p>DNS names ranked by failure count from agent DNS health stats.</p>
-        <div className="list">
-          {(dns?.rows || []).length === 0 && <p className="empty-state">No DNS activity observed yet.</p>}
-          {(dns?.rows || []).map((r) => (
-            <div className={`agent wide${r.failures ? ' row-blocked' : ''}`} key={r.name}>
-              <b>{r.name}</b><span>{(r.failRate * 100).toFixed(1)}% fail</span><small>{r.queries} queries · {r.failures} failures</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      <Section
+        eyebrow="DNS board"
+        tone={dns ? countTone(dnsFail) : undefined}
+        title={`${dns?.queries ?? 0} queries · ${dnsFail} failures`}
+        span={1}
+        lede="DNS names ranked by failure count from agent DNS health stats."
+      >
+        <RankedList
+          empty="No DNS activity observed yet."
+          items={(dns?.rows || []).map((r) => ({
+            name: r.name,
+            count: r.failures || r.queries,
+            tone: r.failures ? 'bad' : undefined,
+            detail: `${(r.failRate * 100).toFixed(1)}% fail · ${r.queries} queries · ${r.failures} failures`,
+          }))}
+        />
+      </Section>
     </div>
   );
 }
