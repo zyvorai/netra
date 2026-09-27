@@ -22,8 +22,9 @@
 # starts, leaving the controller in ImagePullBackOff with helm reporting success.
 # The deploy warns at NETRA_DEPLOY_WARN_DISK_PCT (default 80) and refuses at
 # NETRA_DEPLOY_MAX_DISK_PCT (default 95); NETRA_DEPLOY_SKIP_DISK_CHECK=1 overrides.
-# It re-imports a missing image and waits for the pods to be Ready
-# (NETRA_DEPLOY_READY_TIMEOUT, default 600 s) instead of trusting helm.
+# It re-imports a missing image and waits for each rollout to COMPLETE
+# (NETRA_DEPLOY_READY_TIMEOUT, default 600 s) instead of trusting helm; a Ready pod is
+# not enough, because right after the restart the old pod is still Ready.
 #
 # Netra runs on top of Cilium; it does not replace the CNI.
 # UI/API default NodePort/host access: :30870
@@ -337,13 +338,14 @@ deploy_ensure_image "\$CONTROLLER_IMAGE"
 kubectl -n netra-system rollout restart deployment/netra
 # Not "rollout status --timeout=180s": on a loaded host that timed out and aborted
 # the script before the agent restart, and it cannot tell a slow rollout from a pod
-# stuck in ImagePullBackOff. This waits for Ready, repairs a missing image, and
-# fails loudly (with the pods printed) if the controller does not come up.
-deploy_wait_ready "app.kubernetes.io/name=netra" "\$CONTROLLER_IMAGE"
+# stuck in ImagePullBackOff. This waits for the rollout to complete (not just for a
+# Ready pod: right after the restart the OLD pod is still Ready), repairs a missing
+# image, and fails loudly (with the pods printed) if the controller does not come up.
+deploy_wait_ready deployment/netra "app.kubernetes.io/name=netra" "\$CONTROLLER_IMAGE"
 if [[ "\$AGENT_ENABLED" == "true" ]]; then
   deploy_ensure_image "\$AGENT_IMAGE"
   kubectl -n netra-system rollout restart daemonset/netra-agent
-  deploy_wait_ready "app.kubernetes.io/name=netra-agent" "\$AGENT_IMAGE"
+  deploy_wait_ready daemonset/netra-agent "app.kubernetes.io/name=netra-agent" "\$AGENT_IMAGE"
 fi
 echo "API_KEY=\$API_KEY"
 echo "NETRA_URL=https://\$(hostname -I | awk '{print \$1}'):30870"
