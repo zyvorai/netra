@@ -4,6 +4,9 @@
 [![License: Zyvor Production v1.0](https://img.shields.io/badge/License-Zyvor%20Production%20v1.0-orange.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/zyvorai/netra?label=version&color=informational)](CHANGELOG.md)
 
+[![Book a demo](https://img.shields.io/badge/Book_a_demo-0071e3?style=for-the-badge)](https://zyvor.dev/schedule?utm_source=github&utm_medium=netra&utm_campaign=readme_hero)
+[![30-day PoC](https://img.shields.io/badge/30--day_PoC-1d1d1f?style=for-the-badge)](https://zyvor.dev/poc?utm_source=github&utm_medium=netra&utm_campaign=readme_hero)
+
 ![Netra — standalone eBPF network observability and emergency network control](docs/social/netra-share-card.png)
 
 **Standalone eBPF network observability and emergency network control for Linux/Kubernetes — with optional Cilium + Hubble enrichment.**
@@ -244,7 +247,7 @@ When Cilium is enabled, the dashboard also exposes **Pods** and **VMs** (KubeVir
 The dashboard sits behind a login screen (`admin` / `Admin@321` by default) —
 see [docs/dashboard-login.md](docs/dashboard-login.md) for the full guide,
 including what the login maps to server-side and how to rotate the
-credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev)
+credential. The nav bar and login screen carry the [Zyvor](https://zyvor.dev?utm_source=github&utm_medium=netra&utm_campaign=readme_suite)
 mark; Netra is Zyvor's eBPF observability product.
 
 ## Suite placement (PacketWolf)
@@ -617,4 +620,6 @@ Licensed under the **[Zyvor Production License v1.0](LICENSE)**.
 - **Free** for development, testing, evaluation, research, education, and non-production labs
 - **Paid commercial license required** for production, customer workloads, SaaS, managed services, OEM, redistribution, and other revenue-generating use
 
-Commercial terms are issued separately: [https://zyvor.dev](https://zyvor.dev).
+Commercial terms are issued separately: [https://zyvor.dev](https://zyvor.dev?utm_source=github&utm_medium=netra&utm_campaign=readme_footer).
+
+**Next step:** [Book a demo](https://zyvor.dev/schedule?utm_source=github&utm_medium=netra&utm_campaign=readme_footer) · [30-day PoC](https://zyvor.dev/poc?utm_source=github&utm_medium=netra&utm_campaign=readme_footer) · [sales@zyvor.dev](mailto:sales@zyvor.dev)
