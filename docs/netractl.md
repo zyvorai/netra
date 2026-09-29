@@ -167,5 +167,5 @@ stays observe-first.
 
 - [`features.md`](features.md) — feature catalog, API, UX
 - [`ebpf-maps.md`](ebpf-maps.md) — read-only map inventory (`ebpf maps`)
-- [README · Standalone Helm install](../README.md#standalone-helm-install)
-- [README · HTTPS default](../README.md#https-default)
+- [Install · Standalone Helm install](install.md#standalone-helm-install)
+- [Architecture · HTTPS default](architecture.md#https-default)
