@@ -43,6 +43,8 @@ var adminOnly = map[string]bool{
 	"PUT /api/v1/ebpf/netpol/config":       true,
 	"PUT /api/v1/ebpf/netpol/default-deny": true,
 	"PUT /api/v1/ebpf/netpol/v2/config":    true,
+	// Node-scoped allow-only isolation; can drop all of a node's egress.
+	"PUT /api/v1/ebpf/node-isolation/{node}": true,
 	// Cluster policy and lockdown.
 	"POST /api/v1/policies/apply":                                  true,
 	"POST /api/v1/policies/lockdown":                               true,

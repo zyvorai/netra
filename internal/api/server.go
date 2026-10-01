@@ -220,6 +220,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/slo", s.auth(http.HandlerFunc(s.sloStatus)))
 	mux.Handle("GET /api/v1/ebpf/tcp-events", s.auth(http.HandlerFunc(s.ebpfTCPEvents)))
 	mux.Handle("GET /api/v1/ebpf/drop-info", s.auth(http.HandlerFunc(s.ebpfDropInfo)))
+	mux.Handle("GET /api/v1/ebpf/node-isolation", s.auth(http.HandlerFunc(s.nodeIsolationList)))
+	mux.Handle("PUT /api/v1/ebpf/node-isolation/{node}", s.auth(http.HandlerFunc(s.nodeIsolationSet)))
+	mux.Handle("DELETE /api/v1/ebpf/node-isolation/{node}", s.auth(http.HandlerFunc(s.nodeIsolationClear)))
 	mux.Handle("GET /api/v1/listen-queues", s.auth(http.HandlerFunc(s.listenQueues)))
 	mux.Handle("GET /api/v1/netlink", s.auth(http.HandlerFunc(s.netlinkChanges)))
 	mux.Handle("GET /api/v1/netlink/findings", s.auth(http.HandlerFunc(s.netlinkFindings)))
@@ -1100,6 +1103,7 @@ func (s *Server) ebpfConfig(w http.ResponseWriter, r *http.Request) {
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	if node != "" {
 		cfg.DesiredCapture = s.store.Capture(node)
+		cfg.NodeIsolation = s.store.NodeIsolation(node)
 	}
 	if node != "" && s.kube != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)

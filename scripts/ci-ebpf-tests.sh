@@ -79,6 +79,7 @@ NETRA_BPF_TEST_OBJECT="${OUT}/netra_tc.o" \
 NETRA_BPF_TLSFP_TEST_OBJECT="${OUT}/netra_tlsfp.o" \
 NETRA_BPF_TCPEVENTS_TEST_OBJECT="${OUT}/netra_tcpevents.o" \
 NETRA_BPF_DROPINFO_TEST_OBJECT="${OUT}/netra_dropinfo.o" \
+NETRA_BPF_NODEISO_TEST_OBJECT="${OUT}/netra_nodeiso.o" \
 NETRA_BPF_L7SAMPLE_TEST_OBJECT="${OUT}/netra_l7sample.o" \
 NETRA_BPF_SSL_TEST_OBJECT="${OUT}/netra_ssl.o" \
 NETRA_BPF_RTNL_TEST_OBJECT="${OUT}/netra_rtnl.o" \

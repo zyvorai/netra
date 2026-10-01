@@ -150,6 +150,75 @@ type EBPFFastPathConfig struct {
 	// ever targets one node at a time in v1. Nil means no capture is
 	// desired for this node right now.
 	DesiredCapture *CaptureSpec `json:"desiredCapture,omitempty"`
+	// NodeIsolation is the allow-only egress policy for the node that
+	// requested this config (injected like DesiredCapture). Nil means none.
+	NodeIsolation *NodeIsolationSpec `json:"nodeIsolation,omitempty"`
+}
+
+// Node isolation modes. Shadow evaluates and counts, enforce drops.
+const (
+	NodeIsolationShadow  = "shadow"
+	NodeIsolationEnforce = "enforce"
+)
+
+// NodeIsolationRule is one allow-list entry: a destination CIDR, optionally
+// narrowed to a protocol ("tcp", "udp", or "" for any) and a destination port
+// range (0-0 = any port; a range only matches TCP and UDP).
+type NodeIsolationRule struct {
+	CIDR     string `json:"cidr"`
+	Protocol string `json:"protocol,omitempty"`
+	PortFrom uint16 `json:"portFrom,omitempty"`
+	PortTo   uint16 `json:"portTo,omitempty"`
+}
+
+// NodeIsolationSpec is the operator's allow-only egress policy for one node,
+// reconciled by bpf/netra_nodeiso.c (docs/node-isolation.md). It is
+// independent of the cluster-wide Mode: a node can be in enforce isolation
+// while the rest of the firewall observes. Enforce always carries a lease;
+// when it lapses the controller and the agent both fall back to shadow.
+type NodeIsolationSpec struct {
+	Node     string              `json:"node"`
+	PolicyID string              `json:"policyId,omitempty"`
+	Mode     string              `json:"mode"`
+	Rules    []NodeIsolationRule `json:"rules"`
+	// ExemptLocalPorts are local source ports whose outbound packets always
+	// pass (replies from local UDP services). TCP replies already pass.
+	ExemptLocalPorts []uint16   `json:"exemptLocalPorts,omitempty"`
+	Revision         uint64     `json:"revision"`
+	LeaseUntil       *time.Time `json:"leaseUntil,omitempty"`
+	Requestor        string     `json:"requestor,omitempty"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
+// NodeIsolationDest is one destination outside the allow-list.
+type NodeIsolationDest struct {
+	Address  string `json:"address"`
+	Protocol string `json:"protocol"`
+	Port     uint16 `json:"port,omitempty"`
+	Packets  uint64 `json:"packets"`
+	Bytes    uint64 `json:"bytes"`
+}
+
+// NodeIsolationStatus is what the agent reports about node isolation.
+// Counters are cumulative since the program loaded.
+type NodeIsolationStatus struct {
+	Attached    []string `json:"attached,omitempty"`
+	Unavailable string   `json:"unavailable,omitempty"`
+	// PolicyID/Revision/Mode describe what is loaded in the kernel right
+	// now; Mode is "" when no policy is loaded. Demoted says why an enforce
+	// policy is running in shadow (lease expired, controller stale).
+	PolicyID        string              `json:"policyId,omitempty"`
+	Revision        uint64              `json:"revision,omitempty"`
+	Mode            string              `json:"mode,omitempty"`
+	Demoted         string              `json:"demoted,omitempty"`
+	Generation      uint32              `json:"generation,omitempty"`
+	Allowed         uint64              `json:"allowed"`
+	WouldBlock      uint64              `json:"wouldBlock"`
+	WouldBlockBytes uint64              `json:"wouldBlockBytes"`
+	Blocked         uint64              `json:"blocked"`
+	BlockedBytes    uint64              `json:"blockedBytes"`
+	Exempt          uint64              `json:"exempt"`
+	Top             []NodeIsolationDest `json:"top,omitempty"`
 }
 
 // CaptureSpec is an operator-requested packet-capture session for one node,
@@ -1130,6 +1199,9 @@ type AgentReport struct {
 	// TCPEvents is nil when the TCP event tracepoints never attached
 	// (NETRA_TCP_EVENTS=off, or none could be attached in auto mode).
 	TCPEvents *TCPEventsSummary `json:"tcpEvents,omitempty"`
+	// NodeIsolation is nil when node isolation is off on this agent; when it
+	// tried and could not attach it carries Unavailable with the reason.
+	NodeIsolation *NodeIsolationStatus `json:"nodeIsolation,omitempty"`
 	// DropInfo is nil when drop attribution is off; when it tried and could not
 	// load, it carries Unavailable with the reason.
 	DropInfo *DropInfoSummary `json:"dropInfo,omitempty"`

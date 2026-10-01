@@ -69,6 +69,10 @@ spec:
           value: {{ .Values.agent.tcpEvents | default "auto" | quote }}
         - name: NETRA_DROP_INFO
           value: {{ .Values.agent.dropInfo | default "auto" | quote }}
+        - name: NETRA_NODE_ISOLATION
+          value: {{ .Values.agent.nodeIsolation | default "auto" | quote }}
+        - name: NETRA_NODE_ISOLATION_INTERFACES
+          value: {{ .Values.agent.nodeIsolationInterfaces | default "" | quote }}
         - name: NETRA_LISTEN_QUEUES
           value: {{ .Values.agent.listenQueues | default "auto" | quote }}
         - name: NETRA_NETLINK
