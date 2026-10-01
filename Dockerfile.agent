@@ -43,6 +43,12 @@ RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
 RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
     -I/usr/include/$(uname -m)-linux-gnu \
     -c netra_dropinfo.c -o /out-dropinfo.o
+# Standalone node isolation: an allow-only egress filter at the head of the
+# TCX egress chain, shadow or enforce per node, independent of the cluster
+# mode (docs/node-isolation.md). Ported from FluxVM's pod-policy engine.
+RUN clang -target bpfel -O2 -g -Wall -Wextra -Werror \
+    -I/usr/include/$(uname -m)-linux-gnu \
+    -c netra_nodeiso.c -o /out-nodeiso.o
 # Standalone sampled L7 protocol observer (Redis/Postgres/MySQL/Kafka/HTTP2/gRPC
 # on configured ports). Own verifier budget; off unless NETRA_L7_SAMPLE is set
 # (docs/l7-sampling.md).
@@ -72,6 +78,7 @@ COPY --from=bpf /out-capture.o /opt/netra/bpf/netra_capture.o
 COPY --from=bpf /out-tlsfp.o /opt/netra/bpf/netra_tlsfp.o
 COPY --from=bpf /out-tcpevents.o /opt/netra/bpf/netra_tcpevents.o
 COPY --from=bpf /out-dropinfo.o /opt/netra/bpf/netra_dropinfo.o
+COPY --from=bpf /out-nodeiso.o /opt/netra/bpf/netra_nodeiso.o
 COPY --from=bpf /out-l7sample.o /opt/netra/bpf/netra_l7sample.o
 COPY --from=bpf /out-ssl.o /opt/netra/bpf/netra_ssl.o
 COPY --from=bpf /out-rtnl.o /opt/netra/bpf/netra_rtnl.o

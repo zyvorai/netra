@@ -42,6 +42,7 @@ import (
 	"github.com/zyvorai/netra/internal/models"
 	"github.com/zyvorai/netra/internal/mtls"
 	"github.com/zyvorai/netra/internal/netlinkwatch"
+	"github.com/zyvorai/netra/internal/nodeiso"
 	"github.com/zyvorai/netra/internal/rtnlactor"
 	"github.com/zyvorai/netra/internal/sslprobe"
 	"github.com/zyvorai/netra/internal/sysctlaudit"
@@ -106,6 +107,16 @@ type Agent struct {
 	// loader owns its own links; Close() calls tcpEvents.Close().
 	tcpEventsObject string
 	tcpEvents       *tcpevents.Sensor
+	// nodeIsoObject/nodeIso are the node-scoped allow-only egress filter
+	// (bpf/netra_nodeiso.c, docs/node-isolation.md). nodeIsoWhy is why it is
+	// not running; nodeIsoSpec is the last policy received from the
+	// controller and nodeIsoImplicit the controller-reachability rules the
+	// agent always adds so enforce can never cut it off from its controller.
+	nodeIsoObject   string
+	nodeIso         *nodeiso.Isolator
+	nodeIsoWhy      string
+	nodeIsoSpec     *models.NodeIsolationSpec
+	nodeIsoImplicit []models.NodeIsolationRule
 	// dropInfoObject/dropInfo are the standalone drop-attribution sensor
 	// (bpf/netra_dropinfo.c). dropInfoWhy is why it is not running when it
 	// tried to and could not (surfaced in the report; empty when off).
@@ -249,6 +260,7 @@ func New(log *slog.Logger) *Agent {
 		tlsfpObject:     env("NETRA_BPF_TLSFP_OBJECT", "/opt/netra/bpf/netra_tlsfp.o"),
 		tcpEventsObject: env("NETRA_BPF_TCPEVENTS_OBJECT", "/opt/netra/bpf/netra_tcpevents.o"),
 		dropInfoObject:  env("NETRA_BPF_DROPINFO_OBJECT", "/opt/netra/bpf/netra_dropinfo.o"),
+		nodeIsoObject:   env("NETRA_BPF_NODEISO_OBJECT", "/opt/netra/bpf/netra_nodeiso.o"),
 		l7SampleObject:  env("NETRA_BPF_L7SAMPLE_OBJECT", "/opt/netra/bpf/netra_l7sample.o"),
 		sslObject:       env("NETRA_BPF_SSL_OBJECT", "/opt/netra/bpf/netra_ssl.o"),
 		cgroupPath:      env("NETRA_CGROUP_PATH", "/sys/fs/cgroup"), cgroupEnabled: envBool("NETRA_CGROUP_ENABLED", true),
@@ -314,6 +326,7 @@ func (a *Agent) Run(ctx context.Context) error {
 						a.lastRevision = 0
 						a.log.Warn("controller stale; forced Netra datapath to observe", "after", a.failsafeAfter.String())
 					}
+					a.applyNodeIsolation(a.nodeIsoSpec, "controller stale")
 				}
 			}
 		}
@@ -562,6 +575,9 @@ func (a *Agent) loadAndAttach() error {
 		return err
 	}
 	if err := a.attachDropInfo(); err != nil {
+		return err
+	}
+	if err := a.attachNodeIsolation(ifs); err != nil {
 		return err
 	}
 	a.attachListenQueues()
@@ -1012,6 +1028,10 @@ func (a *Agent) Close() {
 		_ = a.dropInfo.Close()
 		a.dropInfo = nil
 	}
+	if a.nodeIso != nil {
+		_ = a.nodeIso.Close()
+		a.nodeIso = nil
+	}
 	if a.l7Sampler != nil {
 		_ = a.l7Sampler.Close()
 		a.l7Sampler = nil
@@ -1055,6 +1075,9 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 	if err := a.applyCapture(ctx, cfg.DesiredCapture); err != nil {
 		a.log.Warn("apply capture", "error", err)
 	}
+	// Node isolation is per-node operator state like capture: reconciled
+	// every tick, and a failure never stops the report.
+	a.applyNodeIsolation(cfg.NodeIsolation, "")
 	a.lastSync = time.Now()
 	stats, err := a.readStats()
 	if err != nil {
@@ -1198,6 +1221,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		return err
 	}
 	tcpEvents := a.readTCPEvents()
+	nodeIsolation := a.readNodeIsolation()
 	dropInfo := a.readDropInfo()
 	listenQueues := a.readListenQueues()
 	l7 := a.readL7Sample()
@@ -1211,7 +1235,7 @@ func (a *Agent) syncAndReport(ctx context.Context) error {
 		TCPSignals: tcpSignals, DNSHealth: dnsHealth, TLSMetadata: tlsMeta, TLSFingerprints: a.drainTLSFingerprints(200), HTTPMetadata: httpMeta, HTTPStatus: httpStatus,
 		ConnectionAttempts: connAttempts, KernelDrops: kernelDrops, ICMPTypes: icmpTypes, ICMP6Types: icmp6Types, RateDrops: rateDrops, ByteRateDrops: byteRateDrops, ConnRateDrops: connRateDrops, MissingMaps: a.missingMaps(), ICMPErrors: icmpErrors, IPv6ExtHeaders: ipv6ExtHeaders, PolicyDrops: policyDrops,
 		ConntrackEntries: ctEntries, Shield: shieldStats, ShieldClasses: shieldClasses, ShieldSources: shieldSources, InterfaceFlows: ifaceFlows, UDPFlowHealth: udpFlowHealth, QUICObserved: quicObserved, ProcessMeta: processMeta,
-		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, DropInfo: dropInfo, ListenQueues: listenQueues, L7Sample: l7, TLSSample: tlsSample, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
+		Programs: programs, Histograms: &histJSON, EdgeIntel: edgeIntel, TCPEvents: tcpEvents, NodeIsolation: nodeIsolation, DropInfo: dropInfo, ListenQueues: listenQueues, L7Sample: l7, TLSSample: tlsSample, MapScans: a.mapScans(), CapChanges: capChanges, NamespaceChanges: namespaceChanges, ExeHashChanges: exeHashChanges, AgentStartedAt: a.startedAt,
 		Stack: stack, Events: events, ObservedAt: time.Now().UTC(),
 		Workloads: a.workloadSnapshot(), ScopeMode: a.scopeMode, SelectedCgroups: a.selectedCgroups,
 		QdiscStats:         qdiscStats,

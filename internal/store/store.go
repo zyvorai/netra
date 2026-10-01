@@ -90,6 +90,10 @@ type Store struct {
 	// above, this IS persisted (see persistence.go) since it's a small,
 	// bounded audit-style log rather than live session state.
 	captureHistory []models.CaptureHistoryEntry
+	// nodeIsolation holds at most one allow-only egress policy per node
+	// (nodeiso.go). Persisted, but enforce is demoted to shadow on load.
+	nodeIsolation    map[string]models.NodeIsolationSpec
+	nodeIsolationRev uint64
 	// flowLog is a ring of flow deltas. Records live in memory and in
 	// flowPath (state file + ".flows"), not inside the state JSON.
 	flowLog  *flowlog.Log
@@ -102,6 +106,7 @@ func New() *Store {
 		agents:               map[string]models.AgentReport{},
 		preflights:           map[string]preflight{},
 		captures:             map[string]models.CaptureSpec{},
+		nodeIsolation:        map[string]models.NodeIsolationSpec{},
 		rateSamples:          map[string][]rateSample{},
 		kernelNetworkSamples: map[string][]kernelNetworkSample{},
 		ruleIndex:            map[string]firewallRuleIndex{},

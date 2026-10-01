@@ -46,6 +46,8 @@ type diskState struct {
 	FirewallRuleRevisions []models.FirewallRuleRevision `json:"firewallRuleRevisions,omitempty"`
 	NextFirewallRevID     uint64                        `json:"nextFirewallRevisionId,omitempty"`
 	CaptureHistory        []models.CaptureHistoryEntry  `json:"captureHistory,omitempty"`
+	NodeIsolation         []models.NodeIsolationSpec    `json:"nodeIsolation,omitempty"`
+	NodeIsolationRevision uint64                        `json:"nodeIsolationRevision,omitempty"`
 }
 
 // Open returns a store backed by an atomically replaced JSON state file. The
@@ -188,6 +190,31 @@ func (s *Store) load() error {
 			s.nextRevisionID = r.ID
 		}
 	}
+	// Node isolation: keep shadow policies (a review in progress), but never
+	// resume enforce after a restart, for the same reason as Mode above.
+	s.nodeIsolation = map[string]models.NodeIsolationSpec{}
+	s.nodeIsolationRev = d.NodeIsolationRevision
+	nodeIsoDemoted := false
+	for _, spec := range d.NodeIsolation {
+		if spec.Node == "" {
+			continue
+		}
+		if spec.Revision > s.nodeIsolationRev {
+			s.nodeIsolationRev = spec.Revision
+		}
+		if spec.Mode == models.NodeIsolationEnforce {
+			s.nodeIsolationRev++
+			spec.Mode, spec.LeaseUntil, spec.Revision = models.NodeIsolationShadow, nil, s.nodeIsolationRev
+			s.appendAuditLocked(models.AuditEvent{At: now, Actor: "system", Action: "ebpf.node-isolation.restart-fail-open", Target: spec.Node, Details: map[string]any{"policyId": spec.PolicyID}})
+			nodeIsoDemoted = true
+		}
+		s.nodeIsolation[spec.Node] = cloneNodeIsolation(spec)
+	}
+	if nodeIsoDemoted && !wasEnforcing && !wasNetPolDefaultDenying {
+		if err := s.persistLocked(); err != nil {
+			return fmt.Errorf("persist restart fail-open: %w", err)
+		}
+	}
 	if wasEnforcing || wasNetPolDefaultDenying {
 		s.config.Revision++
 		if wasEnforcing {
@@ -261,7 +288,12 @@ func (s *Store) persistLocked() error {
 		FirewallRuleRevisions: append([]models.FirewallRuleRevision(nil), s.firewallRuleRevisions...),
 		NextFirewallRevID:     s.nextFirewallRevID,
 		CaptureHistory:        append([]models.CaptureHistoryEntry(nil), s.captureHistory...),
+		NodeIsolationRevision: s.nodeIsolationRev,
 	}
+	for _, spec := range s.nodeIsolation {
+		d.NodeIsolation = append(d.NodeIsolation, cloneNodeIsolation(spec))
+	}
+	sort.Slice(d.NodeIsolation, func(i, j int) bool { return d.NodeIsolation[i].Node < d.NodeIsolation[j].Node })
 	now := time.Now().UTC()
 	for token, item := range s.preflights {
 		if !now.Before(item.expiresAt) {

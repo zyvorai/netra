@@ -303,6 +303,24 @@ if [[ -n "\$AGENT_XDP_INTERFACES" ]]; then
   IFACE_SET+=(--set "agent.xdpInterfaces=\$AGENT_XDP_INTERFACES")
 fi
 
+# Serve one self-signed cert across controller restarts so API clients can pin it
+# (the chart otherwise mints a new one per pod). NETRA_TLS_PERSIST=0 opts out.
+TLS_SET=()
+if [[ "${NETRA_TLS_PERSIST:-1}" != "0" ]]; then
+  kubectl create namespace netra-system --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  if ! kubectl -n netra-system get secret netra-tls >/dev/null 2>&1; then
+    tls_dir="\$(mktemp -d)"
+    openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+      -keyout "\$tls_dir/tls.key" -out "\$tls_dir/tls.crt" -subj "/CN=netra/O=Zyvor AI Labs" \
+      -addext "subjectAltName=DNS:netra,DNS:netra.netra-system.svc,DNS:localhost,IP:127.0.0.1,IP:\$HOST_IP" 2>/dev/null
+    kubectl -n netra-system create secret tls netra-tls --cert="\$tls_dir/tls.crt" --key="\$tls_dir/tls.key" >/dev/null
+    rm -rf "\$tls_dir"
+  fi
+  kubectl -n netra-system get secret netra-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > "\$HOME/.netra/tls.crt"
+  chmod 600 "\$HOME/.netra/tls.crt"
+  TLS_SET=(--set tls.existingSecret=netra-tls)
+fi
+
 deploy_ensure_image "\$CONTROLLER_IMAGE"
 if [[ "\$AGENT_ENABLED" == "true" ]]; then
   deploy_ensure_image "\$AGENT_IMAGE"
@@ -314,6 +332,7 @@ helm upgrade --install netra ./helm/netra \
   "\${AGENT_SET[@]}" \
   "\${CONSOLE_SET[@]}" \
   "\${IFACE_SET[@]}" \
+  "\${TLS_SET[@]}" \
   --set image.repository=ghcr.io/zyvorai/netra \
   --set image.tag=0.27.81 \
   --set image.pullPolicy=IfNotPresent \

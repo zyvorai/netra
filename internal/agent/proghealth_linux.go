@@ -39,9 +39,20 @@ func (a *Agent) readProgramHealth() []models.BPFProgramStat {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	programs := make(map[string]*ebpf.Program, len(names)+1)
+	for _, name := range names {
+		programs[name] = a.collection.Programs[name]
+	}
+	// Node isolation is its own collection; report it beside the datapath.
+	if a.nodeIso != nil {
+		if p := a.nodeIso.Program(); p != nil {
+			names = append(names, "netra_nodeiso_egress")
+			programs["netra_nodeiso_egress"] = p
+		}
+	}
 	out := make([]models.BPFProgramStat, 0, len(names))
 	for _, name := range names {
-		p := a.collection.Programs[name]
+		p := programs[name]
 		st := models.BPFProgramStat{Name: name, Attached: a.attachedProgs[name]}
 		if info, err := p.Info(); err == nil {
 			if id, ok := info.ID(); ok {

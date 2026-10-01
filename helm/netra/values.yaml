@@ -207,6 +207,9 @@ tls:
   # Set enabled=false only when TLS is terminated by a trusted proxy/ingress.
   enabled: true
   opensslImage: alpine/openssl:3.3.2
+  # kubernetes.io/tls Secret to serve instead of a cert minted per pod start. A
+  # stable cert lets API clients (netractl, Duvora) pin it across restarts.
+  existingSecret: ""
   # Bypass verify for the chart-generated self-signed cert (agent → controller).
   # Prefer a trusted cert/CA in hardened environments and set this false.
   agentInsecureSkipVerify: true
@@ -313,6 +316,14 @@ agent:
   # Needs kernel BTF (/sys/kernel/btf/vmlinux); "auto" reports it unavailable
   # with the reason when the node lacks it.
   dropInfo: auto
+  # Node isolation — a per-node allow-only egress filter, shadow or enforce,
+  # set through PUT /api/v1/ebpf/node-isolation/{node} (bpf/netra_nodeiso.c,
+  # docs/node-isolation.md). Loading it changes nothing until a policy is set.
+  # auto|off|required.
+  nodeIsolation: auto
+  # Where it attaches (comma-separated). Empty: the agent interfaces, or, when the
+  # agent has none (cgroup mode beside a CNI), the default-route uplinks.
+  nodeIsolationInterfaces: ""
   # TCP accept-queue depth per listener, from inet_diag (docs/listen-queues.md).
   # No BPF and no extra privilege. auto|off.
   listenQueues: auto

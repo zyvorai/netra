@@ -61,11 +61,19 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
+          {{- if .Values.tls.existingSecret }}
+          cp /tls-secret/tls.crt /tls-secret/tls.key /certs/
+          {{- else }}
           openssl req -x509 -nodes -days 3650 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /certs/tls.key -out /certs/tls.crt -subj "/CN=netra/O=Zyvor AI Labs" -addext "subjectAltName=DNS:netra,DNS:netra.{{ .Release.Namespace }}.svc,DNS:localhost,IP:127.0.0.1"
+          {{- end }}
           chown 65532:65532 /certs/tls.key /certs/tls.crt
           chmod 600 /certs/tls.key
         securityContext: {runAsUser: 0, runAsNonRoot: false}
-        volumeMounts: [{name: tls-certs, mountPath: /certs}]
+        volumeMounts:
+        - {name: tls-certs, mountPath: /certs}
+        {{- if .Values.tls.existingSecret }}
+        - {name: tls-secret, mountPath: /tls-secret, readOnly: true}
+        {{- end }}
       {{- end }}
       containers:
       - name: netra
@@ -450,6 +458,9 @@ spec:
       volumes:
       {{- if .Values.tls.enabled }}
       - {name: tls-certs, emptyDir: {}}
+      {{- if .Values.tls.existingSecret }}
+      - {name: tls-secret, secret: {secretName: {{ .Values.tls.existingSecret | quote }}}}
+      {{- end }}
       {{- end }}
       {{- if ne (include "netra.mtlsMode" .) "off" }}
       - name: agent-mtls-ca

@@ -8,6 +8,10 @@ Related: patterns from Cloudflare ebpf_exporter and Cilium Tetragon are tracked 
 
 Ported as `bpf/netra_edge_intel.c`, a standalone observe-only TCX program — see `docs/edge-tcp-intel.md` for the full design, the sockops-non-duplication rationale, and the still-outstanding live-kernel verification (a wholly new BPF program, the least-precedented addition in this codebase to date).
 
+## Pod policy engine + XDP shield generation swap — shipped as node isolation
+
+Ported as `bpf/netra_nodeiso.c`, a standalone TCX egress program: the tuple rules and branch-free prefix compare of `fluxvm_pod_policy.bpf.h` (with its global per-rule match function, needed on the Linux 7.x verifier), the generation-keyed atomic policy swap of `fluxvm_xdp_shield.bpf.c`, and the DHCP/NDP passthrough of `fluxvm_tc.bpf.c`. Keyed per node instead of per pod, egress only, and with a lease-bounded enforce mode — see `docs/node-isolation.md`. The `BPF_PROG_TEST_RUN` verdict cases come from `scripts/test-pod-policy-verdict.py`.
+
 ## cgroup LSM MAC (`fluxvm_guard.bpf.c`, `fluxvm_guest_lsm.bpf.c`)
 
 Exec/WX/device/write restrictions keyed by cgroup. Valuable if Netra expands beyond network containment into runtime lockdown. Out of scope while Netra remains a network observability/emergency product.
